@@ -18,6 +18,8 @@ export default {
     '(マウスカーソルを重ねるとで各ボタンの説明が表示されます。)',
   ],
   uploadFile: 'アップロードされたファイルはここに表示されます。',
+  branchCompiled: 'このブランチはコンパイルされます',
+  branchSkipped: 'このブランチは除外されます',
   definedOnLine: '定義行',
   excludedLine: 'コンパイル対象外',
   warning: '警告!',

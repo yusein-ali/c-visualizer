@@ -301,7 +301,11 @@ export default class Editor extends React.Component<Props, State> {
         expansion.column + expansion.length
       );
       const style =
-        expansion.kind === 'macro' ? 'macro-expansion' : 'excluded-region';
+        expansion.kind === 'macro'
+          ? 'macro-expansion'
+          : expansion.kind === 'directive'
+          ? 'directive-line'
+          : 'excluded-region';
       this.expansionMarkerIds.push(
         session.addMarker(range, style, 'text', false)
       );
@@ -309,16 +313,21 @@ export default class Editor extends React.Component<Props, State> {
   }
 
   private expansionAt(row: number, column: number): Expansion | null {
+    let found: Expansion | null = null;
     for (const expansion of this.expansions) {
       if (
         expansion.line - 1 === row &&
         expansion.column <= column &&
         column < expansion.column + expansion.length
       ) {
-        return expansion;
+        // Narrowest wins: a macro named inside a directive sits within the
+        // span of the directive itself, and it is the more specific answer.
+        if (found === null || expansion.length < found.length) {
+          found = expansion;
+        }
       }
     }
-    return null;
+    return found;
   }
 
   private showExpansionTooltip(event: MouseEvent) {
@@ -336,20 +345,33 @@ export default class Editor extends React.Component<Props, State> {
       this.hideTooltip();
       return;
     }
-    const lang = this.props.lang;
-    const label =
-      expansion.kind === 'macro'
-        ? `${expansion.name} → ${expansion.text}`
-        : `${expansion.name}: ${translate(lang, 'excludedLine')}`;
-    const where =
-      expansion.kind === 'macro' && typeof expansion.definedAt !== 'undefined'
-        ? `\n${translate(lang, 'definedOnLine')} ${expansion.definedAt}`
-        : '';
-    this.tooltip.textContent = label + where;
+    this.tooltip.textContent = this.tooltipText(expansion);
     this.tooltip.style.display = 'block';
     const bounds = editor.container.getBoundingClientRect();
     this.tooltip.style.left = `${event.clientX - bounds.left + 12}px`;
     this.tooltip.style.top = `${event.clientY - bounds.top + 18}px`;
+  }
+
+  /** One line of what happened, and one of why, in the interface language. */
+  private tooltipText(expansion: Expansion): string {
+    const lang = this.props.lang;
+    if (expansion.kind === 'excluded') {
+      return `${expansion.name}: ${translate(lang, 'excludedLine')}`;
+    }
+    if (expansion.kind === 'directive') {
+      const head = `${expansion.name} ${expansion.text}`.trim();
+      if (typeof expansion.taken === 'undefined') {
+        return head;
+      }
+      return `${head}\n${translate(
+        lang,
+        expansion.taken ? 'branchCompiled' : 'branchSkipped'
+      )}`;
+    }
+    const head = `${expansion.name} → ${expansion.text}`;
+    return typeof expansion.definedAt === 'undefined'
+      ? head
+      : `${head}\n${translate(lang, 'definedOnLine')} ${expansion.definedAt}`;
   }
 
   private hideTooltip() {

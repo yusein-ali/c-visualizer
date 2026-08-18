@@ -6,7 +6,13 @@
  * Positions are always in the source the user typed, never in the preprocessed
  * text; the pass preserves line numbers, but not columns.
  */
-export type ExpansionKind = 'macro' | 'excluded';
+export type ExpansionKind =
+  /** A macro use that was replaced by its expansion. */
+  | 'macro'
+  /** A line a conditional directive kept out of the compiled source. */
+  | 'excluded'
+  /** A directive line, which is removed and leaves a blank line behind. */
+  | 'directive';
 
 export interface Expansion {
   kind: ExpansionKind;
@@ -22,4 +28,9 @@ export interface Expansion {
   text: string;
   /** Line of the directive that defined the macro, when there is one. */
   definedAt?: number;
+  /**
+   * For a conditional directive: whether the branch it opens is compiled.
+   * Undefined for #endif and for directives that select nothing.
+   */
+  taken?: boolean;
 }

@@ -241,9 +241,13 @@ describe('line numbering', () => {
 });
 
 describe('expansion records for the editor', () => {
+  const macros = (code: string) =>
+    preprocessSource(code).expansions.filter((e) => e.kind === 'macro');
+  const directives = (code: string) =>
+    preprocessSource(code).expansions.filter((e) => e.kind === 'directive');
+
   it('locates a macro use in the source the user typed', () => {
-    const { expansions } = preprocessSource('#define N 7\nint x = N;');
-    expect(expansions).toEqual([
+    expect(macros('#define N 7\nint x = N;')).toEqual([
       {
         kind: 'macro',
         line: 2,
@@ -257,21 +261,78 @@ describe('expansion records for the editor', () => {
   });
 
   it('covers the whole call of a function-like macro', () => {
-    const { expansions } = preprocessSource('#define SQ(x) ((x)*(x))\nint y = SQ(3);');
-    expect(expansions[0].column).toBe(8);
-    expect(expansions[0].length).toBe('SQ(3)'.length);
-    expect(expansions[0].text).toBe('((3)*(3))');
+    const found = macros('#define SQ(x) ((x)*(x))\nint y = SQ(3);');
+    expect(found[0].column).toBe(8);
+    expect(found[0].length).toBe('SQ(3)'.length);
+    expect(found[0].text).toBe('((3)*(3))');
   });
 
   it('reports the fully expanded text of a nested macro', () => {
     const code = '#define A 2\n#define B (A*3)\nint x = B;';
-    const { expansions } = preprocessSource(code);
-    expect(expansions.map((e) => [e.name, e.text])).toEqual([['B', '(2*3)']]);
+    const uses = macros(code).filter((e) => e.line === 3);
+    expect(uses.map((e) => [e.name, e.text])).toEqual([['B', '(2*3)']]);
   });
 
   it('records one entry per use, not per definition', () => {
-    const { expansions } = preprocessSource('#define N 7\nint a = N, b = N;');
-    expect(expansions.map((e) => e.column)).toEqual([8, 15]);
+    expect(macros('#define N 7\nint a = N, b = N;').map((e) => e.column)).toEqual([
+      8,
+      15,
+    ]);
+  });
+
+  it('records the directive lines themselves, with what they did', () => {
+    const found = directives('#define N 7\n#undef N\n#include<stdio.h>');
+    expect(found.map((e) => [e.name, e.text])).toEqual([
+      ['#define', 'N = 7'],
+      ['#undef', 'N'],
+      ['#include', '<stdio.h>'],
+    ]);
+  });
+
+  it('describes a function-like definition with its parameters', () => {
+    expect(directives('#define SQ(x) ((x)*(x))')[0].text).toBe(
+      'SQ(x) = ((x)*(x))'
+    );
+    expect(directives('#define LOG(fmt, ...) printf(fmt)')[0].text).toBe(
+      'LOG(fmt, ...) = printf(fmt)'
+    );
+  });
+
+  it('says whether a conditional branch is compiled', () => {
+    const code = '#define F 1\n#ifdef F\nint a = 1;\n#else\nint b = 2;\n#endif';
+    expect(
+      directives(code)
+        .filter((e) => typeof e.taken !== 'undefined')
+        .map((e) => [e.name, e.taken])
+    ).toEqual([
+      ['#ifdef', true],
+      ['#else', false],
+    ]);
+  });
+
+  it('explains the macros named inside a #define body', () => {
+    const code = '#define A 2\n#define B (A*3)';
+    const inside = macros(code).filter((e) => e.line === 2);
+    expect(inside.map((e) => [e.name, e.text, e.column])).toEqual([
+      ['A', '2', 11],
+    ]);
+  });
+
+  it('explains the macros named inside an #if expression', () => {
+    const code = '#define LEVEL 2\n#if LEVEL > 1\nint a = 1;\n#endif';
+    const inside = macros(code).filter((e) => e.line === 2);
+    expect(inside.map((e) => [e.name, e.text])).toEqual([['LEVEL', '2']]);
+  });
+
+  it('does not treat the operand of defined() as a substitution', () => {
+    const code = '#define N 7\n#if defined(N)\nint a = 1;\n#endif';
+    expect(macros(code).filter((e) => e.line === 2)).toEqual([]);
+  });
+
+  it('keeps a macro defined over two lines anchored to its first line', () => {
+    const code = '#define ADD(a,b) \\\n  ((a)+(b))\nint y = ADD(1,2);';
+    expect(directives(code)[0].line).toBe(1);
+    expect(macros(code).filter((e) => e.kind === 'macro')[0].definedAt).toBe(1);
   });
 
   it('reports lines a conditional excluded, with the directive that did it', () => {
@@ -302,5 +363,59 @@ describe('expansion records for the editor', () => {
   it('leaves the preprocessed text identical to preprocess()', () => {
     const code = '#define N 7\nint x = N;';
     expect(preprocessSource(code).code).toBe(preprocess(code));
+  });
+});
+
+describe('edge cases and malformed input', () => {
+  it('ignores a directive written inside a block comment', () => {
+    const out = preprocess('/* #define N 7 */\nint x = N;');
+    expect(out).toBe('/* #define N 7 */\nint x = N;');
+  });
+
+  it('drops comments from a macro body instead of pasting them at every use', () => {
+    expect(preprocess('#define N 7 /* seven */\nint x = N;').trim()).toBe(
+      'int x = 7;'
+    );
+  });
+
+  it('keeps comment characters that are inside a string in the body', () => {
+    expect(preprocess('#define S "a/*b*/c"\nputs(S);').trim()).toBe(
+      'puts("a/*b*/c");'
+    );
+  });
+
+  it('handles CRLF line endings', () => {
+    expect(preprocess('#define N 7\r\nint x = N;\r\n')).toBe(
+      '\nint x = 7;\r\n'
+    );
+  });
+
+  it('leaves a macro call that is split across lines alone', () => {
+    // The expander works line by line so that positions stay meaningful.
+    const out = preprocess('#define ADD(a,b) ((a)+(b))\nint y = ADD(1,\n2);');
+    expect(out.trim()).toBe('int y = ADD(1,\n2);');
+  });
+
+  it('survives #endif without a matching #if', () => {
+    expect(preprocess('#endif\nint x = 1;').trim()).toBe('int x = 1;');
+  });
+
+  it('survives #undef of a macro that was never defined', () => {
+    expect(preprocess('#undef NOPE\nint x = 1;').trim()).toBe('int x = 1;');
+  });
+
+  it('treats an unparsable #if expression as false rather than throwing', () => {
+    const out = preprocess('#if ?!\nint a = 1;\n#endif\nint b = 2;');
+    expect(out.trim()).toBe('int b = 2;');
+  });
+
+  it('nests conditionals correctly', () => {
+    const out = preprocess('#if 1\n#if 0\nint a = 1;\n#endif\nint b = 2;\n#endif');
+    expect(out.trim()).toBe('int b = 2;');
+  });
+
+  it('leaves source with no directives untouched', () => {
+    const code = 'int main() {\n  return 0;\n}';
+    expect(preprocess(code)).toBe(code);
   });
 });

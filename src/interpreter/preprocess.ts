@@ -33,6 +33,10 @@
  * Variadic macros are supported, including the GNU `, ##__VA_ARGS__` idiom
  * that removes the comma when no variable arguments were passed.
  *
+ * One limitation worth knowing: a macro call has to fit on one line. The
+ * expander works line by line to keep positions meaningful, so `ADD(1,\n2)` is
+ * left as written rather than expanded.
+ *
  * Out of scope: __VA_OPT__, which is C++20 and C23 - the grammar behind this is
  * unicoen.ts's CPP14 parser, and the GNU comma idiom above is what the C++14
  * era offers for the same trailing-comma problem. #include is dropped: the
@@ -67,8 +71,10 @@ class Preprocessor {
   private macros = new Map<string, Macro>();
   private conditionals: ConditionalFrame[] = [];
   private inBlockComment = false;
-  /** What was replaced where, for the editor. Only top-level spans: a macro
-   *  inside another macro's body has no position in the source the user typed. */
+  /**
+   * What was replaced where, for the editor. Only top-level spans: a macro
+   * inside another macro's body has no position in the source the user typed.
+   */
   private expansions: Expansion[] = [];
 
   public run(code: string): { code: string; expansions: Expansion[] } {
@@ -77,15 +83,18 @@ class Preprocessor {
     for (let i = 0; i < lines.length; i += 1) {
       const line = lines[i];
       if (!this.inBlockComment && this.isDirective(line)) {
+        // Captured before the continuation loop: a `\` at the end of a
+        // directive swallows following lines, and everything recorded about
+        // this directive still belongs to the line it started on.
+        const startLine = i + 1;
         let directive = line;
-        // A directive continued with a trailing backslash swallows the lines
-        // that follow it; each one still has to leave a blank line behind.
+        // Each swallowed line still has to leave a blank line behind.
         while (/\\\s*$/.test(directive) && i + 1 < lines.length) {
           directive = directive.replace(/\\\s*$/, ' ') + lines[i + 1];
           i += 1;
           out.push('');
         }
-        this.handleDirective(directive, out.length + 1);
+        this.handleDirective(directive, startLine, line);
         out.push('');
         continue;
       }
@@ -131,59 +140,160 @@ class Preprocessor {
     return true;
   }
 
-  private handleDirective(line: string, lineNumber: number) {
+  private handleDirective(line: string, lineNumber: number, raw: string) {
     const text = line.replace(/^\s*#\s*/, '').trim();
     const match = /^([A-Za-z_][A-Za-z0-9_]*)\s*([\s\S]*)$/.exec(text);
     const keyword = match === null ? '' : match[1];
     const rest = match === null ? '' : match[2];
+    // The editor marks the directive itself, so every branch below records what
+    // this line did: the value a macro was given, or whether a branch is taken.
+    const record = (detail: string, taken?: boolean) => {
+      const column = Math.max(raw.indexOf('#'), 0);
+      this.expansions.push({
+        kind: 'directive',
+        line: lineNumber,
+        column,
+        length: raw.trim().length,
+        name: `#${keyword}`,
+        text: detail,
+        taken,
+      });
+    };
+    const topFrame = () => this.conditionals[this.conditionals.length - 1];
+
     switch (keyword) {
-      case 'define':
-        if (this.isActive()) {
-          this.defineMacro(rest, lineNumber);
+      case 'define': {
+        if (!this.isActive()) {
+          record(rest, false);
+          return;
         }
+        const name = this.defineMacro(rest, lineNumber);
+        this.recordReferences(raw, lineNumber, name === null ? [] : [name]);
+        const macro = name === null ? undefined : this.macros.get(name);
+        record(
+          typeof macro === 'undefined' || name === null
+            ? rest
+            : `${name}${
+                macro.params === null
+                  ? ''
+                  : `(${macro.params
+                      .concat(macro.variadic ? ['...'] : [])
+                      .join(', ')})`
+              } = ${macro.body === '' ? '(empty)' : macro.body}`
+        );
         return;
-      case 'undef':
+      }
+      case 'undef': {
+        const name = rest.split(/\s/)[0];
         if (this.isActive()) {
-          this.macros.delete(rest.split(/\s/)[0]);
+          this.macros.delete(name);
         }
+        record(name);
         return;
+      }
       case 'ifdef':
         this.pushConditional(this.macros.has(rest.split(/\s/)[0]), '#ifdef');
+        record(rest, this.isActive());
         return;
       case 'ifndef':
         this.pushConditional(!this.macros.has(rest.split(/\s/)[0]), '#ifndef');
+        record(rest, this.isActive());
         return;
       case 'if':
         this.pushConditional(this.evaluate(rest) !== 0, '#if');
+        record(rest, this.isActive());
+        this.recordReferences(raw, lineNumber, []);
         return;
       case 'elif': {
-        const frame = this.conditionals[this.conditionals.length - 1];
+        const frame = topFrame();
         if (typeof frame === 'undefined') {
+          record(rest);
           return;
         }
         const value = !frame.taken && this.evaluate(rest) !== 0;
         frame.directive = '#elif';
         frame.active = frame.parentActive && value;
         frame.taken = frame.taken || value;
+        record(rest, this.isActive());
+        this.recordReferences(raw, lineNumber, []);
         return;
       }
       case 'else': {
-        const frame = this.conditionals[this.conditionals.length - 1];
+        const frame = topFrame();
         if (typeof frame === 'undefined') {
+          record('');
           return;
         }
         frame.directive = '#else';
         frame.active = frame.parentActive && !frame.taken;
         frame.taken = true;
+        record('', this.isActive());
         return;
       }
       case 'endif':
         this.conditionals.pop();
+        record('');
         return;
       default:
         // #include, #pragma, #error, #line: dropped, like every other
         // directive. The blank line keeps the numbering.
+        record(rest);
         return;
+    }
+  }
+
+  /**
+   * Records the macros named *inside* a directive - the operands of an #if, the
+   * names used in a #define body - so the editor can explain each one where it
+   * is written, not just the directive as a whole. These are references rather
+   * than replacements: the text is what the name means at this point.
+   *
+   * `skip` holds names that are not references here, such as the macro a
+   * #define is defining. `defined(X)` is skipped too: X is being tested, not
+   * substituted.
+   */
+  private recordReferences(raw: string, lineNumber: number, skip: string[]) {
+    const ignore = new Set(skip);
+    let i = raw.indexOf('#');
+    let seenKeyword = false;
+    let afterDefined = false;
+    while (i < raw.length && i >= 0) {
+      const char = raw[i];
+      if (char === '"' || char === "'") {
+        i = skipLiteral(raw, i);
+        continue;
+      }
+      if (raw.substr(i, 2) === '/*' || raw.substr(i, 2) === '//') {
+        return;
+      }
+      if (!IDENT_START.test(char)) {
+        i += 1;
+        continue;
+      }
+      let end = i + 1;
+      while (end < raw.length && IDENT_CHAR.test(raw[end])) {
+        end += 1;
+      }
+      const name = raw.slice(i, end);
+      if (!seenKeyword) {
+        seenKeyword = true; // the directive keyword itself
+      } else if (name === 'defined') {
+        afterDefined = true;
+      } else if (afterDefined) {
+        afterDefined = false; // the macro `defined` is testing
+      } else if (!ignore.has(name) && this.macros.has(name)) {
+        const macro = this.macros.get(name) as Macro;
+        this.expansions.push({
+          kind: 'macro',
+          line: lineNumber,
+          column: i,
+          length: name.length,
+          name,
+          text: this.expandFragment(name, lineNumber, new Set<string>()),
+          definedAt: macro.definedAt,
+        });
+      }
+      i = end;
     }
   }
 
@@ -197,10 +307,10 @@ class Preprocessor {
     });
   }
 
-  private defineMacro(rest: string, lineNumber: number) {
+  private defineMacro(rest: string, lineNumber: number): string | null {
     const nameMatch = /^([A-Za-z_][A-Za-z0-9_]*)/.exec(rest);
     if (nameMatch === null) {
-      return;
+      return null;
     }
     const name = nameMatch[1];
     let pos = name.length;
@@ -208,7 +318,7 @@ class Preprocessor {
     if (rest[pos] === '(') {
       const close = rest.indexOf(')', pos);
       if (close === -1) {
-        return;
+        return null;
       }
       const inner = rest.slice(pos + 1, close).trim();
       const declared =
@@ -220,16 +330,17 @@ class Preprocessor {
         params,
         variadic,
         definedAt: lineNumber,
-        body: rest.slice(close + 1).trim(),
+        body: stripComments(rest.slice(close + 1)).trim(),
       });
-      return;
+      return name;
     }
     this.macros.set(name, {
       params: null,
       variadic: false,
       definedAt: lineNumber,
-      body: rest.slice(pos).trim(),
+      body: stripComments(rest.slice(pos)).trim(),
     });
+    return name;
   }
 
   /** Copies a line through, expanding macros outside literals and comments. */
@@ -436,6 +547,39 @@ class Preprocessor {
       return 0;
     }
   }
+}
+
+/**
+ * Drops comments from a macro body. A real preprocessor removes them before it
+ * ever sees a directive, so `#define N 7 /* seven *\/` defines `7`, not
+ * `7 /* seven *\/` - which would otherwise be pasted into every use and shown
+ * in the editor's tooltip.
+ */
+function stripComments(text: string): string {
+  let out = '';
+  let i = 0;
+  while (i < text.length) {
+    const pair = text.substr(i, 2);
+    if (pair === '/*') {
+      const end = text.indexOf('*/', i + 2);
+      i = end === -1 ? text.length : end + 2;
+      out += ' ';
+      continue;
+    }
+    if (pair === '//') {
+      break;
+    }
+    const char = text[i];
+    if (char === '"' || char === "'") {
+      const end = skipLiteral(text, i);
+      out += text.slice(i, end);
+      i = end;
+      continue;
+    }
+    out += char;
+    i += 1;
+  }
+  return out;
 }
 
 /** Index just past the string or character literal starting at `start`. */

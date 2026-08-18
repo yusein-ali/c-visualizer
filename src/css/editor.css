@@ -42,3 +42,11 @@
   pointer-events: none;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
 }
+
+/* Directive lines: removed before parsing, so shown as processed, not dead. */
+.directive-line {
+  position: absolute;
+  z-index: 3;
+  background-color: rgba(70, 130, 180, 0.1);
+  border-bottom: 1px dotted rgba(70, 130, 180, 0.6);
+}
