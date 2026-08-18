@@ -14,7 +14,7 @@ editor.
   browser. `src/server.ts` is a *simulated* server: an in-process singleton with a
   `Request`/`Response` API, kept in that shape so a real remote backend could be swapped
   in later. Do not add network calls expecting a server to exist.
-- Ships as a static site: `yarn build` → `dist/`, deployed to the `gh-pages` branch by
+- Ships as a static site: `npm run build` → `dist/`, deployed to the `gh-pages` branch by
   GitHub Actions. Demo: https://ryoskate.github.io/PLIVET
 
 ## Direction (read before proposing dependency work)
@@ -44,24 +44,32 @@ Konva, and do not invest in Java or Python; all of it is being removed.
 
 ## Toolchain — read before running anything
 
-- `.tool-versions`: **nodejs 16.20.2**, yarn 1.22.17. `package.json` enforces
-  `>= 10.20.1 <= 16.20.2`. This is a webpack 4 / TSLint era codebase; **newer Node will
-  break the build** (OpenSSL hashing, among others). Use asdf/nvm to select Node 16.
-- Package manager is **yarn 1** (`yarn.lock` is committed; CI uses `--frozen-lockfile
-  --ignore-optional`). Do not introduce npm or pnpm lockfiles.
-- `node_modules/` may not be installed in a fresh checkout — run `yarn` first.
+- `.tool-versions`: **nodejs 24.15.0**. `package.json` enforces `>=24 <25` and
+  pins `packageManager: npm@11.12.1`.
+- Package manager is **npm** (`package-lock.json` is committed; CI uses `npm ci`).
+  `yarn.lock` was removed in Phase 2 of `UPGRADE_PLAN.md`. Do not reintroduce
+  yarn or pnpm.
+- `.npmrc` sets `legacy-peer-deps=true` because `react-konva@16.9.0-1` declares
+  peer `react@16.9.x` against the project's `react@16.14.0`. Delete it in the
+  commit that removes react-konva (Phase 8/9).
+- **The build does not run on Node 24 yet.** `npm run build` and `npm start`
+  both fail in css-loader 5, which requires `postcss/package.json` — blocked by
+  that package's `exports` map. No OpenSSL flag helps; this is not the md4
+  failure. Phase 3 replaces the loader stack and restores both. `npm test`
+  works.
+- `node_modules/` may not be installed in a fresh checkout — run `npm ci` first.
 
 ## Commands
 
 ```bash
-yarn                # install
-yarn start          # dev server on :8080 (opens a browser; webpack.config.dev.js)
-yarn build          # clean + production build into dist/ + generate licenses.html
-yarn test           # jest
-yarn ts-lint        # tslint --fix over src/**/*.tsx
+npm ci              # install from the committed lockfile
+npm start           # dev server on :8080 — BROKEN on Node 24 until Phase 3
+npm run build       # production build into dist/ — BROKEN on Node 24 until Phase 3
+npm test            # jest — works
+npm run ts-lint     # tslint --fix over src/**/*.tsx
 ```
 
-CI (`.github/workflows/test.yml`) runs `yarn build` **and** `yarn test` on Node 16.13.2
+CI (`.github/workflows/test.yml`) runs `npm ci` and `npm test` on Node 24.15.0
 for every push/PR to `master`. `deploy-to-gh-pages.yml` builds and publishes `dist/` on
 push to `master`.
 
@@ -137,7 +145,7 @@ change that switch when adding a state.
 ## Conventions
 
 - 2-space indent, single quotes, semicolons, trailing commas — enforced by Prettier
-  through TSLint. Run `yarn ts-lint` (or just build: `tslint-loader` runs with `fix: true`
+  through TSLint. Run `npm run ts-lint` (or just build: `tslint-loader` runs with `fix: true`
   during webpack, so building can rewrite your source files).
 - React class components with an explicit `interface Props` / `interface State`; shared
   prop shapes (`LangProps`, `ProgLangProps`, `ThemeProps`) live in
@@ -153,7 +161,7 @@ change that switch when adding a state.
 Jest is scoped to `roots: ['<rootDir>/test']` with `tsconfig.test.json`, CSS mapped to
 `identity-obj-proxy`, and TS diagnostic 2604 suppressed (a `react-numeric-input` typing
 quirk). New tests go under `test/` as `*.test.tsx`. There is no e2e/browser test harness;
-verify interpreter/canvas behavior manually with `yarn start`.
+verify interpreter/canvas behavior manually with `npm start` (blocked until Phase 3).
 
 ## Gotchas
 

@@ -12,15 +12,18 @@ jobs:
 
     strategy:
       matrix:
-        node-version: [16.13.2]
+        node-version: [24.15.0]
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Use Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v2
+        uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
+          cache: npm
       - name: Install dependencies
-        run: yarn --frozen-lockfile --ignore-optional
-      - run: yarn run build
-      - run: yarn run test
+        run: npm ci
+      - run: npm test
+      # `npm run build` is deliberately absent: webpack 4 cannot run on Node 24
+      # (css-loader 5 requires postcss/package.json, which the package `exports`
+      # map blocks). Phase 3 of UPGRADE_PLAN.md restores the build and this step.

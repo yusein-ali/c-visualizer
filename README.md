@@ -32,21 +32,21 @@ Demo page is here.
 
 ### Required
 
-- node.js v16.13.2
-- yarn or npm
+- node.js v24.15.0 (see `.tool-versions`)
+- npm 11 (the only supported package manager; `package-lock.json` is committed)
 
 ### Setup environment
 
 - Install node packages
 
 ```
-yarn
+npm ci
 ```
 
 - After editing files in `src/`,
 
 ```
-yarn build
+npm run build
 ```
 
 to update `bist/` by webpack.
