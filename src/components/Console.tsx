@@ -32,9 +32,8 @@ export default class Console extends React.Component<Props, State> {
       this.setState({ theme });
     });
     slot('changeState', async (debugState: DEBUG_STATE) => {
-      if (debugState === 'stdin') {
-        this.setState({ isReadOnly: false });
-      }
+      // Typable exactly while the program is blocked on a read.
+      this.setState({ isReadOnly: debugState !== 'stdin' });
     });
   }
   onChange(text: string) {
@@ -42,7 +41,10 @@ export default class Console extends React.Component<Props, State> {
       // 改行文字削除&今回入力部分のみ残す
       const sendText = text.slice(0, -1).replace(this.state.output, '');
       this.setState({ output: text, isReadOnly: true });
-      signal('debug', 'Step', sendText);
+      // Resume rather than single-step: the run stops at the next read, at a
+      // breakpoint or at EOF, so the console re-opens on its own for the next
+      // value instead of waiting for a Step press that is easy to miss.
+      signal('debug', 'StepAll', sendText);
     }
   }
   render() {

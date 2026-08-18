@@ -136,7 +136,7 @@ class Server {
         return this.Step(sourcecode, stdinText);
       }
       case 'StepAll': {
-        return this.StepAll(sourcecode, lineNumOfBreakpoint);
+        return this.StepAll(sourcecode, lineNumOfBreakpoint, stdinText);
       }
       case 'Exec': {
         return this.Exec(sourcecode, progLang, lineNumOfBreakpoint);
@@ -322,10 +322,19 @@ class Server {
     return ret;
   }
 
-  private StepAll(sourcecode: string, lineNumOfBreakpoint?: number[]) {
+  private StepAll(
+    sourcecode: string,
+    lineNumOfBreakpoint?: number[],
+    stdinText?: string
+  ) {
     const currentCount = this.count;
+    // Only the first step of the run may consume the submitted line: it is the
+    // one the program is blocked on. Every later step runs with no input, and
+    // the guard in Step stops the run at the next scanf.
+    let pendingStdin = stdinText;
     const loop = () => {
-      const ret: Response = this.Step(sourcecode);
+      const ret: Response = this.Step(sourcecode, pendingStdin);
+      pendingStdin = undefined;
       if (ret.debugState === 'EOF') {
         signal('EOF', ret);
         return;
