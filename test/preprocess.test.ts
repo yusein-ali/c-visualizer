@@ -1,4 +1,4 @@
-import { preprocess } from '../src/interpreter/preprocess';
+import { preprocess, preprocessSource } from '../src/interpreter/preprocess';
 
 /**
  * The cases mirror `baseline/scripts/probe-preprocessor.js`, which records what
@@ -237,5 +237,70 @@ describe('line numbering', () => {
 
   it('expands __LINE__ to the line it appears on', () => {
     expect(lines('int a = 1;\nint b = __LINE__;')[1]).toBe('int b = 2;');
+  });
+});
+
+describe('expansion records for the editor', () => {
+  it('locates a macro use in the source the user typed', () => {
+    const { expansions } = preprocessSource('#define N 7\nint x = N;');
+    expect(expansions).toEqual([
+      {
+        kind: 'macro',
+        line: 2,
+        column: 8,
+        length: 1,
+        name: 'N',
+        text: '7',
+        definedAt: 1,
+      },
+    ]);
+  });
+
+  it('covers the whole call of a function-like macro', () => {
+    const { expansions } = preprocessSource('#define SQ(x) ((x)*(x))\nint y = SQ(3);');
+    expect(expansions[0].column).toBe(8);
+    expect(expansions[0].length).toBe('SQ(3)'.length);
+    expect(expansions[0].text).toBe('((3)*(3))');
+  });
+
+  it('reports the fully expanded text of a nested macro', () => {
+    const code = '#define A 2\n#define B (A*3)\nint x = B;';
+    const { expansions } = preprocessSource(code);
+    expect(expansions.map((e) => [e.name, e.text])).toEqual([['B', '(2*3)']]);
+  });
+
+  it('records one entry per use, not per definition', () => {
+    const { expansions } = preprocessSource('#define N 7\nint a = N, b = N;');
+    expect(expansions.map((e) => e.column)).toEqual([8, 15]);
+  });
+
+  it('reports lines a conditional excluded, with the directive that did it', () => {
+    const code = '#define F 1\n#ifdef F\nint a = 1;\n#else\nint b = 2;\n#endif';
+    const excluded = preprocessSource(code).expansions.filter(
+      (e) => e.kind === 'excluded'
+    );
+    expect(excluded).toEqual([
+      {
+        kind: 'excluded',
+        line: 5,
+        column: 0,
+        length: 'int b = 2;'.length,
+        name: '#else',
+        text: '',
+      },
+    ]);
+  });
+
+  it('does not report blank lines inside an excluded block', () => {
+    const code = '#if 0\n\nint a = 1;\n#endif';
+    const excluded = preprocessSource(code).expansions.filter(
+      (e) => e.kind === 'excluded'
+    );
+    expect(excluded.map((e) => e.line)).toEqual([3]);
+  });
+
+  it('leaves the preprocessed text identical to preprocess()', () => {
+    const code = '#define N 7\nint x = N;';
+    expect(preprocessSource(code).code).toBe(preprocess(code));
   });
 });

@@ -22,6 +22,8 @@ export default {
     'PVC.js adaptively changes its layout to correspond with the size of the browser window.',
   ],
   uploadFile: 'The uploaded file will be displayed here.',
+  definedOnLine: 'defined on line',
+  excludedLine: 'excluded from compilation',
   warning: 'Warning!',
   editInDebug: `The source code being executed has been edited.
 Program behavior is not affected by changing code. 

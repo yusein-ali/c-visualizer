@@ -40,12 +40,16 @@
  * are named.
  */
 
+import { Expansion } from './Expansion';
+
 interface Macro {
   /** null for an object-like macro; the named parameters otherwise. */
   params: string[] | null;
   /** Declared with a trailing `...`, so extra arguments become __VA_ARGS__. */
   variadic: boolean;
   body: string;
+  /** Line of the directive that defined it, for the editor's tooltip. */
+  definedAt: number;
 }
 
 const IDENT_START = /[A-Za-z_]/;
@@ -55,14 +59,19 @@ interface ConditionalFrame {
   active: boolean;
   taken: boolean;
   parentActive: boolean;
+  /** The directive that opened the frame, named in the editor's tooltip. */
+  directive: string;
 }
 
 class Preprocessor {
   private macros = new Map<string, Macro>();
   private conditionals: ConditionalFrame[] = [];
   private inBlockComment = false;
+  /** What was replaced where, for the editor. Only top-level spans: a macro
+   *  inside another macro's body has no position in the source the user typed. */
+  private expansions: Expansion[] = [];
 
-  public run(code: string): string {
+  public run(code: string): { code: string; expansions: Expansion[] } {
     const lines = code.split('\n');
     const out: string[] = [];
     for (let i = 0; i < lines.length; i += 1) {
@@ -76,17 +85,37 @@ class Preprocessor {
           i += 1;
           out.push('');
         }
-        this.handleDirective(directive);
+        this.handleDirective(directive, out.length + 1);
         out.push('');
         continue;
       }
       if (!this.isActive()) {
+        if (line.trim() !== '') {
+          this.expansions.push({
+            kind: 'excluded',
+            line: i + 1,
+            column: 0,
+            length: line.length,
+            name: this.excludedBy(),
+            text: '',
+          });
+        }
         out.push('');
         continue;
       }
       out.push(this.expandLine(line, i + 1));
     }
-    return out.join('\n');
+    return { code: out.join('\n'), expansions: this.expansions };
+  }
+
+  /** The directive whose branch is not being taken, for the tooltip. */
+  private excludedBy(): string {
+    for (const frame of this.conditionals) {
+      if (!frame.active) {
+        return frame.directive;
+      }
+    }
+    return '#if';
   }
 
   private isDirective(line: string): boolean {
@@ -102,7 +131,7 @@ class Preprocessor {
     return true;
   }
 
-  private handleDirective(line: string) {
+  private handleDirective(line: string, lineNumber: number) {
     const text = line.replace(/^\s*#\s*/, '').trim();
     const match = /^([A-Za-z_][A-Za-z0-9_]*)\s*([\s\S]*)$/.exec(text);
     const keyword = match === null ? '' : match[1];
@@ -110,7 +139,7 @@ class Preprocessor {
     switch (keyword) {
       case 'define':
         if (this.isActive()) {
-          this.defineMacro(rest);
+          this.defineMacro(rest, lineNumber);
         }
         return;
       case 'undef':
@@ -119,13 +148,13 @@ class Preprocessor {
         }
         return;
       case 'ifdef':
-        this.pushConditional(this.macros.has(rest.split(/\s/)[0]));
+        this.pushConditional(this.macros.has(rest.split(/\s/)[0]), '#ifdef');
         return;
       case 'ifndef':
-        this.pushConditional(!this.macros.has(rest.split(/\s/)[0]));
+        this.pushConditional(!this.macros.has(rest.split(/\s/)[0]), '#ifndef');
         return;
       case 'if':
-        this.pushConditional(this.evaluate(rest) !== 0);
+        this.pushConditional(this.evaluate(rest) !== 0, '#if');
         return;
       case 'elif': {
         const frame = this.conditionals[this.conditionals.length - 1];
@@ -133,6 +162,7 @@ class Preprocessor {
           return;
         }
         const value = !frame.taken && this.evaluate(rest) !== 0;
+        frame.directive = '#elif';
         frame.active = frame.parentActive && value;
         frame.taken = frame.taken || value;
         return;
@@ -142,6 +172,7 @@ class Preprocessor {
         if (typeof frame === 'undefined') {
           return;
         }
+        frame.directive = '#else';
         frame.active = frame.parentActive && !frame.taken;
         frame.taken = true;
         return;
@@ -156,16 +187,17 @@ class Preprocessor {
     }
   }
 
-  private pushConditional(value: boolean) {
+  private pushConditional(value: boolean, directive: string) {
     const parentActive = this.isActive();
     this.conditionals.push({
       parentActive,
+      directive,
       active: parentActive && value,
       taken: value,
     });
   }
 
-  private defineMacro(rest: string) {
+  private defineMacro(rest: string, lineNumber: number) {
     const nameMatch = /^([A-Za-z_][A-Za-z0-9_]*)/.exec(rest);
     if (nameMatch === null) {
       return;
@@ -187,6 +219,7 @@ class Preprocessor {
       this.macros.set(name, {
         params,
         variadic,
+        definedAt: lineNumber,
         body: rest.slice(close + 1).trim(),
       });
       return;
@@ -194,6 +227,7 @@ class Preprocessor {
     this.macros.set(name, {
       params: null,
       variadic: false,
+      definedAt: lineNumber,
       body: rest.slice(pos).trim(),
     });
   }
@@ -250,6 +284,17 @@ class Preprocessor {
           out += name;
           i = end;
         } else {
+          const macro = this.macros.get(name);
+          this.expansions.push({
+            kind: 'macro',
+            line: lineNumber,
+            column: i,
+            length: expansion.next - i,
+            name,
+            text: expansion.text,
+            definedAt:
+              typeof macro === 'undefined' ? undefined : macro.definedAt,
+          });
           out += expansion.text;
           i = expansion.next;
         }
@@ -721,6 +766,13 @@ function evaluateConstantExpression(expression: string): number {
   return parseOr();
 }
 
-export function preprocess(code: string): string {
+/** The preprocessed source, plus what was replaced where in the original. */
+export function preprocessSource(
+  code: string
+): { code: string; expansions: Expansion[] } {
   return new Preprocessor().run(code);
+}
+
+export function preprocess(code: string): string {
+  return preprocessSource(code).code;
 }

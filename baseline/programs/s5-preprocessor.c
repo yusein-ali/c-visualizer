@@ -103,7 +103,7 @@ int main() {
   printf("roots %d\n", (int)(sqrt(heap[0]) + sqrt(heap[1])));  /* roots 7 */
 
   /* 11. __LINE__ is the line this appears on */
-  printf("line %d\n", __LINE__);                        /* line 104 */
+  printf("line %d\n", __LINE__);                        /* line 106 */
 
   return 0;
 }

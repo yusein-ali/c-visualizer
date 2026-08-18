@@ -29,6 +29,7 @@ import translate from '../locales/translate';
 import { ExecState } from 'unicoen.ts/dist/interpreter/Engine/ExecState';
 import { LangProps, ProgLangProps, Theme } from './Props';
 import { SyntaxErrorData } from 'unicoen.ts/dist/interpreter/mapper/SyntaxErrorData';
+import { Expansion } from '../interpreter/Expansion';
 
 type Props = LangProps & ProgLangProps;
 interface State {
@@ -66,6 +67,9 @@ export default class Editor extends React.Component<Props, State> {
   private checkbox: HTMLInputElement | null = null;
   private noAlert: boolean = false;
   private highlightIds: number[] = [];
+  private expansions: Expansion[] = [];
+  private expansionMarkerIds: number[] = [];
+  private tooltip: HTMLDivElement | null = null;
   constructor(props: Props) {
     super(props);
 
@@ -108,6 +112,19 @@ export default class Editor extends React.Component<Props, State> {
     editor.on('keydown', (e: any) => {
       console.log(e);
     });
+    this.tooltip = document.createElement('div');
+    this.tooltip.className = 'macro-tooltip';
+    this.tooltip.style.display = 'none';
+    editor.container.appendChild(this.tooltip);
+    // A DOM listener rather than editor.on('mousemove'): the position is
+    // resolved through the renderer, so this does not depend on Ace's mouse
+    // plumbing forwarding the event.
+    editor.container.addEventListener('mousemove', (e: MouseEvent) =>
+      this.showExpansionTooltip(e)
+    );
+    editor.container.addEventListener('mouseleave', () => this.hideTooltip());
+    editor.getSession().on('changeScrollTop', () => this.hideTooltip());
+
     editor.on('guttermousedown', (e: GutterMousedownEvent) => {
       const target: GutterMousedownEventTarget = e.domEvent.currentTarget;
       if (
@@ -170,8 +187,11 @@ export default class Editor extends React.Component<Props, State> {
       server
         .send(request)
         .then((response: Response) => {
-          const { errors } = response;
+          const { errors, expansions } = response;
           this.setSyntaxError(errors);
+          this.setExpansions(
+            typeof expansions === 'undefined' ? [] : expansions
+          );
         })
         .catch((e) => {
           console.log(e);
@@ -253,6 +273,88 @@ export default class Editor extends React.Component<Props, State> {
       } else {
         editor.getSelection().setSelectionRange(range);
       }
+    }
+  }
+
+  /**
+   * Marks every span the preprocessor replaced. The pass keeps line numbers, so
+   * a recorded position still refers to the line the user is looking at, and
+   * the mark can sit directly under the macro they wrote.
+   */
+  setExpansions(expansions: Expansion[]) {
+    this.expansions = expansions;
+    const editor: AceAjax.Editor = this.editorRef.current.editor;
+    const session: AceAjax.IEditSession = editor.getSession();
+    for (const id of this.expansionMarkerIds) {
+      session.removeMarker(id);
+    }
+    this.expansionMarkerIds = [];
+    if (this.ace === null) {
+      return;
+    }
+    const AceRange = this.ace.acequire('ace/range').Range;
+    for (const expansion of expansions) {
+      const range = new AceRange(
+        expansion.line - 1,
+        expansion.column,
+        expansion.line - 1,
+        expansion.column + expansion.length
+      );
+      const style =
+        expansion.kind === 'macro' ? 'macro-expansion' : 'excluded-region';
+      this.expansionMarkerIds.push(
+        session.addMarker(range, style, 'text', false)
+      );
+    }
+  }
+
+  private expansionAt(row: number, column: number): Expansion | null {
+    for (const expansion of this.expansions) {
+      if (
+        expansion.line - 1 === row &&
+        expansion.column <= column &&
+        column < expansion.column + expansion.length
+      ) {
+        return expansion;
+      }
+    }
+    return null;
+  }
+
+  private showExpansionTooltip(event: MouseEvent) {
+    if (this.tooltip === null || this.editorRef.current === null) {
+      return;
+    }
+    const editor: AceAjax.Editor = this.editorRef.current.editor;
+    // @types/ace declares this as returning void; it returns a Position.
+    const position = (editor.renderer.screenToTextCoordinates(
+      event.clientX,
+      event.clientY
+    ) as unknown) as AceAjax.Position;
+    const expansion = this.expansionAt(position.row, position.column);
+    if (expansion === null) {
+      this.hideTooltip();
+      return;
+    }
+    const lang = this.props.lang;
+    const label =
+      expansion.kind === 'macro'
+        ? `${expansion.name} → ${expansion.text}`
+        : `${expansion.name}: ${translate(lang, 'excludedLine')}`;
+    const where =
+      expansion.kind === 'macro' && typeof expansion.definedAt !== 'undefined'
+        ? `\n${translate(lang, 'definedOnLine')} ${expansion.definedAt}`
+        : '';
+    this.tooltip.textContent = label + where;
+    this.tooltip.style.display = 'block';
+    const bounds = editor.container.getBoundingClientRect();
+    this.tooltip.style.left = `${event.clientX - bounds.left + 12}px`;
+    this.tooltip.style.top = `${event.clientY - bounds.top + 18}px`;
+  }
+
+  private hideTooltip() {
+    if (this.tooltip !== null) {
+      this.tooltip.style.display = 'none';
     }
   }
 

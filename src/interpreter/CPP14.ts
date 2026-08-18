@@ -2,7 +2,8 @@ import { Interpreter } from 'unicoen.ts/dist/interpreter/Interpreter';
 import { CPP14Mapper } from 'unicoen.ts/dist/interpreter/CPP14/CPP14Mapper';
 import { SyntaxErrorData } from 'unicoen.ts/dist/interpreter/mapper/SyntaxErrorData';
 import { PlivetCPP14Engine } from './CPP14Engine';
-import { preprocess } from './preprocess';
+import { Expansion } from './Expansion';
+import { preprocess, preprocessSource } from './preprocess';
 
 /**
  * PLIVET's C interpreter: the stock mapper and engine behaviour, with the
@@ -24,6 +25,15 @@ export class PlivetCPP14Interpreter extends Interpreter {
 
   preProcess(code: string): string {
     return preprocess(code);
+  }
+
+  /**
+   * What the preprocessor replaced, and where in the source the user typed, so
+   * the editor can mark those spans and explain them on hover. Computed on the
+   * syntax check, which already runs on every edit.
+   */
+  getExpansions(code: string): Expansion[] {
+    return preprocessSource(code).expansions;
   }
 
   /**

@@ -2,6 +2,7 @@ import { SyntaxErrorData } from 'unicoen.ts/dist/interpreter/mapper/SyntaxErrorD
 import { ExecState } from 'unicoen.ts/dist/interpreter/Engine/ExecState';
 import { signal } from './components/emitter';
 import { Interpreter } from 'unicoen.ts/dist/interpreter/Interpreter';
+import { Expansion } from './interpreter/Expansion';
 
 export type CONTROL_EVENT =
   | 'Exec'
@@ -37,8 +38,24 @@ export class Response {
     public step: number,
     public errors: SyntaxErrorData[],
     public files: Map<string, ArrayBuffer>,
-    public execState?: ExecState
+    public execState?: ExecState,
+    /** Preprocessor replacements, for the editor to mark. Syntax checks only. */
+    public expansions?: Expansion[]
   ) {}
+}
+
+/** Implemented by interpreters that preprocess their source. */
+interface ExpansionSource {
+  getExpansions(code: string): Expansion[];
+}
+
+function reportsExpansions(
+  interpreter: Interpreter
+): interpreter is Interpreter & ExpansionSource {
+  return (
+    typeof ((interpreter as unknown) as ExpansionSource).getExpansions ===
+    'function'
+  );
 }
 
 class Server {
@@ -386,6 +403,9 @@ class Server {
     const errors: SyntaxErrorData[] = interpreter.checkSyntaxError(code);
     const ret: Response = {
       errors,
+      expansions: reportsExpansions(interpreter)
+        ? interpreter.getExpansions(code)
+        : [],
       sourcecode: code,
       execState: undefined,
       debugState: 'Stop',
