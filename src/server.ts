@@ -50,30 +50,31 @@ class Server {
   private stateHistory: ExecState[] = [];
   private outputsHistory: string[] = [];
 
-  private async dynamicLoadInterpreter(progLang?: string) {
-    if (typeof progLang === 'undefined') {
-      throw new Error('Selected programming language is invalid.');
-    } else if (progLang === 'c_cpp') {
+  // Returns a new interpreter rather than assigning `this.interpreter`. Only
+  // `reset` may replace the session's interpreter: `SyntaxCheck` runs off a
+  // debounced keystroke and can land at any moment, including right after
+  // `Start` has armed a session.
+  private async createInterpreter(progLang?: string): Promise<Interpreter> {
+    if (progLang === 'c_cpp') {
       // prettier-ignore
       const module = await import(/* webpackChunkName: "CPP14" */ 'unicoen.ts/dist/interpreter/CPP14/CPP14Interpreter');
-      this.interpreter = new module.CPP14Interpreter();
+      return new module.CPP14Interpreter();
     } else if (progLang === 'java') {
       // prettier-ignore
       const module = await import(/* webpackChunkName: "Java8" */ 'unicoen.ts/dist/interpreter/Java8/Java8Interpreter');
-      this.interpreter = new module.Java8Interpreter();
+      return new module.Java8Interpreter();
     } else if (progLang === 'python') {
       // prettier-ignore
       const module = await import(/* webpackChunkName: "Python3" */ 'unicoen.ts/dist/interpreter/Python3/Python3Interpreter');
-      this.interpreter = new module.Python3Interpreter();
+      return new module.Python3Interpreter();
     }
+    throw new Error('Selected programming language is invalid.');
   }
   private async reset(progLang?: string) {
     this.count = 0;
-    await this.dynamicLoadInterpreter(progLang);
-    if (this.interpreter === null) {
-      throw new Error('Interpreter is not found');
-    }
-    this.interpreter.setFileList(this.files);
+    const interpreter = await this.createInterpreter(progLang);
+    interpreter.setFileList(this.files);
+    this.interpreter = interpreter;
     this.stateHistory = [];
     this.outputsHistory = [];
   }
@@ -245,11 +246,28 @@ class Server {
         }
         //  console.log(`stdin:${stdinText}`);
       }
-      let state = this.interpreter.stepExecute();
+      const state: ExecState | null = this.interpreter.stepExecute();
       // let maxSkip = 10;
       // while (state.getCurrentExpr().codeRange == null && 0 < --maxSkip) {
       //   state = this.engine.stepExecute();
       // }
+      if (state === null) {
+        // The engine has no step iterator, so it is not the one `Start` armed.
+        // Report the last known good state: a null ExecState reaches the canvas
+        // through the `draw` signal and takes the whole UI down with it.
+        this.isExecuting = false;
+        this.count = Math.max(this.stateHistory.length - 1, 0);
+        const dead: Response = {
+          sourcecode,
+          output: this.outputsHistory[this.count] ?? '',
+          execState: this.getLastHistory(),
+          debugState: 'EOF',
+          step: this.count,
+          errors: [],
+          files: this.files,
+        };
+        return dead;
+      }
       const execState = this.recordExecState(state);
       const stdout = this.interpreter.getStdout();
       //  console.log(`stdout:${stdout}`);
@@ -337,11 +355,9 @@ class Server {
   }
 
   private async SyntaxCheck(code: string, progLang?: string) {
-    await this.dynamicLoadInterpreter(progLang);
-    if (this.interpreter === null) {
-      throw new Error('Interpreter is not found');
-    }
-    const errors: SyntaxErrorData[] = this.interpreter.checkSyntaxError(code);
+    // Deliberately a throwaway interpreter, never `this.interpreter`.
+    const interpreter = await this.createInterpreter(progLang);
+    const errors: SyntaxErrorData[] = interpreter.checkSyntaxError(code);
     const ret: Response = {
       errors,
       sourcecode: code,

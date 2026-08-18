@@ -11,14 +11,16 @@ interface Props {
   scale: number;
 }
 interface State {
-  execState?: ExecState;
+  execState?: ExecState | null;
 }
 
 export default class Canvas extends React.Component<Props, State> {
   constructor(props: Props) {
     super(props);
     this.state = { execState: undefined };
-    slot('draw', (execState: ExecState) => this.setState({ execState }));
+    slot('draw', (execState?: ExecState | null) =>
+      this.setState({ execState })
+    );
   }
 
   render() {

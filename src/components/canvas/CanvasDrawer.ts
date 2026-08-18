@@ -140,8 +140,11 @@ export class CanvasDrawer {
   private canvasArrows: CanvasArrow[] = [];
   private execState: ExecState | null = null;
   private getTypedef: (type: string) => string;
-  constructor(execState?: ExecState) {
-    if (typeof execState === 'undefined') {
+  constructor(execState?: ExecState | null) {
+    // null as well as undefined: the server can report a state it has no
+    // ExecState for, and this runs inside Canvas.render, where a throw
+    // unmounts the whole application.
+    if (execState === undefined || execState === null) {
       this.getTypedef = (type: string) => type;
       return;
     }
