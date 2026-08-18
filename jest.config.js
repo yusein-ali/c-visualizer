@@ -22,6 +22,9 @@ module.exports = {
       "jsx"
     ],
     moduleNameMapper: {
-      "\\.(css|less)$": "identity-obj-proxy"
+      "\\.(css|less)$": "identity-obj-proxy",
+      // hashids' "main" is its ESM build, which Jest cannot parse. webpack
+      // picks the browser/import build on its own; only Jest needs the CJS one.
+      "^hashids$": "hashids/cjs"
     },
 }
