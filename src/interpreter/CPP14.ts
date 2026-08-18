@@ -2,7 +2,9 @@ import { Interpreter } from 'unicoen.ts/dist/interpreter/Interpreter';
 import { CPP14Mapper } from 'unicoen.ts/dist/interpreter/CPP14/CPP14Mapper';
 import { SyntaxErrorData } from 'unicoen.ts/dist/interpreter/mapper/SyntaxErrorData';
 import { PlivetCPP14Engine } from './CPP14Engine';
+import { Construct } from './Construct';
 import { Expansion } from './Expansion';
+import { outline } from './outline';
 import { preprocess, preprocessSource } from './preprocess';
 
 /**
@@ -34,6 +36,21 @@ export class PlivetCPP14Interpreter extends Interpreter {
    */
   getExpansions(code: string): Expansion[] {
     return preprocessSource(code).expansions;
+  }
+
+  /**
+   * The statements the parser recognised, for the editor to explain on hover.
+   * Parsed from the preprocessed source, so the positions match what the parser
+   * saw - which is the source the user typed, since the pass keeps line
+   * numbers. Returns nothing rather than throwing while the code is half
+   * written: this runs on every edit.
+   */
+  getConstructs(code: string): Construct[] {
+    try {
+      return outline(this.mapper.parseToUniTree(preprocess(code)));
+    } catch (e) {
+      return [];
+    }
   }
 
   /**

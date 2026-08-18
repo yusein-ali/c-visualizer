@@ -2,6 +2,7 @@ import { SyntaxErrorData } from 'unicoen.ts/dist/interpreter/mapper/SyntaxErrorD
 import { ExecState } from 'unicoen.ts/dist/interpreter/Engine/ExecState';
 import { signal } from './components/emitter';
 import { Interpreter } from 'unicoen.ts/dist/interpreter/Interpreter';
+import { Construct } from './interpreter/Construct';
 import { Expansion } from './interpreter/Expansion';
 
 export type CONTROL_EVENT =
@@ -40,21 +41,25 @@ export class Response {
     public files: Map<string, ArrayBuffer>,
     public execState?: ExecState,
     /** Preprocessor replacements, for the editor to mark. Syntax checks only. */
-    public expansions?: Expansion[]
+    public expansions?: Expansion[],
+    /** Parsed statements, for the editor to explain. Syntax checks only. */
+    public constructs?: Construct[]
   ) {}
 }
 
-/** Implemented by interpreters that preprocess their source. */
+/** Implemented by interpreters that can describe their source. */
 interface ExpansionSource {
   getExpansions(code: string): Expansion[];
+  getConstructs(code: string): Construct[];
 }
 
 function reportsExpansions(
   interpreter: Interpreter
 ): interpreter is Interpreter & ExpansionSource {
+  const source = (interpreter as unknown) as ExpansionSource;
   return (
-    typeof ((interpreter as unknown) as ExpansionSource).getExpansions ===
-    'function'
+    typeof source.getExpansions === 'function' &&
+    typeof source.getConstructs === 'function'
   );
 }
 
@@ -405,6 +410,9 @@ class Server {
       errors,
       expansions: reportsExpansions(interpreter)
         ? interpreter.getExpansions(code)
+        : [],
+      constructs: reportsExpansions(interpreter)
+        ? interpreter.getConstructs(code)
         : [],
       sourcecode: code,
       execState: undefined,

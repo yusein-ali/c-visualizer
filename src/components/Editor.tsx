@@ -30,6 +30,9 @@ import { ExecState } from 'unicoen.ts/dist/interpreter/Engine/ExecState';
 import { LangProps, ProgLangProps, Theme } from './Props';
 import { SyntaxErrorData } from 'unicoen.ts/dist/interpreter/mapper/SyntaxErrorData';
 import { Expansion } from '../interpreter/Expansion';
+import { Construct } from '../interpreter/Construct';
+import { libraryHelp } from './libraryHelp';
+import { Variable } from 'unicoen.ts/dist/interpreter/Engine/Variable';
 
 type Props = LangProps & ProgLangProps;
 interface State {
@@ -68,6 +71,8 @@ export default class Editor extends React.Component<Props, State> {
   private noAlert: boolean = false;
   private highlightIds: number[] = [];
   private expansions: Expansion[] = [];
+  private constructs: Construct[] = [];
+  private execState?: ExecState;
   private expansionMarkerIds: number[] = [];
   private tooltip: HTMLDivElement | null = null;
   constructor(props: Props) {
@@ -187,11 +192,12 @@ export default class Editor extends React.Component<Props, State> {
       server
         .send(request)
         .then((response: Response) => {
-          const { errors, expansions } = response;
+          const { errors, expansions, constructs } = response;
           this.setSyntaxError(errors);
           this.setExpansions(
             typeof expansions === 'undefined' ? [] : expansions
           );
+          this.constructs = typeof constructs === 'undefined' ? [] : constructs;
         })
         .catch((e) => {
           console.log(e);
@@ -233,6 +239,9 @@ export default class Editor extends React.Component<Props, State> {
         files,
       } = response;
       this.isDebugging = debugState !== 'Stop';
+      // Kept for the hover tooltips: the values of the variables as they are
+      // right now, which is what a reader wants while stepping.
+      this.execState = debugState === 'Stop' ? undefined : execState;
       this.sentSourcecode = sourcecode;
       if (debugState === 'Executing') {
         return;
@@ -340,20 +349,187 @@ export default class Editor extends React.Component<Props, State> {
       event.clientX,
       event.clientY
     ) as unknown) as AceAjax.Position;
-    const expansion = this.expansionAt(position.row, position.column);
-    if (expansion === null) {
+    const text = this.hoverText(editor, position);
+    if (text === null) {
       this.hideTooltip();
       return;
     }
-    this.tooltip.textContent = this.tooltipText(expansion);
+    this.tooltip.textContent = text;
     this.tooltip.style.display = 'block';
     const bounds = editor.container.getBoundingClientRect();
     this.tooltip.style.left = `${event.clientX - bounds.left + 12}px`;
     this.tooltip.style.top = `${event.clientY - bounds.top + 18}px`;
   }
 
+  /**
+   * What to say about the position under the cursor, most specific first: the
+   * value a variable holds right now, then what the preprocessor did there,
+   * then the library function being called, then the construct the parser saw.
+   */
+  private hoverText(
+    editor: AceAjax.Editor,
+    position: AceAjax.Position
+  ): string | null {
+    const session: AceAjax.IEditSession = editor.getSession();
+    const wordRange = session.getWordRange(position.row, position.column);
+    const word = session.getTextRange(wordRange).trim();
+
+    const variable = this.variableNamed(word);
+    if (variable !== null) {
+      return this.variableText(variable);
+    }
+
+    const expansion = this.expansionAt(position.row, position.column);
+    if (expansion !== null) {
+      return this.expansionText(expansion);
+    }
+
+    const help = libraryHelp(word);
+    if (help !== null) {
+      const lang = this.props.lang;
+      return `${help.signature}\n${lang === 'ja' ? help.ja : help.en}`;
+    }
+
+    const construct = this.constructAt(position.row + 1, position.column);
+    if (construct !== null) {
+      const name = translate(
+        this.props.lang,
+        `construct${construct.kind
+          .charAt(0)
+          .toUpperCase()}${construct.kind.slice(1)}`
+      );
+      return construct.detail === '' ? name : `${name} — ${construct.detail}`;
+    }
+    return null;
+  }
+
+  /** The variable of that name in the innermost frame that has one. */
+  private variableNamed(name: string): Variable | null {
+    if (typeof this.execState === 'undefined' || name === '') {
+      return null;
+    }
+    const stacks = this.execState.getStacks();
+    for (let i = stacks.length - 1; 0 <= i; i -= 1) {
+      for (const variable of stacks[i].getVariables()) {
+        // A bare word never refers to a struct member: those are recorded
+        // under the member name with the struct as their parent.
+        if (
+          variable.getName() === name &&
+          typeof variable.parentName === 'undefined'
+        ) {
+          return variable;
+        }
+      }
+    }
+    return null;
+  }
+
+  private variableText(variable: Variable): string {
+    const lang = this.props.lang;
+    const value = this.formatValue(variable.getValue(), variable.type);
+    const target = this.pointerTarget(variable);
+    return (
+      `${variable.name} : ${variable.type} = ${value}${target}\n` +
+      `${translate(lang, 'atAddress')} ${variable.address}`
+    );
+  }
+
+  /** For a pointer, the variable it points at - the arrow the canvas draws. */
+  private pointerTarget(variable: Variable): string {
+    const value = variable.getValue();
+    if (
+      typeof this.execState === 'undefined' ||
+      variable.type.indexOf('*') === -1 ||
+      typeof value !== 'number'
+    ) {
+      return '';
+    }
+    for (const stack of this.execState.getStacks()) {
+      const found = this.variableAt(stack.getVariables(), value);
+      if (found !== null) {
+        return ` → ${found.getName()} = ${this.formatValue(
+          found.getValue(),
+          found.type
+        )}`;
+      }
+    }
+    return '';
+  }
+
+  /**
+   * The variable living at an address. Array elements are Variables held in
+   * their array's value rather than in the frame, so a pointer into an array -
+   * the common case the canvas draws an arrow for - is only found by looking
+   * inside.
+   */
+  private variableAt(variables: Variable[], address: number): Variable | null {
+    for (const variable of variables) {
+      if (variable.address === address) {
+        return variable;
+      }
+      const value = variable.getValue();
+      if (Array.isArray(value)) {
+        const elements = value.filter(
+          (element: any) =>
+            element !== null &&
+            typeof element === 'object' &&
+            typeof element.getValue === 'function'
+        );
+        const found = this.variableAt(elements, address);
+        if (found !== null) {
+          return found;
+        }
+      }
+    }
+    return null;
+  }
+
+  private formatValue(value: any, type: string): string {
+    if (value === null || typeof value === 'undefined') {
+      return '?';
+    }
+    if (Array.isArray(value)) {
+      // Array elements are Variables, not raw values.
+      const shown = value
+        .slice(0, 8)
+        .map((element: any) =>
+          element !== null &&
+          typeof element === 'object' &&
+          typeof element.getValue === 'function'
+            ? this.formatValue(element.getValue(), element.type)
+            : this.formatValue(element, '')
+        );
+      return `[${shown.join(', ')}${value.length > 8 ? ', …' : ''}]`;
+    }
+    if (typeof value === 'number' && type.indexOf('char') !== -1) {
+      return `'${String.fromCharCode(value)}' (${value})`;
+    }
+    return String(value);
+  }
+
+  /** The smallest construct whose range covers the position. */
+  private constructAt(line: number, column: number): Construct | null {
+    let found: Construct | null = null;
+    const size = (c: Construct) =>
+      (c.endLine - c.line) * 1000 + (c.endColumn - c.column);
+    for (const construct of this.constructs) {
+      const afterStart =
+        construct.line < line ||
+        (construct.line === line && construct.column <= column);
+      const beforeEnd =
+        line < construct.endLine ||
+        (line === construct.endLine && column <= construct.endColumn);
+      if (afterStart && beforeEnd) {
+        if (found === null || size(construct) < size(found)) {
+          found = construct;
+        }
+      }
+    }
+    return found;
+  }
+
   /** One line of what happened, and one of why, in the interface language. */
-  private tooltipText(expansion: Expansion): string {
+  private expansionText(expansion: Expansion): string {
     const lang = this.props.lang;
     if (expansion.kind === 'excluded') {
       return `${expansion.name}: ${translate(lang, 'excludedLine')}`;
