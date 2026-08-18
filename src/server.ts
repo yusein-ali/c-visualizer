@@ -241,9 +241,25 @@ class Server {
         throw new Error('engine is not found');
       }
       if (this.interpreter.getIsWaitingForStdin()) {
-        if (stdinText !== undefined) {
-          this.interpreter.stdin(stdinText);
+        if (stdinText === undefined) {
+          // The program is blocked in scanf, which is a generator that yielded
+          // with the waiting flag set. Resuming it now consumes the read with
+          // an empty string and clears the flag, so the scanf is silently gone
+          // and the variable keeps its old value. Stepping has to be a no-op
+          // until the console submits a line.
+          --this.count;
+          const waiting: Response = {
+            sourcecode,
+            output: this.outputsHistory[this.count] ?? '',
+            execState: this.stateHistory[this.count],
+            debugState: 'stdin',
+            step: this.count,
+            errors: [],
+            files: this.files,
+          };
+          return waiting;
         }
+        this.interpreter.stdin(stdinText);
         //  console.log(`stdin:${stdinText}`);
       }
       const state: ExecState | null = this.interpreter.stepExecute();
