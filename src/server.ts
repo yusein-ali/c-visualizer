@@ -56,9 +56,10 @@ class Server {
   // `Start` has armed a session.
   private async createInterpreter(progLang?: string): Promise<Interpreter> {
     if (progLang === 'c_cpp') {
+      // PLIVET's own subclass, for the preprocessor unicoen.ts does not have.
       // prettier-ignore
-      const module = await import(/* webpackChunkName: "CPP14" */ 'unicoen.ts/dist/interpreter/CPP14/CPP14Interpreter');
-      return new module.CPP14Interpreter();
+      const module = await import(/* webpackChunkName: "CPP14" */ './interpreter/CPP14');
+      return new module.PlivetCPP14Interpreter();
     } else if (progLang === 'java') {
       // prettier-ignore
       const module = await import(/* webpackChunkName: "Java8" */ 'unicoen.ts/dist/interpreter/Java8/Java8Interpreter');
