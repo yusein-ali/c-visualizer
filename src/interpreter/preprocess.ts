@@ -26,9 +26,13 @@
  * continuation, and __LINE__. Expansion skips string literals, character
  * literals and comments.
  *
- * Not supported, and left as plain text: stringification (#x), token pasting
- * (a##b), __VA_ARGS__, and #include - the engine provides printf, malloc, sqrt
- * and friends regardless of which headers are named.
+ * Stringification (#x) and token pasting (a##b) follow the C rule that their
+ * operands are the raw argument text, before expansion; every other parameter
+ * is substituted with the expanded argument.
+ *
+ * Not supported, and left as plain text: __VA_ARGS__, and #include - the
+ * engine provides printf, malloc, sqrt and friends regardless of which headers
+ * are named.
  */
 
 interface Macro {
@@ -282,6 +286,7 @@ class Preprocessor {
     const substituted = substituteParams(
       macro.body,
       macro.params,
+      args.values,
       expandedArgs
     );
     return {
@@ -410,12 +415,41 @@ function readArguments(
   return null;
 }
 
-/** Replaces whole-word parameter names in a macro body. */
+/**
+ * Replaces parameter names in a macro body, and applies the two operators that
+ * exist only inside one: `#x` becomes the argument as a string literal, and
+ * `a##b` pastes its operands together. Both take the raw argument text, as C
+ * requires; every other parameter takes the expanded one.
+ */
 function substituteParams(
   body: string,
   params: string[],
-  args: string[]
+  rawArgs: string[],
+  expandedArgs: string[]
 ): string {
+  const argument = (name: string, raw: boolean): string | null => {
+    const index = params.indexOf(name);
+    if (index === -1) {
+      return null;
+    }
+    return raw ? rawArgs[index] : expandedArgs[index];
+  };
+  const readIdentifier = (text: string, start: number): number => {
+    let end = start + 1;
+    while (end < text.length && IDENT_CHAR.test(text[end])) {
+      end += 1;
+    }
+    return end;
+  };
+  /** True when the next thing after `pos`, ignoring spaces, is a paste. */
+  const pasteFollows = (pos: number): boolean => {
+    let i = pos;
+    while (i < body.length && /\s/.test(body[i])) {
+      i += 1;
+    }
+    return body.substr(i, 2) === '##';
+  };
+
   let out = '';
   let i = 0;
   while (i < body.length) {
@@ -426,14 +460,47 @@ function substituteParams(
       i = end;
       continue;
     }
-    if (IDENT_START.test(char)) {
-      let end = i + 1;
-      while (end < body.length && IDENT_CHAR.test(body[end])) {
-        end += 1;
+    if (char === '#' && body[i + 1] === '#') {
+      // Paste: drop the operator and the space around it, and take the right
+      // operand unexpanded.
+      out = out.replace(/\s+$/, '');
+      i += 2;
+      while (i < body.length && /\s/.test(body[i])) {
+        i += 1;
       }
+      if (i < body.length && IDENT_START.test(body[i])) {
+        const end = readIdentifier(body, i);
+        const name = body.slice(i, end);
+        const raw = argument(name, true);
+        out += raw === null ? name : raw;
+        i = end;
+      }
+      continue;
+    }
+    if (char === '#') {
+      let start = i + 1;
+      while (start < body.length && /\s/.test(body[start])) {
+        start += 1;
+      }
+      if (start < body.length && IDENT_START.test(body[start])) {
+        const end = readIdentifier(body, start);
+        const raw = argument(body.slice(start, end), true);
+        if (raw !== null) {
+          out += stringify(raw);
+          i = end;
+          continue;
+        }
+      }
+      out += char;
+      i += 1;
+      continue;
+    }
+    if (IDENT_START.test(char)) {
+      const end = readIdentifier(body, i);
       const name = body.slice(i, end);
-      const index = params.indexOf(name);
-      out += index === -1 ? name : args[index];
+      // The left operand of a paste is not expanded either.
+      const value = argument(name, pasteFollows(end));
+      out += value === null ? name : value;
       i = end;
       continue;
     }
@@ -441,6 +508,13 @@ function substituteParams(
     i += 1;
   }
   return out;
+}
+
+/** An argument as a C string literal: whitespace squeezed, quotes escaped. */
+function stringify(text: string): string {
+  const squeezed = text.replace(/\s+/g, ' ').trim();
+  const escaped = squeezed.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  return '"' + escaped + '"';
 }
 
 type Token = string;

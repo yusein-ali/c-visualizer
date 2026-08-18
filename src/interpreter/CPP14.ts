@@ -1,17 +1,27 @@
-import { CPP14Interpreter } from 'unicoen.ts/dist/interpreter/CPP14/CPP14Interpreter';
+import { Interpreter } from 'unicoen.ts/dist/interpreter/Interpreter';
+import { CPP14Mapper } from 'unicoen.ts/dist/interpreter/CPP14/CPP14Mapper';
 import { SyntaxErrorData } from 'unicoen.ts/dist/interpreter/mapper/SyntaxErrorData';
+import { PlivetCPP14Engine } from './CPP14Engine';
 import { preprocess } from './preprocess';
 
 /**
- * The stock CPP14Interpreter's `preProcess` is a substring replace that hangs
- * on a valueless define and corrupts string literals and identifiers; see
- * `preprocess.ts`. Overriding the method is enough - `Interpreter` calls it on
- * every `startStepExecution`.
+ * PLIVET's C interpreter: the stock mapper and engine behaviour, with the
+ * preprocessor `unicoen.ts` does not have (`preprocess.ts`) and a `printf` that
+ * can format a string literal (`CPP14Engine.ts`).
+ *
+ * It extends `Interpreter` rather than `CPP14Interpreter` because the engine is
+ * `protected readonly` and built in that subclass's constructor - passing our
+ * own engine in is cleaner than reassigning the field afterwards. The stock
+ * `preProcess` is not inherited and never runs.
  *
  * This module is what `server.ts` imports dynamically, so the interpreter and
  * its parser stay in their own chunk.
  */
-export class PlivetCPP14Interpreter extends CPP14Interpreter {
+export class PlivetCPP14Interpreter extends Interpreter {
+  constructor() {
+    super(new PlivetCPP14Engine(), new CPP14Mapper());
+  }
+
   preProcess(code: string): string {
     return preprocess(code);
   }

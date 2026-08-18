@@ -89,6 +89,52 @@ describe('function-like macros', () => {
   });
 });
 
+describe('stringification and token pasting', () => {
+  it('turns #param into a string literal of the raw argument', () => {
+    expect(preprocess('#define STR(x) #x\nputs(STR(abc));').trim()).toBe(
+      'puts("abc");'
+    );
+  });
+
+  it('squeezes whitespace in the stringified argument', () => {
+    expect(preprocess('#define STR(x) #x\nputs(STR( a   b ));').trim()).toBe(
+      'puts("a b");'
+    );
+  });
+
+  it('stringifies the argument unexpanded, as C does', () => {
+    const out = preprocess('#define N 7\n#define STR(x) #x\nputs(STR(N));');
+    expect(out.trim()).toBe('puts("N");');
+  });
+
+  it('escapes quotes and backslashes', () => {
+    const out = preprocess('#define STR(x) #x\nputs(STR("a\\n"));');
+    expect(out.trim()).toBe('puts("\\"a\\\\n\\"");');
+  });
+
+  it('pastes two operands into one token', () => {
+    expect(preprocess('#define CAT(a,b) a##b\nint y = CAT(x,z);').trim()).toBe(
+      'int y = xz;'
+    );
+  });
+
+  it('pastes without expanding either operand first', () => {
+    const out = preprocess('#define N 7\n#define CAT(a,b) a##b\nint y = CAT(N,N);');
+    expect(out.trim()).toBe('int y = NN;');
+  });
+
+  it('expands the result of a paste when it names a macro', () => {
+    const out = preprocess('#define xy 4\n#define CAT(a,b) a##b\nint y = CAT(x,y);');
+    expect(out.trim()).toBe('int y = 4;');
+  });
+
+  it('leaves a # that is not followed by a parameter alone', () => {
+    expect(preprocess('#define HASH(x) # y\nint a = HASH(1);').trim()).toBe(
+      'int a = # y;'
+    );
+  });
+});
+
 describe('conditional directives', () => {
   it('keeps the taken branch and drops the other one', () => {
     const out = lines('#define F 1\n#ifdef F\nint a = 1;\n#else\nint b = 2;\n#endif');
