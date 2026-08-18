@@ -117,9 +117,16 @@ Verified against the current tree; re-check if the code moves.
   dynamic import, eight `progLang` call sites in `src/server.ts`, one emitter
   event, one selector, and two sample programs per locale. Removing it is
   deletion, not refactoring.
-- Webpack 4 fails on current Node because it hashes with md4, which OpenSSL 3
-  removed. `--openssl-legacy-provider` restores it and is the escape hatch if a
-  working build is needed before Phase 3 lands.
+- Webpack 4 does not run on Node 24, and **there is no escape hatch**. The
+  md4/OpenSSL 3 hashing failure that `--openssl-legacy-provider` works around is
+  a Node 17-20 era problem this environment never reaches: the build now dies
+  earlier, in css-loader 5, which requires `postcss/package.json` — a subpath the
+  package's `exports` map does not expose. Every CSS import fails. Because
+  `webpack.config.dev.js` is `merge(baseConfig, …)`, the dev server fails
+  identically, so `npm start` is dead too. Measured on Node 24.15.0; see
+  `baseline/results/RESULTS.md`. Consequences: no runnable local build or dev
+  server until Phase 3, and no phase before it can have an exit criterion that
+  inspects build output. `npm test` is unaffected — Jest never touches webpack.
 - `unicoen.ts` is frozen at 0.5.0, last published in 2022. It is the interpreter
   and it will not be upgraded. Its `scanf` dependency is why the build needs an
   `fs` fallback.

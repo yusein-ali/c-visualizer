@@ -27,6 +27,38 @@ Carry forward for Phase 1's exit criterion: `Java8.bundle.js` 473,674 B and
 `Python3.bundle.js` 183,677 B must disappear, and `CPP14-Java8-Python3.bundle.js`
 (417,882 B) should fold back into `CPP14`. Total today: 4,320,799 B.
 
+## Toolchain reality on Node 24
+
+The plan's "Facts this plan relies on" says webpack 4 fails on current Node
+because of md4/OpenSSL 3, with `--openssl-legacy-provider` as the escape hatch.
+**That is not the failure on Node 24.24.15 (this machine).** With the flag set,
+the build still dies earlier, in css-loader:
+
+```
+ERROR in ./src/css/theme.css (./node_modules/css-loader/dist/cjs.js!./src/css/theme.css)
+Error [ERR_PACKAGE_PATH_NOT_EXPORTED]: Package subpath './package.json' is not
+defined by "exports" in node_modules/postcss/package.json
+```
+
+css-loader 5.0.2 requires `postcss/package.json` (postcss 8.2.8) directly, and
+modern Node enforces the package `exports` map. Every CSS import fails —
+Bootstrap, `theme.css`, `footer.css`, `editor.css`, `rc-slider`. No flag helps.
+
+`webpack.config.dev.js` is `merge(baseConfig, …)`, so the dev server inherits the
+same loader chain and `yarn start` fails identically.
+
+Consequences:
+
+- There is **no runnable local build or dev server** until Phase 3 replaces the
+  loader stack. The only working artifact is the deployed `gh-pages` bundle,
+  which is why Phase 0 was measured against it.
+- `npm test` is unaffected (Jest never touches webpack) and passes on Node 24.
+- Any phase whose exit criterion inspects build output cannot be verified before
+  Phase 3. That includes Phase 1's "the Java8 and Python3 chunks no longer
+  appear in the build output".
+- The plan's md4 note should be corrected; it describes a Node 17-20 era failure
+  that this environment never reaches.
+
 ## Parity checklist
 
 `ok` pass, `nok` fail, `ok*` works with console errors or visible defects.
