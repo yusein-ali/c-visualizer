@@ -1,99 +1,110 @@
-const path = require('path');                             // 絶対パスに変換するために
+const path = require('path');
 const webpack = require('webpack');
-const htmlWebpackPlugin = require('html-webpack-plugin'); // index.htmlをビルドチェインの中で作っちゃう
+const HtmlWebpackPlugin = require('html-webpack-plugin');
 const ForkTsCheckerWebpackPlugin = require('fork-ts-checker-webpack-plugin');
-const HardSourceWebpackPlugin = require('hard-source-webpack-plugin');
-const workers = ForkTsCheckerWebpackPlugin.ALL_CPUS + 1;
+
 const isProduction = process.env.NODE_ENV === 'prod';
 const tsConfigFile = `tsconfig.${isProduction ? 'prod' : 'dev'}.json`;
+
 module.exports = {
-    mode: isProduction ? 'production' : 'development',
-    entry: './src/index.tsx',  // エントリポイントの指定、src下に書いていくので　src/index.tsxにしとく
-    output: {
-        filename: 'js/[name].js',// 仕上がりファイルの置き場
-        chunkFilename: 'js/[name].bundle.js',
-        path: path.resolve(__dirname, 'dist')   // 出力ディレクトリの指定の絶対パス
+  mode: isProduction ? 'production' : 'development',
+  entry: './src/index.tsx',
+  output: {
+    filename: 'js/[name].js',
+    chunkFilename: 'js/[name].bundle.js',
+    path: path.resolve(__dirname, 'dist'),
+    clean: true,
+  },
+  // Keep the interpreter in its own chunk: the dynamic import in
+  // src/server.ts is what keeps the editor interactive while the parser loads.
+  optimization: {
+    chunkIds: 'named',
+    splitChunks: {
+      automaticNameDelimiter: '-',
+      cacheGroups: {
+        defaultVendors: false,
+      },
     },
-    optimization: {
-        namedChunks: true,
-        splitChunks: {
-            automaticNameDelimiter: '-',
-            cacheGroups: {
-                vendors: false
-            }
-        }
+  },
+  resolve: {
+    extensions: ['.tsx', '.ts', '.js', '.json'],
+    fallback: {
+      // unicoen.ts pulls in scanf, which requires fs. There is no server here.
+      fs: false,
+      // webpack 4 polyfilled Node core modules automatically; webpack 5 does
+      // not. antlr4ts (unicoen's parser runtime) needs both for real:
+      // `assert(...)` runs in the parser hot path, and BitSet.js evaluates
+      // `util.inspect.custom` as a computed method key at module load. Stubbing
+      // either to `false` throws on the first parse.
+      assert: require.resolve('assert/'),
+      util: require.resolve('util/'),
+      // scanf's stdin module calls Buffer.alloc(256) at module scope and
+      // process.platform inside its export. webpack 4 injected both globals
+      // automatically; webpack 5 removed them. Without these the CPP14 chunk
+      // throws ReferenceError on load and CPP14Interpreter never gets exported.
+      buffer: require.resolve('buffer/'),
+      process: require.resolve('process/browser'),
     },
-    resolve: {
-        extensions: [ '.tsx', '.ts', '.js','.json' ]    // importの時に、これらの拡張子は解決してもらえる、要するにHoge.tsxをimport Hoge from './Hoge'みたいに書ける
+  },
+  target: ['web', 'es2020'],
+  // Filesystem cache replaces HardSourceWebpackPlugin, which is unmaintained
+  // and never supported webpack 5.
+  cache: {
+    type: 'filesystem',
+    buildDependencies: {
+      config: [__filename],
     },
-    node: {
-        fs: 'empty' // for Module not found: Error: Can't resolve 'fs' in 'node_modules\scanf\lib'
-    },
-    target: 'web',
-    module: {
-        rules: [
-            {
-                test: /\.tsx?$/,
-                exclude: /node_modules/,
-                use: [
-                    {
-                        loader: 'thread-loader',
-                        options: {
-                            workers
-                        }
-                    },
-                    {
-                        loader: 'babel-loader?cacheDirectory'
-                    },
-                    {
-                        loader: 'tslint-loader',
-                        options: {
-                            fix: true,
-                            typeCheck: true, // これがないとtslint-config-airbnbが'no-boolean-literal-compare'エラーを出す。
-                            emitErrors: true, // これ設定しとくとTSLintが出してくれたwarningをエラーとして扱ってくれる、要するに-Wall
-                            tsConfigFile
-                        }
-                    }
-                ]
-            },
-            {
-                test: /\.css$/,
-                use: [
-                    'style-loader',//cssを<link>タグに展開する
-                    'css-loader',//cssをjsにバンドルする
-                ],
-            },
-            {
-                test: /\.(gif|png)$/,
-                loaders: 'url-loader'
-              },
-            {
-                test: /\.(woff|woff2|eot|ttf|svg)$/,
-                loader: 'file-loader?name=./font/[name].[ext]'
-            }
-        ]
-    },
-    plugins: [
-        new htmlWebpackPlugin({
-            template: "src/index.html"    // 同じ階層にあるindex.htmlを元に、デプロイ用のindex.htmlを作って出力ディレクトリに配置してくれる
-        }),
-        new webpack.ProvidePlugin({
-            $: "jquery",
-            jQuery: "jquery"
-        }),
-        new ForkTsCheckerWebpackPlugin({
-            // workers: ForkTsCheckerWebpackPlugin.TWO_CPUS_FREE,
-            useTypescriptIncrementalApi: true,
-            tsconfig: path.resolve(__dirname, tsConfigFile),
-            async: false,
-            checkSyntacticErrors: true,
-            memoryLimit : 4096,
-            compilerOptions: {
-                skipLibCheck: true
-            },
-        }),
-        new HardSourceWebpackPlugin({
-            cacheDirectory: path.resolve(__dirname, 'node_modules/.cache/hard-source/[confighash]')
-        })
-    ]
+  },
+  module: {
+    rules: [
+      {
+        test: /\.tsx?$/,
+        exclude: /node_modules/,
+        use: [{ loader: 'babel-loader', options: { cacheDirectory: true } }],
+      },
+      {
+        // @babel/runtime and other packages ship ESM with extensionless
+        // relative imports; webpack 5 enforces fullySpecified for ESM.
+        test: /\.m?js$/,
+        resolve: { fullySpecified: false },
+      },
+      {
+        test: /\.css$/,
+        use: ['style-loader', 'css-loader'],
+      },
+      {
+        test: /\.(gif|png)$/,
+        type: 'asset',
+      },
+      {
+        test: /\.(woff|woff2|eot|ttf|svg)$/,
+        type: 'asset/resource',
+        generator: {
+          filename: 'font/[name][ext]',
+        },
+      },
+    ],
+  },
+  plugins: [
+    new HtmlWebpackPlugin({
+      template: 'src/index.html',
+    }),
+    new webpack.ProvidePlugin({
+      $: 'jquery',
+      jQuery: 'jquery',
+      // See resolve.fallback above: these are globals in Node, not modules.
+      Buffer: ['buffer', 'Buffer'],
+      process: 'process/browser',
+    }),
+    new ForkTsCheckerWebpackPlugin({
+      async: false,
+      typescript: {
+        configFile: path.resolve(__dirname, tsConfigFile),
+        memoryLimit: 4096,
+        configOverwrite: {
+          compilerOptions: { skipLibCheck: true },
+        },
+      },
+    }),
+  ],
 };

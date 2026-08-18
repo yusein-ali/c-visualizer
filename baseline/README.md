@@ -320,6 +320,73 @@ a comparison.
 
 ---
 
+## Regression protocol — testing a migration phase against this baseline
+
+Run against a **production** build served statically, the same family the Phase 0
+numbers came from:
+
+```bash
+npm run build && python3 -m http.server 8082 --bind 127.0.0.1 --directory dist
+```
+
+### Tier 1 — five minutes, and it covers the risky parts
+
+Load S1 (`programs/s1-pointers.c`), breakpoint on line 23, run.
+
+1. **Stops at step 17**, GLOBAL frame reads `10, 20, 30, 1, 2, 3, 4`, and pointer
+   arrows are drawn. This single check exercises the three changes most likely to
+   break silently in the Phase 3 build: the `hashids` import (arrow keys are
+   hashids-encoded), the `assert`/`util` polyfills (nothing parses without them),
+   and the dynamic interpreter chunk.
+2. **Network tab**: `CPP14.bundle.js` is requested on the first run, not at page
+   load. That is the deferred parser the plan calls the one piece of the old
+   build worth keeping.
+3. **Toolbar icons are glyphs, not boxes** — proves the glyphicon fonts survived
+   the move from file-loader to asset modules.
+4. **Console is clean.**
+
+A pass here means the app is fundamentally intact. A failure names its own cause.
+
+### Tier 2 — screenshot diff
+
+Recapture all eight fixtures at the same viewport (1440 × 900, DPR 2) into a
+scratch directory, then:
+
+```bash
+bash baseline/scripts/compare-screens.sh /path/to/new-screenshots
+```
+
+It reports the fraction of differing pixels per fixture and writes visual diffs
+to `<dir>/diff/`. Interpretation: under 0.5% is antialiasing (confirm the red is
+scattered, not clustered); over 1% means something moved — open the diff.
+
+Remember S0's GLOBAL frame is uninitialized memory and will always differ; judge
+it on structure only.
+
+### Tier 3 — benchmarks
+
+Re-run A and C (`bench-ui.js`, `bench-step.js`) and compare against the recorded
+figures: **271 steps / 1442 ms / 5.32 ms per step** for A, **2.9 ms per step**
+for C. A change beyond noise in either direction wants an explanation — a
+polyfill, a build target, or a redraw path.
+
+### Tier 4 — the checklist rows a build change can actually break
+
+Not all 34. These: 1, 2, 3, 9, 10, 13, 17-20, 22, 24, 24b, 25, 26, 29, 30 —
+loading, breakpoints, syntax diagnostics, the file panel, i18n, both zoom
+controls, folding, arrows, the modal, and resize.
+
+### Tier 5 — toolchain
+
+```bash
+npm test
+rm -rf node_modules && npm ci && npm run build   # clean-cache reproduction
+```
+
+And confirm source maps still bind: set a breakpoint in `src/components/Editor.tsx`,
+run the "PLIVET: attach browser to running server" launch configuration, and check
+it is hit in the `.tsx` file rather than in generated output.
+
 ## Exit criterion
 
 `results/RESULTS.md` is filled in, screenshots are committed, and every failure

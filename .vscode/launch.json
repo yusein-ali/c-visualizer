@@ -17,7 +17,7 @@
         "<node_internals>/**"
       ],
       "serverReadyAction": {
-        "pattern": "Project is running at (https?://\\S+)",
+        "pattern": "Loopback:\\s+(https?://[^,\\s]+)",
         "uriFormat": "%s",
         "action": "debugWithChrome"
       }
@@ -26,12 +26,13 @@
       "name": "PLIVET: attach browser to running server",
       "type": "pwa-chrome",
       "request": "launch",
-      "url": "http://localhost:8080",
+      "url": "http://localhost:8082",
       "webRoot": "${workspaceFolder}",
       "sourceMaps": true,
       "sourceMapPathOverrides": {
+        "webpack://./*": "${workspaceFolder}/*",
         "webpack:///./*": "${workspaceFolder}/*",
-        "webpack:///*": "${workspaceFolder}/*"
+        "webpack://?:*/*": "${workspaceFolder}/*"
       },
       "skipFiles": [
         "<node_internals>/**"
