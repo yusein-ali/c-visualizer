@@ -17,10 +17,10 @@
  * position. In the browser that freezes the tab, so do not paste those probes
  * into PLIVET - run them here.
  *
- * `--plivet` runs the same probes through src/interpreter/preprocess.ts, the
- * pass PLIVET substitutes for the one above, so the two matrices can be
- * compared directly. It leaves no directives behind, which makes the stock pass
- * a no-op, so the interpreter can be driven unchanged.
+ * `--plivet` runs the same probes through PlivetCPP14Interpreter instead - the
+ * class the application actually uses, with its own preprocessor pass and its
+ * own printf - so the two matrices can be compared directly. The TypeScript is
+ * compiled on the fly with babel; no build step is needed.
  *
  * Usage:
  *   node baseline/scripts/probe-preprocessor.js            # every probe, stock
@@ -246,6 +246,21 @@ int main(){ char s[4] = "abc"; printf("%d\\n", (int)strlen(s)); return 0; }`,
 int main(){ printf("%d\\n", (int)sqrt(9.0)); return 0; }`,
   },
   {
+    id: 'P26',
+    title: 'printf("%s") with a string literal, no macros involved',
+    expect: 'abc',
+    code: `#include<stdio.h>
+int main(){ printf("%s\\n", "abc"); return 0; }`,
+  },
+  {
+    id: 'P27',
+    title: 'stringification printed with %s - the reason P13 matters',
+    expect: 'x + y',
+    code: `#include<stdio.h>
+#define SHOW(e) printf("%s\\n", #e)
+int main(){ SHOW(x + y); return 0; }`,
+  },
+  {
     id: 'P25',
     title: 'a define directive named in a COMMENT, with nothing after it',
     expect: 'ok',
@@ -266,21 +281,36 @@ int main(){ printf("ok\\n"); return 0; }`,
 
 const usePlivetPass = process.argv.includes('--plivet');
 
-/** Compiles and loads src/interpreter/preprocess.ts through the project babel. */
-function loadPlivetPreprocess() {
+const tsCache = new Map();
+
+/** Compiles one src/*.ts with babel, resolving its relative imports the same way. */
+function loadTs(file) {
+  if (tsCache.has(file)) {
+    return tsCache.get(file);
+  }
   const babel = require(path.join(__dirname, '..', '..', 'node_modules', '@babel', 'core'));
-  const source = path.join(__dirname, '..', '..', 'src', 'interpreter', 'preprocess.ts');
-  const { code } = babel.transformFileSync(source, {
-    cwd: path.join(__dirname, '..', '..'),
-    filename: source,
-    presets: [[require.resolve('@babel/preset-typescript'), { isTSX: false }]],
+  const { code } = babel.transformFileSync(file, {
+    filename: file,
+    presets: [[require.resolve('@babel/preset-typescript'), {}]],
     plugins: [require.resolve('@babel/plugin-transform-modules-commonjs')],
     babelrc: false,
     configFile: false,
   });
-  const module = { exports: {} };
-  new Function('module', 'exports', 'require', code)(module, module.exports, require);
-  return module.exports.preprocess;
+  const loaded = { exports: {} };
+  tsCache.set(file, loaded.exports);
+  const localRequire = (request) =>
+    request.startsWith('.')
+      ? loadTs(path.resolve(path.dirname(file), request) + '.ts')
+      : require(request);
+  new Function('module', 'exports', 'require', code)(loaded, loaded.exports, localRequire);
+  tsCache.set(file, loaded.exports);
+  return loaded.exports;
+}
+
+/** The interpreter the application itself uses, compiled from src/. */
+function loadPlivetInterpreter() {
+  const entry = path.join(__dirname, '..', '..', 'src', 'interpreter', 'CPP14.ts');
+  return loadTs(entry).PlivetCPP14Interpreter;
 }
 
 function runChild(code) {
@@ -303,30 +333,25 @@ function runChild(code) {
 }
 
 function child() {
-  let code = require('fs').readFileSync(0, 'utf8');
+  const code = require('fs').readFileSync(0, 'utf8');
   const log = console.log;
   console.log = () => {}; // the engine dumps every stack frame it builds
   const out = (payload) => log(JSON.stringify(payload));
   let interpreter;
   try {
-    const { CPP14Interpreter } = require(path.join(
-      __dirname, '..', '..', 'node_modules', 'unicoen.ts',
-      'dist', 'interpreter', 'CPP14', 'CPP14Interpreter'
-    ));
-    interpreter = new CPP14Interpreter();
+    if (process.argv.includes('--plivet')) {
+      const PlivetInterpreter = loadPlivetInterpreter();
+      interpreter = new PlivetInterpreter();
+    } else {
+      const { CPP14Interpreter } = require(path.join(
+        __dirname, '..', '..', 'node_modules', 'unicoen.ts',
+        'dist', 'interpreter', 'CPP14', 'CPP14Interpreter'
+      ));
+      interpreter = new CPP14Interpreter();
+    }
     interpreter.setFileList(new Map());
   } catch (e) {
     return out({ verdict: 'CRASH', detail: 'cannot load interpreter: ' + e.message });
-  }
-  if (process.argv.includes('--plivet')) {
-    try {
-      code = loadPlivetPreprocess()(code);
-      // PlivetCPP14Interpreter overrides preProcess, it does not run after it.
-      // Without this the stock scan still sees the source and can still hang.
-      interpreter.preProcess = (text) => text;
-    } catch (e) {
-      return out({ verdict: 'CRASH', detail: 'preprocess pass failed: ' + e.message });
-    }
   }
   let syntaxErrors = [];
   try {
