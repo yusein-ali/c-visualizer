@@ -27,6 +27,11 @@
  *   node baseline/scripts/probe-preprocessor.js --plivet   # every probe, fixed
  *   node baseline/scripts/probe-preprocessor.js --json     # machine readable
  *   node baseline/scripts/probe-preprocessor.js --only P05 # one probe
+ *   node baseline/scripts/probe-preprocessor.js --map f.c   # what it replaced
+ *
+ * With --plivet it exits non-zero if an in-scope probe fails, so it can be run
+ * as a check. Probes marked `scope: 'out'` are features deliberately not
+ * implemented; they are reported as SKIP and never fail the run.
  *
  * Requires node_modules (unicoen.ts, @babel/core). No browser, no build.
  */
@@ -193,7 +198,7 @@ int main(){ LOG("%d\\n", 3); return 0; }`,
   {
     id: 'P17',
     title: 'predefined __LINE__',
-    expect: 'any number',
+    expect: '2',
     code: `#include<stdio.h>
 int main(){ printf("%d\\n", __LINE__); return 0; }`,
   },
@@ -244,6 +249,23 @@ int main(){ char s[4] = "abc"; printf("%d\\n", (int)strlen(s)); return 0; }`,
     code: `#include<stdio.h>
 #include<math.h>
 int main(){ printf("%d\\n", (int)sqrt(9.0)); return 0; }`,
+  },
+  {
+    id: 'P16b',
+    title: 'variadic macro called with no variable arguments (`, ##__VA_ARGS__`)',
+    expect: 'done',
+    code: `#include<stdio.h>
+#define LOG(fmt, ...) printf(fmt, ##__VA_ARGS__)
+int main(){ LOG("done\\n"); return 0; }`,
+  },
+  {
+    id: 'P28',
+    title: '__VA_OPT__ - C++20 and C23, out of scope for a CPP14 parser',
+    scope: 'out',
+    expect: 'done',
+    code: `#include<stdio.h>
+#define LOG(fmt, ...) printf(fmt __VA_OPT__(,) __VA_ARGS__)
+int main(){ LOG("done\\n"); return 0; }`,
   },
   {
     id: 'P26',
@@ -380,32 +402,93 @@ function child() {
   }
 }
 
+/** A probe passes when the program ran and printed exactly what was expected. */
+function judge(probe, result) {
+  const ok =
+    result.verdict === 'RAN' && (result.stdout || '').trim() === probe.expect;
+  if (ok) {
+    return 'pass';
+  }
+  return probe.scope === 'out' ? 'out of scope' : 'fail';
+}
+
+/** Prints what the preprocessor replaced in a file, the data behind the editor's tooltips. */
+function printExpansions(file) {
+  const source = require('fs').readFileSync(file, 'utf8');
+  const { preprocessSource } = loadTs(
+    path.join(__dirname, '..', '..', 'src', 'interpreter', 'preprocess.ts')
+  );
+  const { expansions } = preprocessSource(source);
+  for (const e of expansions) {
+    const where = `${String(e.line).padStart(4)}:${String(e.column).padStart(3)}`;
+    const detail =
+      e.kind === 'macro'
+        ? `${e.name} -> ${e.text}` +
+          (e.definedAt === undefined ? '' : `   (defined line ${e.definedAt})`)
+        : `${e.name} excluded ${e.length} characters`;
+    console.log(`${where}  ${e.kind.padEnd(8)} ${detail}`);
+  }
+  console.log(`\n${expansions.length} replacements`);
+}
+
 function main() {
-  if (process.argv.includes('--child')) return child();
-  const only = (() => {
-    const i = process.argv.indexOf('--only');
+  if (process.argv.includes('--child')) {
+    return child();
+  }
+  const argumentAfter = (flag) => {
+    const i = process.argv.indexOf(flag);
     return i === -1 ? null : process.argv[i + 1];
-  })();
+  };
+  const map = argumentAfter('--map');
+  if (map !== null) {
+    return printExpansions(map);
+  }
+
+  const only = argumentAfter('--only');
   const wanted = only ? probes.filter((p) => p.id === only) : probes;
-  const results = wanted.map((p) => {
-    const r = runChild(p.code);
-    return { id: p.id, title: p.title, expect: p.expect, ...r };
+  const results = wanted.map((probe) => {
+    const result = runChild(probe.code);
+    return {
+      id: probe.id,
+      title: probe.title,
+      expect: probe.expect,
+      scope: probe.scope || 'in',
+      status: judge(probe, result),
+      ...result,
+    };
   });
+
   if (process.argv.includes('--json')) {
     console.log(JSON.stringify(results, null, 2));
-    return;
-  }
-  for (const r of results) {
-    const got =
-      r.verdict === 'RAN'
-        ? JSON.stringify(r.stdout)
-        : `${r.verdict}${r.detail ? ' - ' + r.detail : ''}`;
-    console.log(`${r.id}  ${r.title}`);
-    console.log(`     expect ${JSON.stringify(r.expect)}  got ${got}`);
-    if (r.syntaxErrors && r.syntaxErrors.length) {
-      console.log(`     syntax: ${r.syntaxErrors.slice(0, 2).join(' | ')}`);
+  } else {
+    const label = { pass: 'PASS', fail: 'FAIL', 'out of scope': 'SKIP' };
+    for (const r of results) {
+      const got =
+        r.verdict === 'RAN'
+          ? JSON.stringify(r.stdout)
+          : `${r.verdict}${r.detail ? ' - ' + r.detail : ''}`;
+      console.log(`${label[r.status]}  ${r.id.padEnd(5)} ${r.title}`);
+      if (r.status === 'fail') {
+        console.log(`             expect ${JSON.stringify(r.expect)}  got ${got}`);
+        if (r.syntaxErrors && r.syntaxErrors.length) {
+          // One line is enough to tell a parse failure from a wrong result.
+          console.log(`             syntax: ${r.syntaxErrors[0].split(' expecting ')[0]}`);
+        }
+      }
     }
+    const passed = results.filter((r) => r.status === 'pass').length;
+    const skipped = results.filter((r) => r.status === 'out of scope').length;
+    const pass = usePlivetPass ? 'PLIVET' : 'stock unicoen.ts';
+    console.log(
+      `\n${passed}/${results.length - skipped} passing with the ${pass} pass` +
+        (skipped ? `, ${skipped} out of scope` : '')
+    );
   }
+
+  // Only an in-scope failure is a real one; with the stock pass most of them
+  // are, which is the point of keeping that mode.
+  const failed = results.filter((r) => r.status === 'fail').length;
+  process.exitCode = usePlivetPass && failed > 0 ? 1 : 0;
 }
 
 main();
