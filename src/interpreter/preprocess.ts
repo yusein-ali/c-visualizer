@@ -33,8 +33,11 @@
  * Variadic macros are supported, including the GNU `, ##__VA_ARGS__` idiom
  * that removes the comma when no variable arguments were passed.
  *
- * Not supported: __VA_OPT__, and #include - the engine provides printf, malloc,
- * sqrt and friends regardless of which headers are named.
+ * Out of scope: __VA_OPT__, which is C++20 and C23 - the grammar behind this is
+ * unicoen.ts's CPP14 parser, and the GNU comma idiom above is what the C++14
+ * era offers for the same trailing-comma problem. #include is dropped: the
+ * engine provides printf, malloc, sqrt and friends regardless of which headers
+ * are named.
  */
 
 interface Macro {

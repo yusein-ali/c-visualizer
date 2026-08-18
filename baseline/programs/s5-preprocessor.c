@@ -13,8 +13,10 @@
  * character literals and comments, and directives are removed without moving
  * any line - the highlight and breakpoints stay aligned.
  *
- * Not supported: __VA_OPT__. #include lines are dropped: printf, malloc and
- * sqrt come from the engine whether or not a header is named.
+ * Out of scope: __VA_OPT__, which is C++20 and C23 - this is a C++14 parser,
+ * and `, ##__VA_ARGS__` is the C++14-era answer to the same problem.
+ * #include lines are dropped: printf, malloc and sqrt come from the engine
+ * whether or not a header is named.
  *
  * Run it, or step through it. Expected output is noted per line.
  */
