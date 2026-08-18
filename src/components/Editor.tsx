@@ -30,7 +30,7 @@ import { ExecState } from 'unicoen.ts/dist/interpreter/Engine/ExecState';
 import { LangProps, ProgLangProps, Theme } from './Props';
 import { SyntaxErrorData } from 'unicoen.ts/dist/interpreter/mapper/SyntaxErrorData';
 import { Expansion } from '../interpreter/Expansion';
-import { Construct } from '../interpreter/Construct';
+import { Construct, constructAt } from '../interpreter/Construct';
 import { libraryHelp } from './libraryHelp';
 import { Variable } from 'unicoen.ts/dist/interpreter/Engine/Variable';
 
@@ -390,7 +390,11 @@ export default class Editor extends React.Component<Props, State> {
       return `${help.signature}\n${lang === 'ja' ? help.ja : help.en}`;
     }
 
-    const construct = this.constructAt(position.row + 1, position.column);
+    const construct = constructAt(
+      this.constructs,
+      position.row + 1,
+      position.column
+    );
     if (construct !== null) {
       const name = translate(
         this.props.lang,
@@ -505,27 +509,6 @@ export default class Editor extends React.Component<Props, State> {
       return `'${String.fromCharCode(value)}' (${value})`;
     }
     return String(value);
-  }
-
-  /** The smallest construct whose range covers the position. */
-  private constructAt(line: number, column: number): Construct | null {
-    let found: Construct | null = null;
-    const size = (c: Construct) =>
-      (c.endLine - c.line) * 1000 + (c.endColumn - c.column);
-    for (const construct of this.constructs) {
-      const afterStart =
-        construct.line < line ||
-        (construct.line === line && construct.column <= column);
-      const beforeEnd =
-        line < construct.endLine ||
-        (line === construct.endLine && column <= construct.endColumn);
-      if (afterStart && beforeEnd) {
-        if (found === null || size(construct) < size(found)) {
-          found = construct;
-        }
-      }
-    }
-    return found;
   }
 
   /** One line of what happened, and one of why, in the interface language. */

@@ -756,7 +756,7 @@ function stringify(text: string): string {
 type Token = string;
 
 /** Tokenises and evaluates a C constant expression (integers only). */
-function evaluateConstantExpression(expression: string): number {
+export function evaluateConstantExpression(expression: string): number {
   const tokens: Token[] = [];
   let i = 0;
   while (i < expression.length) {

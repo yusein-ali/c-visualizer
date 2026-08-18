@@ -12,7 +12,9 @@ export type ExpansionKind =
   /** A line a conditional directive kept out of the compiled source. */
   | 'excluded'
   /** A directive line, which is removed and leaves a blank line behind. */
-  | 'directive';
+  | 'directive'
+  /** An enumerator that was replaced by the integer it stands for. */
+  | 'enum';
 
 export interface Expansion {
   kind: ExpansionKind;
