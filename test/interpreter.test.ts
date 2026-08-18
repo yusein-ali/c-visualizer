@@ -50,6 +50,13 @@ int main(){
   expect(run(code)).toBe('high\n');
 });
 
+it('runs a variadic logging macro', () => {
+  const code = `#include<stdio.h>
+#define LOG(fmt, ...) printf(fmt, ##__VA_ARGS__)
+int main(){ LOG("%d %d\\n", 1, 2); LOG("done\\n"); return 0; }`;
+  expect(run(code)).toBe('1 2\ndone\n');
+});
+
 it('does not expand a macro name inside a string literal', () => {
   const code = `#include<stdio.h>
 #define N 7

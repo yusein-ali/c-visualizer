@@ -135,6 +135,56 @@ describe('stringification and token pasting', () => {
   });
 });
 
+describe('variadic macros', () => {
+  it('passes every argument through __VA_ARGS__', () => {
+    const out = preprocess('#define LOG(...) printf(__VA_ARGS__)\nLOG("%d", 3);');
+    expect(out.trim()).toBe('printf("%d", 3);');
+  });
+
+  it('combines named parameters with the variable part', () => {
+    const out = preprocess(
+      '#define LOG(fmt, ...) printf(fmt, __VA_ARGS__)\nLOG("%d %d", 1, 2);'
+    );
+    expect(out.trim()).toBe('printf("%d %d", 1, 2);');
+  });
+
+  it('expands macros inside the variable arguments', () => {
+    const out = preprocess(
+      '#define N 7\n#define LOG(...) printf(__VA_ARGS__)\nLOG("%d", N);'
+    );
+    expect(out.trim()).toBe('printf("%d", 7);');
+  });
+
+  it('drops the comma of `, ##__VA_ARGS__` when nothing was passed', () => {
+    const out = preprocess(
+      '#define LOG(fmt, ...) printf(fmt, ##__VA_ARGS__)\nLOG("hi");'
+    );
+    expect(out.trim()).toBe('printf("hi");');
+  });
+
+  it('keeps the comma when variable arguments are present', () => {
+    const out = preprocess(
+      '#define LOG(fmt, ...) printf(fmt, ##__VA_ARGS__)\nLOG("%d", 3);'
+    );
+    expect(out.trim()).toBe('printf("%d", 3);');
+  });
+
+  it('stringifies the whole variable part', () => {
+    const out = preprocess('#define SHOW(...) puts(#__VA_ARGS__)\nSHOW(a, b);');
+    expect(out.trim()).toBe('puts("a, b");');
+  });
+
+  it('accepts a call with no variable arguments at all', () => {
+    const out = preprocess('#define F(...) g(__VA_ARGS__)\nF();');
+    expect(out.trim()).toBe('g();');
+  });
+
+  it('rejects too few arguments for the named parameters', () => {
+    const out = preprocess('#define LOG(fmt, ...) printf(fmt)\nLOG();');
+    expect(out.trim()).toBe('LOG();');
+  });
+});
+
 describe('conditional directives', () => {
   it('keeps the taken branch and drops the other one', () => {
     const out = lines('#define F 1\n#ifdef F\nint a = 1;\n#else\nint b = 2;\n#endif');

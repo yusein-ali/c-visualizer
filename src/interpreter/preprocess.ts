@@ -30,13 +30,18 @@
  * operands are the raw argument text, before expansion; every other parameter
  * is substituted with the expanded argument.
  *
- * Not supported, and left as plain text: __VA_ARGS__, and #include - the
- * engine provides printf, malloc, sqrt and friends regardless of which headers
- * are named.
+ * Variadic macros are supported, including the GNU `, ##__VA_ARGS__` idiom
+ * that removes the comma when no variable arguments were passed.
+ *
+ * Not supported: __VA_OPT__, and #include - the engine provides printf, malloc,
+ * sqrt and friends regardless of which headers are named.
  */
 
 interface Macro {
+  /** null for an object-like macro; the named parameters otherwise. */
   params: string[] | null;
+  /** Declared with a trailing `...`, so extra arguments become __VA_ARGS__. */
+  variadic: boolean;
   body: string;
 }
 
@@ -171,12 +176,23 @@ class Preprocessor {
         return;
       }
       const inner = rest.slice(pos + 1, close).trim();
-      const params =
+      const declared =
         inner === '' ? [] : inner.split(',').map((param) => param.trim());
-      this.macros.set(name, { params, body: rest.slice(close + 1).trim() });
+      const variadic =
+        declared.length > 0 && declared[declared.length - 1] === '...';
+      const params = variadic ? declared.slice(0, -1) : declared;
+      this.macros.set(name, {
+        params,
+        variadic,
+        body: rest.slice(close + 1).trim(),
+      });
       return;
     }
-    this.macros.set(name, { params: null, body: rest.slice(pos).trim() });
+    this.macros.set(name, {
+      params: null,
+      variadic: false,
+      body: rest.slice(pos).trim(),
+    });
   }
 
   /** Copies a line through, expanding macros outside literals and comments. */
@@ -277,17 +293,36 @@ class Preprocessor {
       return null;
     }
     const args = readArguments(line, open);
-    if (args === null || args.values.length !== macro.params.length) {
+    const required = macro.params.length;
+    const arity = args === null ? -1 : args.values.length;
+    const matches = macro.variadic ? required <= arity : required === arity;
+    if (args === null || !matches) {
       return null;
     }
     const expandedArgs = args.values.map((value) =>
       this.expandFragment(value, lineNumber, active)
     );
+    // The variable part is one more parameter, named __VA_ARGS__, holding the
+    // remaining arguments with their commas - which is exactly how it behaves:
+    // expanded in a normal position, raw as the operand of # or ##.
+    const params = macro.variadic
+      ? macro.params.concat(['__VA_ARGS__'])
+      : macro.params;
+    const rawValues = macro.variadic
+      ? args.values
+          .slice(0, required)
+          .concat([args.values.slice(required).join(', ')])
+      : args.values;
+    const expandedValues = macro.variadic
+      ? expandedArgs
+          .slice(0, required)
+          .concat([expandedArgs.slice(required).join(', ')])
+      : expandedArgs;
     const substituted = substituteParams(
       macro.body,
-      macro.params,
-      args.values,
-      expandedArgs
+      params,
+      rawValues,
+      expandedValues
     );
     return {
       text: this.expandFragment(substituted, lineNumber, nested),
@@ -461,9 +496,14 @@ function substituteParams(
       continue;
     }
     if (char === '#' && body[i + 1] === '#') {
-      // Paste: drop the operator and the space around it, and take the right
-      // operand unexpanded.
-      out = out.replace(/\s+$/, '');
+      // `, ##__VA_ARGS__` is the GNU idiom, not a token paste: the comma is
+      // there to be removed when no variable arguments were passed, and the
+      // spacing around it is left alone otherwise. A real paste glues its
+      // operands, so it eats the whitespace between them.
+      const commaIdiom = /,\s*$/.test(out);
+      if (!commaIdiom) {
+        out = out.replace(/\s+$/, '');
+      }
       i += 2;
       while (i < body.length && /\s/.test(body[i])) {
         i += 1;
@@ -472,7 +512,11 @@ function substituteParams(
         const end = readIdentifier(body, i);
         const name = body.slice(i, end);
         const raw = argument(name, true);
-        out += raw === null ? name : raw;
+        if (commaIdiom && raw === '') {
+          out = out.replace(/,\s*$/, '');
+        } else {
+          out += raw === null ? name : raw;
+        }
         i = end;
       }
       continue;
