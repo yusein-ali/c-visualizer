@@ -1,7 +1,5 @@
 {
-  "extends": [
-    "config:base"
-  ],
+  "extends": ["config:base"],
   "rebaseStalePrs": true,
   "prCreation": "not-pending",
   "automerge": true,
@@ -12,5 +10,10 @@
     "groupName": "all dependencies"
   },
   "automergeType": "branch-push",
-  "ignoreDeps": ["bootstrap", "@types/bootstrap", "rc-slider", "@types/rc-slider"]
+  "ignoreDeps": [
+    "bootstrap",
+    "@types/bootstrap",
+    "rc-slider",
+    "@types/rc-slider"
+  ]
 }

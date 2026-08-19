@@ -144,7 +144,7 @@ export class PlivetCPP14Engine extends CPP14Engine {
    * behaviour for every node the tables do not recognise.
    */
   protected execClassDec(dec: UniClassDec, scope: Scope): void {
-    const runtimeDec = (dec as unknown) as RuntimeClassDec;
+    const runtimeDec = dec as unknown as RuntimeClassDec;
     let name = runtimeDec.className;
     let table = name === null ? null : this.tableFor(name);
     if (name === null && runtimeDec.codeRange !== null) {
@@ -297,7 +297,7 @@ export class PlivetCPP14Engine extends CPP14Engine {
     for (const arg of mc.args) {
       args.push(yield* this.execExpr(arg, scope));
     }
-    return yield* ((this as unknown) as DispatchingEngine).execFunc(
+    return yield* (this as unknown as DispatchingEngine).execFunc(
       callee,
       scope,
       args
@@ -578,9 +578,9 @@ export class PlivetCPP14Engine extends CPP14Engine {
     if (typeof original !== 'function') {
       return;
     }
-    // tslint:disable-next-line:only-arrow-functions
-    const wrapped = function (this: unknown) {
-      const args = Array.prototype.slice.call(arguments);
+    // A `function` rather than an arrow: the wrapper is called as a method of
+    // the engine's global object, and the arrow would capture the wrong `this`.
+    const wrapped = function (this: unknown, ...args: any[]) {
       for (let i = 1; i < args.length; i += 1) {
         if (Array.isArray(args[i])) {
           args[i] = Engine.bytesToStr(args[i]);

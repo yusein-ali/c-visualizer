@@ -199,9 +199,9 @@ export class DeclarationSpecifiers {
       baseQualifiers.push(qualifier);
     }
     if (typedefInfo !== null) {
-      const typedefPointers = (
-        typedefInfo.pointerQualifiers || []
-      ).map((level) => level.slice());
+      const typedefPointers = (typedefInfo.pointerQualifiers || []).map(
+        (level) => level.slice()
+      );
       if (typedefPointers.length > 0 && baseQualifiers.length > 0) {
         typedefPointers[typedefPointers.length - 1].push(...baseQualifiers);
         baseQualifiers.length = 0;

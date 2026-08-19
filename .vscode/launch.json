@@ -6,19 +6,11 @@
       "type": "node",
       "request": "launch",
       "runtimeExecutable": "npm",
-      "runtimeArgs": [
-        "run",
-        "start",
-        "--",
-        "--port",
-        "8088"
-      ],
+      "runtimeArgs": ["run", "start", "--", "--port", "8088"],
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
       "autoAttachChildProcesses": true,
-      "skipFiles": [
-        "<node_internals>/**"
-      ],
+      "skipFiles": ["<node_internals>/**"],
       "serverReadyAction": {
         "pattern": "Loopback:\\s+(https?://[^,\\s]+)",
         "uriFormat": "%s",
@@ -37,9 +29,7 @@
         "webpack:///./*": "${workspaceFolder}/*",
         "webpack://?:*/*": "${workspaceFolder}/*"
       },
-      "skipFiles": [
-        "<node_internals>/**"
-      ]
+      "skipFiles": ["<node_internals>/**"]
     }
   ]
 }

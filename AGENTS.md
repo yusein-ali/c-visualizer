@@ -2,7 +2,7 @@
 
 ## What this project is
 
-PLIVET (*Programming Language Interpreter for Visualization of Execution Trace*) is a
+PLIVET (_Programming Language Interpreter for Visualization of Execution Trace_) is a
 **browser-only program visualizer and step debugger**. The user writes C code in an
 in-page editor, then steps forward/backward through execution while the runtime state
 (call stacks, variables, arrays, pointer arrows) is drawn live on a canvas next to the
@@ -14,7 +14,7 @@ editor.
 - The interface is **English only**. There is no locale layer: every string the
   UI shows lives in [src/strings.ts](src/strings.ts).
 - **There is no backend.** Everything — parsing, interpretation, stepping — runs in the
-  browser. `src/server.ts` is a *simulated* server: an in-process singleton with a
+  browser. `src/server.ts` is a _simulated_ server: an in-process singleton with a
   `Request`/`Response` API, kept in that shape so a real remote backend could be swapped
   in later. Do not add network calls expecting a server to exist.
 - Ships as a static site: `npm run build` → `dist/`, deployed to the `gh-pages` branch by
@@ -33,16 +33,16 @@ Konva, and do not reintroduce Java, Python or a second interface language.
 
 ## Tech stack
 
-| Concern | Choice |
-|---|---|
-| Language | TypeScript 4.1, `strict`, `noUnusedLocals`/`noUnusedParameters`/`noImplicitReturns` |
-| UI | React 16 **class components** (no hooks anywhere), `react-bootstrap` 0.33 / Bootstrap **3** |
-| Code editor | Ace via `react-ace` (`ace-builds` modes/themes imported explicitly) |
-| Visualization | Konva via `react-konva` (`Stage` / `Layer` / shapes) |
-| Interpreter | [`unicoen.ts`](https://www.npmjs.com/package/unicoen.ts) 0.5.0 — deep imports like `unicoen.ts/dist/interpreter/Engine/ExecState` |
-| Build | webpack 4 + babel-loader (transpile only) + `fork-ts-checker-webpack-plugin` (types) |
-| Lint/format | TSLint + Prettier rules via `tslint-plugin-prettier` (single quotes, semicolons) |
-| Test | Jest 26 + `ts-jest` + Enzyme (adapter for React 16) |
+| Concern       | Choice                                                                                                                            |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Language      | TypeScript 5.9, `strict`, `noUnusedLocals`/`noUnusedParameters`/`noImplicitReturns`                                               |
+| UI            | React 16 **class components** (no hooks anywhere), `react-bootstrap` 0.33 / Bootstrap **3**                                       |
+| Code editor   | CodeMirror 6 — `src/ui/editor/`, framework-free; `Editor.tsx` is only the wiring                                                  |
+| Visualization | Konva via `react-konva` (`Stage` / `Layer` / shapes)                                                                              |
+| Interpreter   | [`unicoen.ts`](https://www.npmjs.com/package/unicoen.ts) 0.5.0 — deep imports like `unicoen.ts/dist/interpreter/Engine/ExecState` |
+| Build         | webpack 5 + babel-loader (transpile only) + `fork-ts-checker-webpack-plugin` (types)                                              |
+| Lint/format   | ESLint 9 (flat config, `eslint.config.js`) + Prettier 3 (single quotes, semicolons, es5 trailing commas)                          |
+| Test          | Jest 26 + `ts-jest` + Enzyme (adapter for React 16)                                                                               |
 
 ## Toolchain — read before running anything
 
@@ -54,21 +54,26 @@ Konva, and do not reintroduce Java, Python or a second interface language.
 - `.npmrc` sets `legacy-peer-deps=true` because `react-konva@16.9.0-1` declares
   peer `react@16.9.x` against the project's `react@16.14.0`. Delete it in the
   commit that removes react-konva (Phase 8/9).
-- **The build does not run on Node 24 yet.** `npm run build` and `npm start`
-  both fail in css-loader 5, which requires `postcss/package.json` — blocked by
-  that package's `exports` map. No OpenSSL flag helps; this is not the md4
-  failure. Phase 3 replaces the loader stack and restores both. `npm test`
-  works.
+- The browser policy is the `browserslist` key in `package.json`: the last two
+  versions of Chrome, Firefox, Edge and Safari, plus Firefox ESR. It is what
+  `@babel/preset-env` compiles against, and it is chosen to match CodeMirror 6,
+  which ships modern syntax and is not transpiled (babel-loader excludes
+  `node_modules`). Raising or lowering it is a decision, not a detail.
+- Type checking and linting are separate from the build: `npm run typecheck`
+  and `npm run lint` both run without webpack, and neither rewrites source. Use
+  `npm run format` for that.
 - `node_modules/` may not be installed in a fresh checkout — run `npm ci` first.
 
 ## Commands
 
 ```bash
 npm ci              # install from the committed lockfile
-npm start           # dev server on :8080 — BROKEN on Node 24 until Phase 3
-npm run build       # production build into dist/ — BROKEN on Node 24 until Phase 3
-npm test            # jest — works
-npm run ts-lint     # tslint --fix over src/**/*.tsx
+npm start           # dev server on :8080
+npm run build       # production build into dist/ (+ dist/licenses.html)
+npm test            # jest
+npm run typecheck   # tsc --noEmit, no webpack
+npm run lint        # eslint over the whole tree
+npm run format      # prettier --write (the only command that rewrites source)
 ```
 
 CI (`.github/workflows/test.yml`) runs `npm ci` and `npm test` on Node 24.15.0
@@ -102,7 +107,7 @@ only registry.
 1. `CtrlButtons` renders `CtrlButton`s that `signal('debug', <CONTROL_EVENT>)`.
    Control events: `Start | Stop | Step | StepBack | StepAll | BackAll | Exec | SyntaxCheck`.
 2. `Editor.send()` builds a `Request { controlEvent, sourcecode, stdinText,
-   lineNumOfBreakpoint }` and awaits `server.send(request)`.
+lineNumOfBreakpoint }` and awaits `server.send(request)`.
 3. `server.ts` lazily `import()`s the CPP14 interpreter (webpack chunk `CPP14`
    — still a dynamic import, to keep the parser out of the initial bundle and
    to leave one branch to add if a language ever comes back), drives

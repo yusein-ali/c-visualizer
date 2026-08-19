@@ -9,8 +9,8 @@ directory is imported by `src/`; it is documentation plus two console scripts.
 
 Run everything **before** Phase 1 deletes Java and Python. Nothing here needs a
 local Node 16 install: section 1 is already captured, and sections 2–4 run in a
-browser against the deployed bundle served from disk — see *Which build to
-measure* below.
+browser against the deployed bundle served from disk — see _Which build to
+measure_ below.
 
 ---
 
@@ -65,16 +65,16 @@ webpack 4 build log has no forward value; the one figure that does — what ship
 was read straight off the deployed branch into
 [results/deployed-bundle.txt](results/deployed-bundle.txt):
 
-| Asset | Bytes |
-|---|---|
-| `js/main.js` | 1,487,510 |
-| `licenses.html` | 1,051,111 |
-| `js/CPP14.bundle.js` | 491,072 |
-| `js/Java8.bundle.js` | 473,674 |
-| `js/CPP14-Java8-Python3.bundle.js` | 417,882 |
-| `js/Python3.bundle.js` | 183,677 |
-| fonts (glyphicons ×5) | 215,721 |
-| **total** | **4,320,799 (4.12 MB)** |
+| Asset                              | Bytes                   |
+| ---------------------------------- | ----------------------- |
+| `js/main.js`                       | 1,487,510               |
+| `licenses.html`                    | 1,051,111               |
+| `js/CPP14.bundle.js`               | 491,072                 |
+| `js/Java8.bundle.js`               | 473,674                 |
+| `js/CPP14-Java8-Python3.bundle.js` | 417,882                 |
+| `js/Python3.bundle.js`             | 183,677                 |
+| fonts (glyphicons ×5)              | 215,721                 |
+| **total**                          | **4,320,799 (4.12 MB)** |
 
 Two things this pins down:
 
@@ -99,7 +99,7 @@ working artifact of the pre-migration code.
 
 ## 2. Functional parity checklist
 
-Walk `results/RESULTS.md` § *Parity checklist* top to bottom in Chrome at
+Walk `results/RESULTS.md` § _Parity checklist_ top to bottom in Chrome at
 <http://localhost:8080>, with the console open, and record pass / fail / notes for each row. Any console error
 counts as a note even when the feature works.
 
@@ -129,7 +129,7 @@ The screenshots are compared against Phase 8's output pixel by eye, so the
 viewport must be reproducible. Fix it before the first capture and record the
 values in `RESULTS.md`:
 
-1. Open <http://localhost:8080> in Chrome (see *Which build to measure* for how
+1. Open <http://localhost:8080> in Chrome (see _Which build to measure_ for how
    the server is started).
 2. Open DevTools (`Cmd+Opt+I`), toggle the device toolbar (`Cmd+Shift+M`),
    choose **Responsive** and type **1440 × 900**, DPR **2**, zoom **100%**.
@@ -155,13 +155,14 @@ values in `RESULTS.md`:
    into the console:
 
    ```js
-   document.body.innerText.match(/DebugStatus:.*/)[0]
+   document.body.innerText.match(/DebugStatus:.*/)[0];
    ```
 
    Record it in `RESULTS.md`. This number matters as much as the image: the same
    program and breakpoint must reach the same step after Phases 5–8, and a
    divergence is a regression that no pixel comparison would catch.
-7. **Capture.** In DevTools press `Cmd+Shift+P`, type *screenshot*, choose
+
+7. **Capture.** In DevTools press `Cmd+Shift+P`, type _screenshot_, choose
    **Capture full size screenshot**. It lands in `~/Downloads`; move it to
    `baseline/screenshots/` under the name in the table below. This captures the
    page itself, without window chrome or scrollbars, which is what makes two
@@ -194,13 +195,13 @@ view, and a scrolled or rescaled capture is not the same view.
 
 ### The fixtures
 
-| Fixture | File | Breakpoint (editor line) | Save as | What it must show |
-|---|---|---|---|---|
-| S0 | `s0-default-sample.c` | 28 (`printf("Hello,world!\n");`) | `s0-light.png` | the shipped sample: recursion, array, pointer, malloc, 2-D dynamic array |
-| S1 | `s1-pointers.c` | 23 (final `printf`) | `s1-pointers-light.png` | pointer to local, pointer-to-pointer, pointer into an array, heap block, array of pointers |
-| S2 | `s2-arrays.c` | 16 (`printf`) | `s2-arrays-light.png` | 1-D array, 2-D array, char array |
-| S3 | `s3-recursion.c` | 8 (`printf("fact(%d)\n", n);`) | `s3-recursion-light.png` | four nested `fact` frames plus `main` — the first hit is the deepest call |
-| S4 | `s4-stdin.c` | none | `s4-stdin-waiting.png`, `s4-stdin-light.png` | stdin handling — see below |
+| Fixture | File                  | Breakpoint (editor line)         | Save as                                      | What it must show                                                                          |
+| ------- | --------------------- | -------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| S0      | `s0-default-sample.c` | 28 (`printf("Hello,world!\n");`) | `s0-light.png`                               | the shipped sample: recursion, array, pointer, malloc, 2-D dynamic array                   |
+| S1      | `s1-pointers.c`       | 23 (final `printf`)              | `s1-pointers-light.png`                      | pointer to local, pointer-to-pointer, pointer into an array, heap block, array of pointers |
+| S2      | `s2-arrays.c`         | 16 (`printf`)                    | `s2-arrays-light.png`                        | 1-D array, 2-D array, char array                                                           |
+| S3      | `s3-recursion.c`      | 8 (`printf("fact(%d)\n", n);`)   | `s3-recursion-light.png`                     | four nested `fact` frames plus `main` — the first hit is the deepest call                  |
+| S4      | `s4-stdin.c`          | none                             | `s4-stdin-waiting.png`, `s4-stdin-light.png` | stdin handling — see below                                                                 |
 
 ### S4 in detail
 
@@ -267,7 +268,7 @@ compared against this exact source, with a breakpoint on **line 26**
 ### Measurement A — end-to-end run to breakpoint
 
 1. Reload <http://localhost:8080>, paste `programs/bench.c` (`pbcopy <
-   baseline/programs/bench.c`), set the one breakpoint on line 26.
+baseline/programs/bench.c`), set the one breakpoint on line 26.
 2. Paste [scripts/bench-ui.js](scripts/bench-ui.js) into the console.
 3. `await plivetBench(5)`.
 
@@ -287,7 +288,7 @@ Paste [scripts/bench-step.js](scripts/bench-step.js)
 into the console with `bench.c` in the editor and no breakpoints, then:
 
 ```js
-await plivetStepBench(200)
+await plivetStepBench(200);
 ```
 
 It presses Step 200 times and times each round trip — interpreter step, React

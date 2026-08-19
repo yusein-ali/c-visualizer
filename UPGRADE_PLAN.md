@@ -241,6 +241,7 @@ and `npm run build` produces a working production bundle without legacy OpenSSL
 flags.
 
 ## Phase 4: TypeScript and linting
+
 1. Upgrade TypeScript to 5.x and the Babel TypeScript preset together. Keep
    `strict`, `noUnusedLocals`, `noUnusedParameters`, `noImplicitReturns`.
 2. Remove TSLint, its plugins and configs, and `tslint-loader`.
@@ -262,30 +263,31 @@ The two files worth keeping are `server.ts` (372 lines) and `CanvasDrawer.ts`
 (535 lines). This phase makes them independent of the UI so later phases can move
 them freely. The React application keeps working throughout.
 
-1. Create `src/core/` and move both files into it. Nothing in `src/core/` may
-   import from `src/components/`.
-2. Define the plain-data step model that will later cross the Worker boundary.
-   Approximately:
+1.  Create `src/core/` and move both files into it. Nothing in `src/core/` may
+    import from `src/components/`.
+2.  Define the plain-data step model that will later cross the Worker boundary.
+    Approximately:
 
-       interface CellModel   { key, text, kind, width, pointerTarget?, foldGroup? }
-       interface StackModel  { name, rows: CellModel[][] }
-       interface StepModel   { step, debugState, output, codeRange,
-                               stacks: StackModel[], pointers: {from, to}[] }
+        interface CellModel   { key, text, kind, width, pointerTarget?, foldGroup? }
+        interface StackModel  { name, rows: CellModel[][] }
+        interface StepModel   { step, debugState, output, codeRange,
+                                stacks: StackModel[], pointers: {from, to}[] }
 
-   Everything in it must survive `structuredClone`.
-3. Split `CanvasDrawer` along that seam:
-   - `extractModel(execState): StepModel` — walks stacks and variables, resolves
-     pointer targets by key. Depends on `unicoen.ts`, not on geometry.
-   - `layout(model, foldState): Geometry` — the existing `calcPos`,
-     `alignToMaximumWidth`, `rescaleWidthForLongFuncName` and arrow routing.
-4. Move fold state out of the cells and into a main-thread structure keyed by
-   cell key. Delete the `signal('redraw')` call at line 533; `toggleFold` returns
-   and the caller re-lays-out. A model must not emit UI events.
-5. Make `pointerConnectionManager` an instance owned by the layout pass rather
-   than a module singleton.
-6. Cap `stateHistory`. Either bound the number of retained states or keep
-   periodic snapshots and replay forward. Without a server this is the user's own
-   memory, and a long loop currently grows it without limit.
+    Everything in it must survive `structuredClone`.
+
+3.  Split `CanvasDrawer` along that seam:
+    - `extractModel(execState): StepModel` — walks stacks and variables, resolves
+      pointer targets by key. Depends on `unicoen.ts`, not on geometry.
+    - `layout(model, foldState): Geometry` — the existing `calcPos`,
+      `alignToMaximumWidth`, `rescaleWidthForLongFuncName` and arrow routing.
+4.  Move fold state out of the cells and into a main-thread structure keyed by
+    cell key. Delete the `signal('redraw')` call at line 533; `toggleFold` returns
+    and the caller re-lays-out. A model must not emit UI events.
+5.  Make `pointerConnectionManager` an instance owned by the layout pass rather
+    than a module singleton.
+6.  Cap `stateHistory`. Either bound the number of retained states or keep
+    periodic snapshots and replay forward. Without a server this is the user's own
+    memory, and a long loop currently grows it without limit.
 
 Exit criterion: `src/core/` builds and is unit-testable with no DOM, no React and
 no renderer. The application still passes the Phase 0 checklist.
@@ -357,8 +359,8 @@ are exported as a standalone array that attaches to any `EditorView`.
    with plain-data expression nodes and evaluation results from the Worker, then
    render the operands, operators, evaluation order and intermediate values in
    JointJS without sending interpreter or AST class instances across the Worker
-   boundary. Include also the assignment if applicable so that expression expansion forms a 
-   complete statement.  
+   boundary. Include also the assignment if applicable so that expression expansion forms a
+   complete statement.
 7. Address redraw cost before considering this phase done. The current code
    rebuilds the entire scene per step; an SVG graph cannot absorb that during a
    run. Either diff the graph against the previous `StepModel`, or suspend

@@ -59,7 +59,10 @@ import {
  * Subclasses come first: UniDoWhile extends UniWhile, so testing UniWhile
  * first would label every do-while a while.
  */
-const KINDS: Array<[Function, string]> = [
+/** A class to test with `instanceof`, which is all these entries are used for. */
+type NodeClass = abstract new (...args: any[]) => object;
+
+const KINDS: Array<[NodeClass, string]> = [
   [UniDoWhile, 'doWhile'],
   [UniWhile, 'while'],
   [UniEnhancedFor, 'for'],
@@ -204,8 +207,8 @@ function declarationType(
     typeof node.type === 'string'
       ? node.type
       : node.type instanceof UniClassDec
-      ? node.type.className || ''
-      : '';
+        ? node.type.className || ''
+        : '';
   const prefix = sourceForRange(source, {
     begin: node.codeRange.begin,
     end: variable.codeRange.begin,
@@ -348,7 +351,8 @@ const normalizeSpace = (text: string): string =>
  * `char *` that is not const. Storage classes and `inline` sit in the same
  * place and are dropped the same way by the mapper.
  */
-const SPECIFIER_RUN = /(?:\b(?:const|volatile|restrict|_Atomic|static|extern|inline|_Noreturn|auto|register|_Thread_local|thread_local)\b\s*)+$/;
+const SPECIFIER_RUN =
+  /(?:\b(?:const|volatile|restrict|_Atomic|static|extern|inline|_Noreturn|auto|register|_Thread_local|thread_local)\b\s*)+$/;
 
 /** A declarator's trailing name, and everything written in front of it. */
 const DECLARED_NAME = /^([\s\S]*?)([A-Za-z_]\w*)\s*$/;
@@ -359,7 +363,8 @@ const DECLARED_NAME = /^([\s\S]*?)([A-Za-z_]\w*)\s*$/;
  * `_Noreturn` describe the function itself (6.7.4): `static const char *f`
  * returns a `const char *`, not a `static const char *`.
  */
-const NOT_A_TYPE = /\b(?:typedef|static|extern|inline|_Noreturn|auto|register|_Thread_local|thread_local)\b/g;
+const NOT_A_TYPE =
+  /\b(?:typedef|static|extern|inline|_Noreturn|auto|register|_Thread_local|thread_local)\b/g;
 
 /** Where the declaration whose parsed range begins here was actually typed. */
 function declarationStart(source: string, offset: number): number {
@@ -866,8 +871,8 @@ export function outline(
       node instanceof UniClassDec
         ? recordTypeOf(node, source)
         : node instanceof UniFunctionDec
-        ? null
-        : containingRecord;
+          ? null
+          : containingRecord;
     for (const field of Array.from(node.fields.keys()) as string[]) {
       if (field !== 'comments' && field !== 'codeRange') {
         visit(node[field], childAutomaticStorage, childRecord);

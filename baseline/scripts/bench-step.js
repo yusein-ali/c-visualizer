@@ -21,7 +21,8 @@ window.plivetStepBench = async function plivetStepBench(steps = 200) {
   const groups = document.querySelectorAll('.btn-toolbar .btn-group');
   if (groups.length < 1) throw new Error('control buttons not found');
   const buttons = groups[0].querySelectorAll('button');
-  if (buttons.length !== 6) throw new Error(`expected 6 debug buttons, got ${buttons.length}`);
+  if (buttons.length !== 6)
+    throw new Error(`expected 6 debug buttons, got ${buttons.length}`);
   const STOP = buttons[1];
   // Button 4 does double duty: its command is "Start" while the app is stopped
   // (CtrlButtons keeps `Stop: false` then, which also leaves button 0 disabled)
@@ -50,23 +51,37 @@ window.plivetStepBench = async function plivetStepBench(steps = 200) {
       });
       const timer = setTimeout(() => {
         observer.disconnect();
-        reject(new Error(`timed out after ${timeoutMs} ms, status still "${status()}"`));
+        reject(
+          new Error(
+            `timed out after ${timeoutMs} ms, status still "${status()}"`
+          )
+        );
       }, timeoutMs);
-      observer.observe(statusHost, { subtree: true, childList: true, characterData: true });
+      observer.observe(statusHost, {
+        subtree: true,
+        childList: true,
+        characterData: true,
+      });
     });
   }
 
-  const heapMb = () => (performance.memory ? +(performance.memory.usedJSHeapSize / 1048576).toFixed(1) : null);
+  const heapMb = () =>
+    performance.memory
+      ? +(performance.memory.usedJSHeapSize / 1048576).toFixed(1)
+      : null;
 
   const current = status();
   if (current !== 'DebugStatus:' && current !== 'DebugStatus: Stop') {
-    if (STOP.disabled) throw new Error(`cannot reset: stop button disabled at "${current}"`);
+    if (STOP.disabled)
+      throw new Error(`cannot reset: stop button disabled at "${current}"`);
     STOP.click();
     await waitForChange(current, 10000).catch(() => {});
   }
 
   if (STEP.disabled) {
-    throw new Error('step/start button is disabled — reload the page and try again');
+    throw new Error(
+      'step/start button is disabled — reload the page and try again'
+    );
   }
 
   const heapBefore = heapMb();
@@ -93,7 +108,9 @@ window.plivetStepBench = async function plivetStepBench(steps = 200) {
     last = result.text;
     finalState = last;
     if (/EOF|stdin|Stop/.test(last)) {
-      console.warn(`reached ${last} after ${samples.length} steps — use a longer program or fewer steps`);
+      console.warn(
+        `reached ${last} after ${samples.length} steps — use a longer program or fewer steps`
+      );
       break;
     }
   }
@@ -102,7 +119,10 @@ window.plivetStepBench = async function plivetStepBench(steps = 200) {
   if (!STOP.disabled) STOP.click();
 
   const sorted = [...samples].sort((a, b) => a - b);
-  const pick = (q) => +sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))].toFixed(2);
+  const pick = (q) =>
+    +sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))].toFixed(
+      2
+    );
   const summary = {
     steps_measured: samples.length,
     final_status: finalState.replace('DebugStatus: ', ''),
@@ -114,7 +134,8 @@ window.plivetStepBench = async function plivetStepBench(steps = 200) {
     ms_total: +samples.reduce((a, b) => a + b, 0).toFixed(1),
     heap_before_mb: heapBefore,
     heap_after_mb: heapAfter,
-    heap_growth_mb: heapBefore !== null ? +(heapAfter - heapBefore).toFixed(1) : null,
+    heap_growth_mb:
+      heapBefore !== null ? +(heapAfter - heapBefore).toFixed(1) : null,
     userAgent: navigator.userAgent,
   };
   console.table(summary);

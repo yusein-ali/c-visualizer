@@ -22,7 +22,8 @@ window.plivetBench = async function plivetBench(runs = 5) {
   const groups = document.querySelectorAll('.btn-toolbar .btn-group');
   if (groups.length < 1) throw new Error('control buttons not found');
   const buttons = Array.from(groups[0].querySelectorAll('button'));
-  if (buttons.length !== 6) throw new Error(`expected 6 debug buttons, got ${buttons.length}`);
+  if (buttons.length !== 6)
+    throw new Error(`expected 6 debug buttons, got ${buttons.length}`);
 
   const TITLES = {
     Start: ['restart step execution', '現在のプログラムで再ステップ実行'],
@@ -43,7 +44,8 @@ window.plivetBench = async function plivetBench(runs = 5) {
   }
   if (!statusHost) throw new Error('DebugStatus element not found');
   const status = () => statusHost.textContent.replace(/\s+/g, ' ').trim();
-  const settled = (t) => /DebugStatus: (Step \d+|First|EOF|stdin|Stop)$/.test(t);
+  const settled = (t) =>
+    /DebugStatus: (Step \d+|First|EOF|stdin|Stop)$/.test(t);
 
   function waitForSettled(timeoutMs = 120000) {
     return new Promise((resolve, reject) => {
@@ -54,31 +56,47 @@ window.plivetBench = async function plivetBench(runs = 5) {
         observer.disconnect();
         clearTimeout(timer);
         requestAnimationFrame(() =>
-          requestAnimationFrame(() => resolve({ text, tStatus, tPaint: performance.now() }))
+          requestAnimationFrame(() =>
+            resolve({ text, tStatus, tPaint: performance.now() })
+          )
         );
       });
       const timer = setTimeout(() => {
         observer.disconnect();
-        reject(new Error(`timed out after ${timeoutMs} ms, status still "${status()}"`));
+        reject(
+          new Error(
+            `timed out after ${timeoutMs} ms, status still "${status()}"`
+          )
+        );
       }, timeoutMs);
-      observer.observe(statusHost, { subtree: true, childList: true, characterData: true });
+      observer.observe(statusHost, {
+        subtree: true,
+        childList: true,
+        characterData: true,
+      });
     });
   }
 
-  const heapMb = () => (performance.memory ? +(performance.memory.usedJSHeapSize / 1048576).toFixed(1) : null);
+  const heapMb = () =>
+    performance.memory
+      ? +(performance.memory.usedJSHeapSize / 1048576).toFixed(1)
+      : null;
   const rows = [];
 
   for (let run = 1; run <= runs; run++) {
     if (status() !== 'DebugStatus: First') {
       const start = find(TITLES.Start);
-      if (!start || start.disabled) throw new Error(`no enabled restart button at "${status()}"`);
+      if (!start || start.disabled)
+        throw new Error(`no enabled restart button at "${status()}"`);
       start.click();
       const s = await waitForSettled(30000);
-      if (s.text !== 'DebugStatus: First') throw new Error(`restart landed on "${s.text}"`);
+      if (s.text !== 'DebugStatus: First')
+        throw new Error(`restart landed on "${s.text}"`);
     }
 
     const go = find(TITLES.StepAll);
-    if (!go || go.disabled) throw new Error(`no enabled run button at "${status()}"`);
+    if (!go || go.disabled)
+      throw new Error(`no enabled run button at "${status()}"`);
 
     const heapBefore = heapMb();
     const t0 = performance.now();
@@ -91,7 +109,9 @@ window.plivetBench = async function plivetBench(runs = 5) {
       step,
       ms_to_status: +(tStatus - t0).toFixed(1),
       ms_to_paint: +(tPaint - t0).toFixed(1),
-      ms_per_step: Number.isFinite(step) ? +((tStatus - t0) / step).toFixed(2) : null,
+      ms_per_step: Number.isFinite(step)
+        ? +((tStatus - t0) / step).toFixed(2)
+        : null,
       heap_before_mb: heapBefore,
       heap_after_mb: heapMb(),
     });
@@ -100,7 +120,9 @@ window.plivetBench = async function plivetBench(runs = 5) {
 
   const median = (xs) => {
     const s = [...xs].sort((a, b) => a - b);
-    return s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2;
+    return s.length % 2
+      ? s[(s.length - 1) / 2]
+      : (s[s.length / 2 - 1] + s[s.length / 2]) / 2;
   };
   console.table(rows);
   const summary = {

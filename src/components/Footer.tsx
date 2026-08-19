@@ -1,4 +1,7 @@
 import * as React from 'react';
+// A default import: webpack warns that a JSON module's named exports are on
+// their way out, and only the default is guaranteed.
+import packageJson from '../../package.json';
 import '../css/footer.css';
 interface Props {
   fromYear?: number;
@@ -32,7 +35,7 @@ export default class Footer extends React.Component<Props, State> {
   renderCopyRight() {
     return (
       <span>
-        PLIVET&nbsp;v{require('../../package.json').version}&nbsp;&copy;&nbsp;
+        PLIVET&nbsp;v{packageJson.version}&nbsp;&copy;&nbsp;
         {this.getYear()}&nbsp; @RYOSKATE
       </span>
     );

@@ -13,50 +13,56 @@ const checker = require('license-checker-rseidelsohn');
 const OUT = path.resolve(__dirname, '..', 'dist', 'licenses.html');
 const AUTHOR = 'RYOSKATE';
 
-const escape = (s) =>
-  String(s).replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;',
-  })[c]);
-
-checker.init({ start: path.resolve(__dirname, '..'), production: false }, (err, packages) => {
-  if (err) {
-    console.error(err);
-    process.exit(1);
-  }
-
-  const names = Object.keys(packages).sort((a, b) =>
-    a.toLowerCase().localeCompare(b.toLowerCase())
+const escapeHtml = (s) =>
+  String(s).replace(
+    /[&<>"']/g,
+    (c) =>
+      ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+      })[c]
   );
 
-  const sections = names.map((name) => {
-    const info = packages[name];
-    let text = '';
-    if (info.licenseFile && fs.existsSync(info.licenseFile)) {
-      try {
-        text = fs.readFileSync(info.licenseFile, 'utf8');
-      } catch (_) {
-        text = '';
-      }
+checker.init(
+  { start: path.resolve(__dirname, '..'), production: false },
+  (err, packages) => {
+    if (err) {
+      console.error(err);
+      process.exit(1);
     }
-    const repo = info.repository
-      ? `<div class="repo"><a href="${escape(info.repository)}">${escape(info.repository)}</a></div>`
-      : '';
-    const body = text
-      ? `<pre>${escape(text)}</pre>`
-      : `<p class="none">No licence file bundled with this package.</p>`;
-    return `<section>
-  <h2>${escape(name)}</h2>
-  <div class="license">${escape(info.licenses || 'UNKNOWN')}</div>
+
+    const names = Object.keys(packages).sort((a, b) =>
+      a.toLowerCase().localeCompare(b.toLowerCase())
+    );
+
+    const sections = names.map((name) => {
+      const info = packages[name];
+      let text = '';
+      if (info.licenseFile && fs.existsSync(info.licenseFile)) {
+        try {
+          text = fs.readFileSync(info.licenseFile, 'utf8');
+        } catch {
+          text = '';
+        }
+      }
+      const repo = info.repository
+        ? `<div class="repo"><a href="${escapeHtml(info.repository)}">${escapeHtml(info.repository)}</a></div>`
+        : '';
+      const body = text
+        ? `<pre>${escapeHtml(text)}</pre>`
+        : `<p class="none">No licence file bundled with this package.</p>`;
+      return `<section>
+  <h2>${escapeHtml(name)}</h2>
+  <div class="license">${escapeHtml(info.licenses || 'UNKNOWN')}</div>
   ${repo}
   ${body}
 </section>`;
-  });
+    });
 
-  const html = `<!doctype html>
+    const html = `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -75,14 +81,17 @@ checker.init({ start: path.resolve(__dirname, '..'), production: false }, (err, 
 </head>
 <body>
 <h1>Third-party licences</h1>
-<p>PLIVET is distributed by ${escape(AUTHOR)} under the MIT licence. It bundles the
+<p>PLIVET is distributed by ${escapeHtml(AUTHOR)} under the MIT licence. It bundles the
 ${names.length} packages listed below, each under its own licence.</p>
 ${sections.join('\n')}
 </body>
 </html>
 `;
 
-  fs.mkdirSync(path.dirname(OUT), { recursive: true });
-  fs.writeFileSync(OUT, html);
-  console.log(`licenses.html: ${names.length} packages, ${html.length} bytes`);
-});
+    fs.mkdirSync(path.dirname(OUT), { recursive: true });
+    fs.writeFileSync(OUT, html);
+    console.log(
+      `licenses.html: ${names.length} packages, ${html.length} bytes`
+    );
+  }
+);

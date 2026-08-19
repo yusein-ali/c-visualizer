@@ -282,7 +282,9 @@ function loadTs(file) {
   if (tsCache.has(file)) {
     return tsCache.get(file);
   }
-  const babel = require(path.join(__dirname, '..', '..', 'node_modules', '@babel', 'core'));
+  const babel = require(
+    path.join(__dirname, '..', '..', 'node_modules', '@babel', 'core')
+  );
   const { code } = babel.transformFileSync(file, {
     filename: file,
     presets: [[require.resolve('@babel/preset-typescript'), {}]],
@@ -296,14 +298,25 @@ function loadTs(file) {
     request.startsWith('.')
       ? loadTs(path.resolve(path.dirname(file), request) + '.ts')
       : require(request);
-  new Function('module', 'exports', 'require', code)(loaded, loaded.exports, localRequire);
+  new Function('module', 'exports', 'require', code)(
+    loaded,
+    loaded.exports,
+    localRequire
+  );
   tsCache.set(file, loaded.exports);
   return loaded.exports;
 }
 
 /** The interpreter the application itself uses, compiled from src/. */
 function loadPlivetInterpreter() {
-  const entry = path.join(__dirname, '..', '..', 'src', 'interpreter', 'CPP14.ts');
+  const entry = path.join(
+    __dirname,
+    '..',
+    '..',
+    'src',
+    'interpreter',
+    'CPP14.ts'
+  );
   return loadTs(entry).PlivetCPP14Interpreter;
 }
 
@@ -322,7 +335,10 @@ function runChild(code) {
   try {
     return JSON.parse(res.stdout.trim().split('\n').pop());
   } catch (e) {
-    return { verdict: 'CRASH', detail: (res.stderr || res.stdout || '').trim().split('\n')[0] };
+    return {
+      verdict: 'CRASH',
+      detail: (res.stderr || res.stdout || '').trim().split('\n')[0],
+    };
   }
 }
 
@@ -337,15 +353,27 @@ function child() {
       const PlivetInterpreter = loadPlivetInterpreter();
       interpreter = new PlivetInterpreter();
     } else {
-      const { CPP14Interpreter } = require(path.join(
-        __dirname, '..', '..', 'node_modules', 'unicoen.ts',
-        'dist', 'interpreter', 'CPP14', 'CPP14Interpreter'
-      ));
+      const { CPP14Interpreter } = require(
+        path.join(
+          __dirname,
+          '..',
+          '..',
+          'node_modules',
+          'unicoen.ts',
+          'dist',
+          'interpreter',
+          'CPP14',
+          'CPP14Interpreter'
+        )
+      );
       interpreter = new CPP14Interpreter();
     }
     interpreter.setFileList(new Map());
   } catch (e) {
-    return out({ verdict: 'CRASH', detail: 'cannot load interpreter: ' + e.message });
+    return out({
+      verdict: 'CRASH',
+      detail: 'cannot load interpreter: ' + e.message,
+    });
   }
   let syntaxErrors = [];
   try {
@@ -358,7 +386,11 @@ function child() {
     let steps = 0;
     while (interpreter.isStepExecutionRunning() && steps < MAX_STEPS) {
       if (interpreter.getIsWaitingForStdin()) {
-        return out({ verdict: 'STDIN', detail: 'program blocked on input', syntaxErrors });
+        return out({
+          verdict: 'STDIN',
+          detail: 'program blocked on input',
+          syntaxErrors,
+        });
       }
       interpreter.stepExecute();
       steps++;
@@ -431,9 +463,13 @@ function main() {
           : `${r.verdict}${r.detail ? ' - ' + r.detail : ''}`;
       console.log(`${label[r.status]}  ${r.id.padEnd(5)} ${r.title}`);
       if (r.status === 'fail' || r.status === 'not yet') {
-        console.log(`             expect ${JSON.stringify(r.expect)}  got ${got}`);
+        console.log(
+          `             expect ${JSON.stringify(r.expect)}  got ${got}`
+        );
         if (r.syntaxErrors && r.syntaxErrors.length) {
-          console.log(`             syntax: ${r.syntaxErrors[0].split(' expecting ')[0]}`);
+          console.log(
+            `             syntax: ${r.syntaxErrors[0].split(' expecting ')[0]}`
+          );
         }
       }
     }
@@ -454,7 +490,8 @@ function main() {
   }
 
   // Only a probe that used to work and stopped is a real failure.
-  process.exitCode = results.filter((r) => r.status === 'fail').length > 0 ? 1 : 0;
+  process.exitCode =
+    results.filter((r) => r.status === 'fail').length > 0 ? 1 : 0;
 }
 
 main();

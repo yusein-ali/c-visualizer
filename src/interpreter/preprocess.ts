@@ -313,7 +313,7 @@ class Preprocessor {
       return null;
     }
     const name = nameMatch[1];
-    let pos = name.length;
+    const pos = name.length;
     // Function-like only when the parenthesis touches the name, as in C.
     if (rest[pos] === '(') {
       const close = rest.indexOf(')', pos);
@@ -543,7 +543,7 @@ class Preprocessor {
     const expanded = this.expandFragment(resolved, 0, new Set<string>());
     try {
       return evaluateConstantExpression(expanded);
-    } catch (e) {
+    } catch {
       return 0;
     }
   }
@@ -827,76 +827,75 @@ export function evaluateConstantExpression(expression: string): number {
     const value = Number(token);
     return isNaN(value) ? 0 : value;
   };
-  const binary = (
-    next: () => number,
-    operators: string[]
-  ): (() => number) => () => {
-    let left = next();
-    while (operators.indexOf(peek()) !== -1) {
-      const operator = peek();
-      pos += 1;
-      const right = next();
-      switch (operator) {
-        case '*':
-          left = left * right;
-          break;
-        case '/':
-          left = right === 0 ? 0 : Math.trunc(left / right);
-          break;
-        case '%':
-          left = right === 0 ? 0 : left % right;
-          break;
-        case '+':
-          left = left + right;
-          break;
-        case '-':
-          left = left - right;
-          break;
-        case '<<':
-          left = left << right;
-          break;
-        case '>>':
-          left = left >> right;
-          break;
-        case '<':
-          left = left < right ? 1 : 0;
-          break;
-        case '>':
-          left = left > right ? 1 : 0;
-          break;
-        case '<=':
-          left = left <= right ? 1 : 0;
-          break;
-        case '>=':
-          left = left >= right ? 1 : 0;
-          break;
-        case '==':
-          left = left === right ? 1 : 0;
-          break;
-        case '!=':
-          left = left !== right ? 1 : 0;
-          break;
-        case '&':
-          left = left & right;
-          break;
-        case '^':
-          left = left ^ right;
-          break;
-        case '|':
-          left = left | right;
-          break;
-        case '&&':
-          left = left !== 0 && right !== 0 ? 1 : 0;
-          break;
-        case '||':
-          left = left !== 0 || right !== 0 ? 1 : 0;
-          break;
-        default:
-          break;
+  const binary =
+    (next: () => number, operators: string[]): (() => number) =>
+    () => {
+      let left = next();
+      while (operators.indexOf(peek()) !== -1) {
+        const operator = peek();
+        pos += 1;
+        const right = next();
+        switch (operator) {
+          case '*':
+            left = left * right;
+            break;
+          case '/':
+            left = right === 0 ? 0 : Math.trunc(left / right);
+            break;
+          case '%':
+            left = right === 0 ? 0 : left % right;
+            break;
+          case '+':
+            left = left + right;
+            break;
+          case '-':
+            left = left - right;
+            break;
+          case '<<':
+            left = left << right;
+            break;
+          case '>>':
+            left = left >> right;
+            break;
+          case '<':
+            left = left < right ? 1 : 0;
+            break;
+          case '>':
+            left = left > right ? 1 : 0;
+            break;
+          case '<=':
+            left = left <= right ? 1 : 0;
+            break;
+          case '>=':
+            left = left >= right ? 1 : 0;
+            break;
+          case '==':
+            left = left === right ? 1 : 0;
+            break;
+          case '!=':
+            left = left !== right ? 1 : 0;
+            break;
+          case '&':
+            left = left & right;
+            break;
+          case '^':
+            left = left ^ right;
+            break;
+          case '|':
+            left = left | right;
+            break;
+          case '&&':
+            left = left !== 0 && right !== 0 ? 1 : 0;
+            break;
+          case '||':
+            left = left !== 0 || right !== 0 ? 1 : 0;
+            break;
+          default:
+            break;
+        }
       }
-    }
-    return left;
-  };
+      return left;
+    };
   const parseMul = binary(parseUnary, ['*', '/', '%']);
   const parseAdd = binary(parseMul, ['+', '-']);
   const parseShift = binary(parseAdd, ['<<', '>>']);
@@ -911,9 +910,10 @@ export function evaluateConstantExpression(expression: string): number {
 }
 
 /** The preprocessed source, plus what was replaced where in the original. */
-export function preprocessSource(
-  code: string
-): { code: string; expansions: Expansion[] } {
+export function preprocessSource(code: string): {
+  code: string;
+  expansions: Expansion[];
+} {
   return new Preprocessor().run(code);
 }
 

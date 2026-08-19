@@ -1,11 +1,11 @@
 {
-    "extends": "./tsconfig.prod.json",
-    "compilerOptions": {
-      "esModuleInterop": true,
-      // ts-jest emits with this target. es5 downlevels classes to functions,
-      // which cannot extend unicoen.ts's native ES2015 classes - the engine
-      // subclass throws "cannot be invoked without 'new'". The browser bundle
-      // is unaffected: babel-loader builds it for the es2020 target.
-      "target": "es2018"
-    }
+  "extends": "./tsconfig.prod.json",
+  "compilerOptions": {
+    "esModuleInterop": true,
+    // ts-jest emits with this target. es5 downlevels classes to functions,
+    // which cannot extend unicoen.ts's native ES2015 classes - the engine
+    // subclass throws "cannot be invoked without 'new'". The browser bundle
+    // is unaffected: babel-loader builds it for the es2020 target.
+    "target": "es2018"
+  }
 }

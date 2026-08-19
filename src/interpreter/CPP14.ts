@@ -118,7 +118,7 @@ export class PlivetCPP14Interpreter extends Interpreter {
             sourceColumns(construct, prepared.functionPointers)
           )
       );
-    } catch (e) {
+    } catch {
       return sourceTypes;
     }
   }
@@ -175,9 +175,7 @@ export class PlivetCPP14Interpreter extends Interpreter {
   }
 
   /** Runs every source pass once and gives the engine fresh record metadata. */
-  private prepare(
-    code: string
-  ): {
+  private prepare(code: string): {
     code: string;
     expansions: Expansion[];
     source: string;

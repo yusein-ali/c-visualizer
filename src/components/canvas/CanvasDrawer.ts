@@ -64,7 +64,10 @@ const hashids = new Hashids('', 6, '1234567890abcdef'); // all lowercase
 class Connection {
   public readonly color: string;
   public isDrawn: boolean = false;
-  constructor(public readonly fromKey: string, public readonly toKey: string) {
+  constructor(
+    public readonly fromKey: string,
+    public readonly toKey: string
+  ) {
     const hashFrom = stringHash(fromKey);
     const hashTo = stringHash(toKey);
     const hashNumber = hashids.encode(hashFrom, hashTo);
@@ -77,7 +80,11 @@ export class CanvasArrow {
   public readonly from: Vector;
   public readonly to: Vector;
   public readonly mid: Vector;
-  constructor(from: Vector, to: Vector, public readonly color: string) {
+  constructor(
+    from: Vector,
+    to: Vector,
+    public readonly color: string
+  ) {
     const halfHeight = CanvasCell.HEIGHT / 2;
     this.from = this.clone(from).add(new Vector(-5, halfHeight));
     this.to = this.clone(to).add(new Vector(5, halfHeight));
@@ -529,7 +536,7 @@ export class CanvasArrayVariable extends CanvasVariable {
   }
 
   public getCanvasTable(): CanvasTable {
-    let children: CanvasTable = [];
+    const children: CanvasTable = [];
     const value: Variable[] = this.variable.getValue();
     for (const v of value) {
       const canvasVariable = Array.isArray(v.getValue())
@@ -563,7 +570,10 @@ export class CanvasCell {
   private pos: Vector = new Vector(-1, -1);
   private colors: string[] = [];
   private children: CanvasTable | null = null;
-  constructor(private text: string, parentKey: string) {
+  constructor(
+    private text: string,
+    parentKey: string
+  ) {
     const margin = text.length % 2 === 0 ? 1.5 : 1;
     this.width = (text.length + 2 * margin) * (CanvasCell.FONT_SIZE / 2);
     this.key = `${parentKey}-${text}`;

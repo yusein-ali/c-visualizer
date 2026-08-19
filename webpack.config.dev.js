@@ -5,9 +5,7 @@ const baseConfig = require('./webpack.config.js');
 // every debug session. `npm run analyze` sets it.
 const plugins = [];
 if (process.env.ANALYZE) {
-  const {
-    BundleAnalyzerPlugin,
-  } = require('webpack-bundle-analyzer');
+  const { BundleAnalyzerPlugin } = require('webpack-bundle-analyzer');
   plugins.push(new BundleAnalyzerPlugin());
 }
 

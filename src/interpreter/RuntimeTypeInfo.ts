@@ -160,7 +160,7 @@ function annotateVariable(
       annotated.plivetDeclarationInfo = declarationInfo;
     }
   }
-  const match = /^([^\[*]+)([\s\S]*)$/.exec(variable.type);
+  const match = /^([^[*]+)([\s\S]*)$/.exec(variable.type);
   const baseType = match === null ? variable.type : match[1].trim();
   const suffix = match === null ? '' : match[2];
   const enumInfo = enumTypes[baseType];
@@ -269,7 +269,7 @@ function annotateFunctionPointers(
       annotateFunctionPointers(child, functionPointerTypes, functionAt);
     }
   }
-  const match = /^([^\[*]+)([\s\S]*)$/.exec(variable.type);
+  const match = /^([^[*]+)([\s\S]*)$/.exec(variable.type);
   const baseType = match === null ? variable.type : match[1].trim();
   const suffix = match === null ? '' : match[2];
   const info = functionPointerTypes[baseType];
@@ -322,7 +322,7 @@ function displayShapeOf(
   variable: Variable,
   recordTypes: RuntimeRecordTypes
 ): { size: number; alignment: number } {
-  const match = /^([^\[*]+)([\s\S]*)$/.exec(variable.type);
+  const match = /^([^[*]+)([\s\S]*)$/.exec(variable.type);
   const baseType = match === null ? variable.type : match[1].trim();
   const suffix = match === null ? '' : match[2];
   const record = recordTypes[baseType];

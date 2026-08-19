@@ -1,3 +1,4 @@
+import { readFileSync } from 'fs';
 import { PlivetCPP14Interpreter } from '../src/interpreter/CPP14';
 import { libraryHelp, libraryNames } from '../src/components/libraryHelp';
 import { constructAt } from '../src/interpreter/Construct';
@@ -563,7 +564,7 @@ describe('library help', () => {
     const engine = require.resolve(
       'unicoen.ts/dist/interpreter/CPP14/CPP14Engine'
     );
-    const source = require('fs').readFileSync(engine, 'utf8');
+    const source = readFileSync(engine, 'utf8');
     const registered = (source.match(/global\.setTop\('([a-zA-Z_]+)'/g) || [])
       .map((call: string) =>
         call.replace(/global\.setTop\('/, '').replace(/'/, '')

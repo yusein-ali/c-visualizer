@@ -131,8 +131,8 @@ export class EnumTable {
         tag !== ''
           ? `enum ${tag}`
           : aliases.length === 0
-          ? 'enum without a tag'
-          : aliases[0];
+            ? 'enum without a tag'
+            : aliases[0];
       const enumerators = this.readEnumerators(
         masked.slice(cursor + 1, close),
         code.slice(cursor + 1, close),
@@ -406,7 +406,8 @@ export class EnumTable {
 
   /** `typedef const enum Color Shade;` aliases an already declared tag. */
   private readAliasUses(masked: string): void {
-    const pattern = /\btypedef\b([^;]*?)\benum\s+([A-Za-z_]\w*)\s+([A-Za-z_]\w*)\s*;/g;
+    const pattern =
+      /\btypedef\b([^;]*?)\benum\s+([A-Za-z_]\w*)\s+([A-Za-z_]\w*)\s*;/g;
     let match = pattern.exec(masked);
     while (match !== null) {
       const runtimeType = this.runtimeByTag.get(match[2]);
@@ -440,7 +441,7 @@ export class EnumTable {
     try {
       const value = evaluateConstantExpression(text);
       return isNaN(value) ? fallback : value;
-    } catch (error) {
+    } catch {
       return fallback;
     }
   }

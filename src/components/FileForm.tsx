@@ -38,7 +38,9 @@ export default class FileForm extends React.Component<Props, State> {
       this.setState({ filelist });
       target.value = '';
     } catch (e) {
-      console.warn(e.message);
+      // TypeScript types a caught value as `unknown`: whatever was thrown need
+      // not be an Error, and here it comes from the FileReader.
+      console.warn(e instanceof Error ? e.message : e);
       alert('Failed to upload files');
     }
   }

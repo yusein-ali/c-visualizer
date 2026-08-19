@@ -14,7 +14,9 @@ describe('object-like macros', () => {
   });
 
   it('expands a macro that refers to another macro', () => {
-    const out = preprocess('#define TWO 2\n#define FOUR (TWO*2)\nint x = FOUR;');
+    const out = preprocess(
+      '#define TWO 2\n#define FOUR (TWO*2)\nint x = FOUR;'
+    );
     expect(out.trim()).toBe('int x = (2*2);');
   });
 
@@ -36,7 +38,9 @@ describe('object-like macros', () => {
 
 describe('textual substitution traps', () => {
   it('leaves macro names inside string literals alone', () => {
-    expect(preprocess('#define N 7\nputs("N=%d");').trim()).toBe('puts("N=%d");');
+    expect(preprocess('#define N 7\nputs("N=%d");').trim()).toBe(
+      'puts("N=%d");'
+    );
   });
 
   it('leaves macro names inside longer identifiers alone', () => {
@@ -44,13 +48,15 @@ describe('textual substitution traps', () => {
   });
 
   it('leaves macro names inside comments alone', () => {
-    expect(preprocess('#define N 7\n/* N is the size */ int x = N;').trim()).toBe(
-      '/* N is the size */ int x = 7;'
-    );
+    expect(
+      preprocess('#define N 7\n/* N is the size */ int x = N;').trim()
+    ).toBe('/* N is the size */ int x = 7;');
   });
 
   it('leaves macro names inside character literals alone', () => {
-    expect(preprocess("#define N 7\nchar c = 'N';").trim()).toBe("char c = 'N';");
+    expect(preprocess("#define N 7\nchar c = 'N';").trim()).toBe(
+      "char c = 'N';"
+    );
   });
 });
 
@@ -62,9 +68,9 @@ describe('function-like macros', () => {
   });
 
   it('expands a call with several arguments', () => {
-    expect(preprocess('#define ADD(a,b) ((a)+(b))\nint y = ADD(1,2);').trim()).toBe(
-      'int y = ((1)+(2));'
-    );
+    expect(
+      preprocess('#define ADD(a,b) ((a)+(b))\nint y = ADD(1,2);').trim()
+    ).toBe('int y = ((1)+(2));');
   });
 
   it('keeps commas inside nested parentheses in one argument', () => {
@@ -73,7 +79,9 @@ describe('function-like macros', () => {
   });
 
   it('accepts a definition split over lines with a backslash', () => {
-    const out = preprocess('#define ADD(a,b) \\\n  ((a)+(b))\nint y = ADD(5,6);');
+    const out = preprocess(
+      '#define ADD(a,b) \\\n  ((a)+(b))\nint y = ADD(5,6);'
+    );
     expect(out.split('\n').length).toBe(3); // line numbering preserved
     expect(out.trim()).toBe('int y = ((5)+(6));');
   });
@@ -85,7 +93,9 @@ describe('function-like macros', () => {
   });
 
   it('does not recurse forever on a self-referential macro', () => {
-    expect(preprocess('#define N (N+1)\nint x = N;').trim()).toBe('int x = (N+1);');
+    expect(preprocess('#define N (N+1)\nint x = N;').trim()).toBe(
+      'int x = (N+1);'
+    );
   });
 });
 
@@ -119,12 +129,16 @@ describe('stringification and token pasting', () => {
   });
 
   it('pastes without expanding either operand first', () => {
-    const out = preprocess('#define N 7\n#define CAT(a,b) a##b\nint y = CAT(N,N);');
+    const out = preprocess(
+      '#define N 7\n#define CAT(a,b) a##b\nint y = CAT(N,N);'
+    );
     expect(out.trim()).toBe('int y = NN;');
   });
 
   it('expands the result of a paste when it names a macro', () => {
-    const out = preprocess('#define xy 4\n#define CAT(a,b) a##b\nint y = CAT(x,y);');
+    const out = preprocess(
+      '#define xy 4\n#define CAT(a,b) a##b\nint y = CAT(x,y);'
+    );
     expect(out.trim()).toBe('int y = 4;');
   });
 
@@ -137,7 +151,9 @@ describe('stringification and token pasting', () => {
 
 describe('variadic macros', () => {
   it('passes every argument through __VA_ARGS__', () => {
-    const out = preprocess('#define LOG(...) printf(__VA_ARGS__)\nLOG("%d", 3);');
+    const out = preprocess(
+      '#define LOG(...) printf(__VA_ARGS__)\nLOG("%d", 3);'
+    );
     expect(out.trim()).toBe('printf("%d", 3);');
   });
 
@@ -187,7 +203,9 @@ describe('variadic macros', () => {
 
 describe('conditional directives', () => {
   it('keeps the taken branch and drops the other one', () => {
-    const out = lines('#define F 1\n#ifdef F\nint a = 1;\n#else\nint b = 2;\n#endif');
+    const out = lines(
+      '#define F 1\n#ifdef F\nint a = 1;\n#else\nint b = 2;\n#endif'
+    );
     expect(out[2].trim()).toBe('int a = 1;');
     expect(out[4].trim()).toBe('');
   });
@@ -205,12 +223,16 @@ describe('conditional directives', () => {
   });
 
   it('evaluates arithmetic and defined() in #if', () => {
-    const out = lines('#define N 3\n#if N > 2 && defined(N)\nint a = 1;\n#endif');
+    const out = lines(
+      '#define N 3\n#if N > 2 && defined(N)\nint a = 1;\n#endif'
+    );
     expect(out[2].trim()).toBe('int a = 1;');
   });
 
   it('takes the #elif branch when the first test fails', () => {
-    const out = lines('#if 0\nint a = 1;\n#elif 1\nint b = 2;\n#else\nint c = 3;\n#endif');
+    const out = lines(
+      '#if 0\nint a = 1;\n#elif 1\nint b = 2;\n#else\nint c = 3;\n#endif'
+    );
     expect(out[1].trim()).toBe('');
     expect(out[3].trim()).toBe('int b = 2;');
     expect(out[5].trim()).toBe('');
@@ -225,7 +247,8 @@ describe('conditional directives', () => {
 
 describe('line numbering', () => {
   it('keeps one output line per input line', () => {
-    const code = '#include<stdio.h>\n#define N 3\n\nint main(){\n  return N;\n}';
+    const code =
+      '#include<stdio.h>\n#define N 3\n\nint main(){\n  return N;\n}';
     expect(preprocess(code).split('\n').length).toBe(code.split('\n').length);
   });
 
@@ -274,10 +297,9 @@ describe('expansion records for the editor', () => {
   });
 
   it('records one entry per use, not per definition', () => {
-    expect(macros('#define N 7\nint a = N, b = N;').map((e) => e.column)).toEqual([
-      8,
-      15,
-    ]);
+    expect(
+      macros('#define N 7\nint a = N, b = N;').map((e) => e.column)
+    ).toEqual([8, 15]);
   });
 
   it('records the directive lines themselves, with what they did', () => {
@@ -410,7 +432,9 @@ describe('edge cases and malformed input', () => {
   });
 
   it('nests conditionals correctly', () => {
-    const out = preprocess('#if 1\n#if 0\nint a = 1;\n#endif\nint b = 2;\n#endif');
+    const out = preprocess(
+      '#if 1\n#if 0\nint a = 1;\n#endif\nint b = 2;\n#endif'
+    );
     expect(out.trim()).toBe('int b = 2;');
   });
 

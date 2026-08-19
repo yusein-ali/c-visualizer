@@ -68,7 +68,8 @@ const probes = [
     scope: 'in',
     expect: '5',
     code:
-      F + 'int main(){ int (*op)(int, int) = add; printf("%d\\n", op(2, 3)); return 0; }',
+      F +
+      'int main(){ int (*op)(int, int) = add; printf("%d\\n", op(2, 3)); return 0; }',
   },
   {
     id: 'F02',
@@ -76,7 +77,8 @@ const probes = [
     scope: 'in',
     expect: '5',
     code:
-      F + 'int main(){ int (*op)(int, int) = &add; printf("%d\\n", op(2, 3)); return 0; }',
+      F +
+      'int main(){ int (*op)(int, int) = &add; printf("%d\\n", op(2, 3)); return 0; }',
   },
   {
     id: 'F03',
@@ -84,7 +86,8 @@ const probes = [
     scope: 'in',
     expect: '5',
     code:
-      F + 'int main(){ int (*op)(int, int) = add; printf("%d\\n", (*op)(2, 3)); return 0; }',
+      F +
+      'int main(){ int (*op)(int, int) = add; printf("%d\\n", (*op)(2, 3)); return 0; }',
   },
   {
     id: 'F04',
@@ -92,7 +95,8 @@ const probes = [
     scope: 'in',
     expect: '5',
     code:
-      F + 'int main(){ int (*op)(int, int); op = add; printf("%d\\n", op(2, 3)); return 0; }',
+      F +
+      'int main(){ int (*op)(int, int); op = add; printf("%d\\n", op(2, 3)); return 0; }',
   },
   {
     id: 'F05',
@@ -100,7 +104,8 @@ const probes = [
     scope: 'in',
     expect: '4',
     code:
-      F + 'int main(){ int (*op)(int, int) = add; op = sub; printf("%d\\n", op(7, 3)); return 0; }',
+      F +
+      'int main(){ int (*op)(int, int) = add; op = sub; printf("%d\\n", op(7, 3)); return 0; }',
   },
   {
     id: 'F06',
@@ -108,7 +113,8 @@ const probes = [
     scope: 'in',
     expect: 'hi',
     code:
-      H + 'void greet(void){ printf("hi\\n"); }\n' +
+      H +
+      'void greet(void){ printf("hi\\n"); }\n' +
       'int main(){ void (*g)(void) = greet; g(); return 0; }',
   },
   {
@@ -116,7 +122,9 @@ const probes = [
     title: 'a pointer held in a global',
     scope: 'in',
     expect: '5',
-    code: F + 'int (*gop)(int, int) = add;\nint main(){ printf("%d\\n", gop(2, 3)); return 0; }',
+    code:
+      F +
+      'int (*gop)(int, int) = add;\nint main(){ printf("%d\\n", gop(2, 3)); return 0; }',
   },
 
   // ---- callbacks -----------------------------------------------------------
@@ -126,7 +134,8 @@ const probes = [
     scope: 'in',
     expect: '5',
     code:
-      F + 'int apply(int (*f)(int, int), int a, int b){ return f(a, b); }\n' +
+      F +
+      'int apply(int (*f)(int, int), int a, int b){ return f(a, b); }\n' +
       'int main(){ printf("%d\\n", apply(add, 2, 3)); return 0; }',
   },
   {
@@ -135,7 +144,8 @@ const probes = [
     scope: 'in',
     expect: '4',
     code:
-      F + 'int apply(int (*f)(int, int), int a, int b){ return f(a, b); }\n' +
+      F +
+      'int apply(int (*f)(int, int), int a, int b){ return f(a, b); }\n' +
       'int main(){ int (*op)(int, int) = sub; printf("%d\\n", apply(op, 7, 3)); return 0; }',
   },
   {
@@ -144,7 +154,8 @@ const probes = [
     scope: 'in',
     expect: '5',
     code:
-      H + 'typedef int (*BinOp)(int, int);\nint add(int a, int b){ return a + b; }\n' +
+      H +
+      'typedef int (*BinOp)(int, int);\nint add(int a, int b){ return a + b; }\n' +
       'int main(){ BinOp op = add; printf("%d\\n", op(2, 3)); return 0; }',
   },
 
@@ -155,7 +166,8 @@ const probes = [
     scope: 'in',
     expect: '5 4',
     code:
-      F + 'int main(){ int (*ops[2])(int, int) = {add, sub};\n' +
+      F +
+      'int main(){ int (*ops[2])(int, int) = {add, sub};\n' +
       '  printf("%d %d\\n", ops[0](2, 3), ops[1](7, 3)); return 0; }',
   },
   {
@@ -164,7 +176,8 @@ const probes = [
     scope: 'in',
     expect: '4',
     code:
-      F + 'int main(){ int (*ops[2])(int, int) = {add, sub};\n' +
+      F +
+      'int main(){ int (*ops[2])(int, int) = {add, sub};\n' +
       '  printf("%d\\n", (*ops[1])(7, 3)); return 0; }',
   },
   {
@@ -173,7 +186,8 @@ const probes = [
     scope: 'in',
     expect: '5',
     code:
-      F + 'struct Op { int (*fn)(int, int); };\n' +
+      F +
+      'struct Op { int (*fn)(int, int); };\n' +
       'int main(){ struct Op o; o.fn = add; printf("%d\\n", o.fn(2, 3)); return 0; }',
   },
 
@@ -184,7 +198,8 @@ const probes = [
     scope: 'in',
     expect: '1 0',
     code:
-      F + 'int main(){ int (*op)(int, int) = add;\n' +
+      F +
+      'int main(){ int (*op)(int, int) = add;\n' +
       '  printf("%d %d\\n", op == add, op == sub); return 0; }',
   },
   {
@@ -193,14 +208,17 @@ const probes = [
     scope: 'in',
     expect: 'clear',
     code:
-      F + 'int main(){ int (*op)(int, int) = 0; if (!op) { printf("clear\\n"); } return 0; }',
+      F +
+      'int main(){ int (*op)(int, int) = 0; if (!op) { printf("clear\\n"); } return 0; }',
   },
   {
     id: 'F16',
     title: 'a function is never at the null address',
     scope: 'in',
     expect: '0',
-    code: F + 'int main(){ int (*op)(int, int) = add; printf("%d\\n", op == 0); return 0; }',
+    code:
+      F +
+      'int main(){ int (*op)(int, int) = add; printf("%d\\n", op == 0); return 0; }',
   },
   {
     id: 'F17',
@@ -208,7 +226,8 @@ const probes = [
     scope: 'in',
     expect: '10',
     code:
-      F + 'int main(){ int wide = 1; int (*op)(int, int) = wide ? add : sub;\n' +
+      F +
+      'int main(){ int wide = 1; int (*op)(int, int) = wide ? add : sub;\n' +
       '  printf("%d\\n", op(7, 3)); return 0; }',
   },
 
@@ -219,7 +238,8 @@ const probes = [
     scope: 'out',
     expect: '5',
     code:
-      F + 'int (*pick(int wide))(int, int){ return wide ? add : sub; }\n' +
+      F +
+      'int (*pick(int wide))(int, int){ return wide ? add : sub; }\n' +
       'int main(){ printf("%d\\n", pick(0)(2, 3)); return 0; }',
   },
   {
@@ -228,7 +248,8 @@ const probes = [
     scope: 'out',
     expect: '5',
     code:
-      H + 'int add(int a, int b){ return a + b; }\ntypedef int BinOp(int, int);\n' +
+      H +
+      'int add(int a, int b){ return a + b; }\ntypedef int BinOp(int, int);\n' +
       'int main(){ BinOp *op = add; printf("%d\\n", op(2, 3)); return 0; }',
   },
   {
@@ -237,7 +258,8 @@ const probes = [
     scope: 'out',
     expect: '1 2 3',
     code:
-      H + '#include<stdlib.h>\n' +
+      H +
+      '#include<stdlib.h>\n' +
       'int cmp(const void *a, const void *b){ return *(int *)a - *(int *)b; }\n' +
       'int main(){ int v[3] = {3, 1, 2}; qsort(v, 3, sizeof(int), cmp);\n' +
       '  printf("%d %d %d\\n", v[0], v[1], v[2]); return 0; }',
@@ -253,7 +275,9 @@ function loadTs(file) {
   if (tsCache.has(file)) {
     return tsCache.get(file);
   }
-  const babel = require(path.join(__dirname, '..', '..', 'node_modules', '@babel', 'core'));
+  const babel = require(
+    path.join(__dirname, '..', '..', 'node_modules', '@babel', 'core')
+  );
   const { code } = babel.transformFileSync(file, {
     filename: file,
     presets: [[require.resolve('@babel/preset-typescript'), {}]],
@@ -267,14 +291,25 @@ function loadTs(file) {
     request.startsWith('.')
       ? loadTs(path.resolve(path.dirname(file), request) + '.ts')
       : require(request);
-  new Function('module', 'exports', 'require', code)(loaded, loaded.exports, localRequire);
+  new Function('module', 'exports', 'require', code)(
+    loaded,
+    loaded.exports,
+    localRequire
+  );
   tsCache.set(file, loaded.exports);
   return loaded.exports;
 }
 
 /** The interpreter the application itself uses, compiled from src/. */
 function loadPlivetInterpreter() {
-  const entry = path.join(__dirname, '..', '..', 'src', 'interpreter', 'CPP14.ts');
+  const entry = path.join(
+    __dirname,
+    '..',
+    '..',
+    'src',
+    'interpreter',
+    'CPP14.ts'
+  );
   return loadTs(entry).PlivetCPP14Interpreter;
 }
 
@@ -293,7 +328,10 @@ function runChild(code) {
   try {
     return JSON.parse(res.stdout.trim().split('\n').pop());
   } catch (e) {
-    return { verdict: 'CRASH', detail: (res.stderr || res.stdout || '').trim().split('\n')[0] };
+    return {
+      verdict: 'CRASH',
+      detail: (res.stderr || res.stdout || '').trim().split('\n')[0],
+    };
   }
 }
 
@@ -308,15 +346,27 @@ function child() {
       const PlivetInterpreter = loadPlivetInterpreter();
       interpreter = new PlivetInterpreter();
     } else {
-      const { CPP14Interpreter } = require(path.join(
-        __dirname, '..', '..', 'node_modules', 'unicoen.ts',
-        'dist', 'interpreter', 'CPP14', 'CPP14Interpreter'
-      ));
+      const { CPP14Interpreter } = require(
+        path.join(
+          __dirname,
+          '..',
+          '..',
+          'node_modules',
+          'unicoen.ts',
+          'dist',
+          'interpreter',
+          'CPP14',
+          'CPP14Interpreter'
+        )
+      );
       interpreter = new CPP14Interpreter();
     }
     interpreter.setFileList(new Map());
   } catch (e) {
-    return out({ verdict: 'CRASH', detail: 'cannot load interpreter: ' + e.message });
+    return out({
+      verdict: 'CRASH',
+      detail: 'cannot load interpreter: ' + e.message,
+    });
   }
   let syntaxErrors = [];
   try {
@@ -329,7 +379,11 @@ function child() {
     let steps = 0;
     while (interpreter.isStepExecutionRunning() && steps < MAX_STEPS) {
       if (interpreter.getIsWaitingForStdin()) {
-        return out({ verdict: 'STDIN', detail: 'program blocked on input', syntaxErrors });
+        return out({
+          verdict: 'STDIN',
+          detail: 'program blocked on input',
+          syntaxErrors,
+        });
       }
       interpreter.stepExecute();
       steps++;
@@ -402,9 +456,13 @@ function main() {
           : `${r.verdict}${r.detail ? ' - ' + r.detail : ''}`;
       console.log(`${label[r.status]}  ${r.id.padEnd(5)} ${r.title}`);
       if (r.status === 'fail' || r.status === 'not yet') {
-        console.log(`             expect ${JSON.stringify(r.expect)}  got ${got}`);
+        console.log(
+          `             expect ${JSON.stringify(r.expect)}  got ${got}`
+        );
         if (r.syntaxErrors && r.syntaxErrors.length) {
-          console.log(`             syntax: ${r.syntaxErrors[0].split(' expecting ')[0]}`);
+          console.log(
+            `             syntax: ${r.syntaxErrors[0].split(' expecting ')[0]}`
+          );
         }
       }
     }
@@ -425,7 +483,8 @@ function main() {
   }
 
   // Only a probe that used to work and stopped is a real failure.
-  process.exitCode = results.filter((r) => r.status === 'fail').length > 0 ? 1 : 0;
+  process.exitCode =
+    results.filter((r) => r.status === 'fail').length > 0 ? 1 : 0;
 }
 
 main();

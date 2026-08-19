@@ -55,7 +55,7 @@ interface ExpansionSource {
 function reportsExpansions(
   interpreter: Interpreter
 ): interpreter is Interpreter & ExpansionSource {
-  const source = (interpreter as unknown) as ExpansionSource;
+  const source = interpreter as unknown as ExpansionSource;
   return (
     typeof source.getExpansions === 'function' &&
     typeof source.getConstructs === 'function'
@@ -125,12 +125,8 @@ class Server {
   }
 
   public async send(request: Request): Promise<Response> {
-    const {
-      controlEvent,
-      sourcecode,
-      stdinText,
-      lineNumOfBreakpoint,
-    } = request;
+    const { controlEvent, sourcecode, stdinText, lineNumOfBreakpoint } =
+      request;
 
     switch (controlEvent) {
       case 'Start': {
