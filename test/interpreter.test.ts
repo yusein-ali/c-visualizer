@@ -82,9 +82,26 @@ describe('constructs for the editor', () => {
         ['functionDec', 1],
         ['variableDec', 2],
         ['if', 3],
+        ['assignment', 3],
         ['return', 4],
       ])
     );
+  });
+
+  it('lists simple and compound assignments but not equality comparisons', () => {
+    const code = `int main(){
+  int x = 1;
+  x = 2;
+  x += 3;
+  if (x == 5) { return x; }
+}`;
+    const all = constructs(code);
+    const found = all.filter(
+      (construct) => construct.kind === 'assignment'
+    );
+    expect(found.map((construct) => construct.line)).toEqual([3, 4]);
+    expect(constructAt(all, 3, 2)!.kind).toBe('assignment');
+    expect(constructAt(all, 4, 4)!.kind).toBe('assignment');
   });
 
   it('names what the construct is about', () => {

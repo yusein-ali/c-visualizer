@@ -1,5 +1,6 @@
 import { UniNode } from 'unicoen.ts/dist/node/UniNode';
 import { UniBreak } from 'unicoen.ts/dist/node/UniBreak';
+import { UniBinOp } from 'unicoen.ts/dist/node/UniBinOp';
 import { UniCast } from 'unicoen.ts/dist/node/UniCast';
 import { UniClassDec } from 'unicoen.ts/dist/node/UniClassDec';
 import { UniContinue } from 'unicoen.ts/dist/node/UniContinue';
@@ -73,7 +74,28 @@ const KINDS: Array<[Function, string]> = [
   [UniCast, 'cast'],
 ];
 
+/** C's assignment operators (6.5.16), excluding equality comparisons. */
+const ASSIGNMENT_OPERATORS = [
+  '=',
+  '*=',
+  '/=',
+  '%=',
+  '+=',
+  '-=',
+  '<<=',
+  '>>=',
+  '&=',
+  '^=',
+  '|=',
+];
+
 const kindOf = (node: object): string | null => {
+  if (
+    node instanceof UniBinOp &&
+    ASSIGNMENT_OPERATORS.indexOf(node.operator) !== -1
+  ) {
+    return 'assignment';
+  }
   if (node instanceof UniVariableDec) {
     const declaration = node as any;
     if (

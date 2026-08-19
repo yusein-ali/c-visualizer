@@ -31,6 +31,7 @@ export default {
   constructReturn: 'return statement',
   constructBreak: 'break',
   constructContinue: 'continue',
+  constructAssignment: 'assignment statement',
   constructVariableDec: 'variable declaration',
   constructTypeDec: 'type declaration',
   constructEnumerator: 'enumeration constant',

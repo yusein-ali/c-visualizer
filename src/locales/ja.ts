@@ -27,6 +27,7 @@ export default {
   constructReturn: 'return 文',
   constructBreak: 'break 文',
   constructContinue: 'continue 文',
+  constructAssignment: '代入文',
   constructVariableDec: '変数宣言',
   constructTypeDec: '型宣言',
   constructEnumerator: '列挙定数',
