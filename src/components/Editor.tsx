@@ -30,7 +30,20 @@ import { ExecState } from 'unicoen.ts/dist/interpreter/Engine/ExecState';
 import { LangProps, ProgLangProps, Theme } from './Props';
 import { SyntaxErrorData } from 'unicoen.ts/dist/interpreter/mapper/SyntaxErrorData';
 import { Expansion } from '../interpreter/Expansion';
-import { Construct, constructAt } from '../interpreter/Construct';
+import {
+  displayAddressOf,
+  displayPointerValueOf,
+  displayTypeOf,
+  functionPointerInfoOf,
+} from '../interpreter/RuntimeTypeInfo';
+import {
+  Construct,
+  constructAt,
+  EnumeratorDetail,
+  FunctionDeclarationDetail,
+  TypeDeclarationDetail,
+  VariableDeclarationDetail,
+} from '../interpreter/Construct';
 import { libraryHelp } from './libraryHelp';
 import { Variable } from 'unicoen.ts/dist/interpreter/Engine/Variable';
 
@@ -58,6 +71,93 @@ interface GutterMousedownEvent extends React.MouseEvent {
   getDocumentPosition: () => AceAjax.Position;
   stop: () => void;
 }
+
+export const formatAddress = (address: number): string =>
+  `0x${address.toString(16).toUpperCase()}`;
+
+export const formatVariableDeclaration = (
+  declaration: VariableDeclarationDetail,
+  lang: string
+): string =>
+  [
+    `${translate(lang, 'declarationType')}: ${declaration.type}`,
+    `${translate(lang, 'storageClass')}: ${
+      declaration.storageClasses.join(', ') || translate(lang, 'none')
+    }`,
+    `${translate(lang, 'qualifiers')}: ${
+      declaration.qualifiers.join(', ') || translate(lang, 'none')
+    }`,
+    `${translate(lang, 'identifier')}: ${declaration.identifier}`,
+    `${translate(lang, 'value')}: ${
+      declaration.initialValue === null
+        ? translate(lang, 'uninitialized')
+        : declaration.initialValue
+    }`,
+  ].join('\n');
+
+/**
+ * A C declaration always names a complete type - storage class and type, with
+ * only the qualifiers optional - so the tooltip lists every part and says
+ * `none` where the source left one out. The last line takes the standard's
+ * own term for the name being introduced: a typedef declarator defines a
+ * typedef name, a record or enumeration definition names a tag.
+ */
+export const formatTypeDeclaration = (
+  declaration: TypeDeclarationDetail,
+  lang: string
+): string =>
+  [
+    `${translate(lang, 'declarationType')}: ${declaration.type}`,
+    `${translate(lang, 'storageClass')}: ${
+      declaration.storageClasses.join(', ') || translate(lang, 'none')
+    }`,
+    `${translate(lang, 'qualifiers')}: ${
+      declaration.qualifiers.join(', ') || translate(lang, 'none')
+    }`,
+    `${translate(lang, declaration.nameKind)}: ${
+      declaration.name || translate(lang, 'none')
+    }`,
+  ].join('\n');
+
+/**
+ * What an enumerator declares. The value is the point of it: nothing in
+ * `enum Mode { OFF, ON = 4, FAULT }` tells a reader that FAULT is 5.
+ */
+export const formatEnumerator = (
+  declaration: EnumeratorDetail,
+  lang: string
+): string =>
+  [
+    `${translate(lang, 'declarationType')}: ${declaration.type}`,
+    `${translate(lang, 'enumeration')}: ${declaration.enumeration}`,
+    `${translate(lang, 'identifier')}: ${declaration.identifier}`,
+    `${translate(lang, 'value')}: ${declaration.value}`,
+  ].join('\n');
+
+/**
+ * What a function declaration says, in the standard's own words: the type it
+ * returns, the identifier it declares (6.9.1), and its parameters (3.16) - one
+ * per line, each named before the type it has, the way the declaration reads.
+ * `void` in a parameter list declares no parameters, so it is reported as
+ * none rather than as a parameter called nothing.
+ */
+export const formatFunctionDeclaration = (
+  declaration: FunctionDeclarationDetail,
+  lang: string
+): string =>
+  [
+    `${translate(lang, 'returnType')}: ${declaration.returnType}`,
+    `${translate(lang, 'identifier')}: ${declaration.identifier}`,
+    declaration.parameters.length === 0
+      ? `${translate(lang, 'parameters')}: ${translate(lang, 'none')}`
+      : [`${translate(lang, 'parameters')}:`]
+          .concat(
+            declaration.parameters.map(
+              (parameter) => `  ${parameter.identifier}: ${parameter.type}`
+            )
+          )
+          .join('\n'),
+  ].join('\n');
 
 export default class Editor extends React.Component<Props, State> {
   private sentSourcecode: string;
@@ -402,6 +502,42 @@ export default class Editor extends React.Component<Props, State> {
           .charAt(0)
           .toUpperCase()}${construct.kind.slice(1)}`
       );
+      if (
+        construct.kind === 'variableDec' &&
+        typeof construct.variableDeclarations !== 'undefined'
+      ) {
+        const declarations = construct.variableDeclarations.map((declaration) =>
+          formatVariableDeclaration(declaration, this.props.lang)
+        );
+        return `${name}\n${declarations.join('\n\n')}`;
+      }
+      if (
+        construct.kind === 'enumerator' &&
+        typeof construct.enumerator !== 'undefined'
+      ) {
+        return `${name}\n${formatEnumerator(
+          construct.enumerator,
+          this.props.lang
+        )}`;
+      }
+      if (
+        construct.kind === 'functionDec' &&
+        typeof construct.declaredFunction !== 'undefined'
+      ) {
+        return `${name}\n${formatFunctionDeclaration(
+          construct.declaredFunction,
+          this.props.lang
+        )}`;
+      }
+      if (
+        construct.kind === 'typeDec' &&
+        typeof construct.declaredTypes !== 'undefined'
+      ) {
+        const declared = construct.declaredTypes.map((declaration) =>
+          formatTypeDeclaration(declaration, this.props.lang)
+        );
+        return `${name}\n${declared.join('\n\n')}`;
+      }
       return construct.detail === '' ? name : `${name} — ${construct.detail}`;
     }
     return null;
@@ -428,14 +564,48 @@ export default class Editor extends React.Component<Props, State> {
     return null;
   }
 
+  /**
+   * Everything shown here goes through the display layer rather than the
+   * runtime one. An enum, a record and a function pointer all execute under a
+   * synthetic type the source never contained, and addresses are laid out for
+   * the reader before the canvas draws them - so reading `type` and `address`
+   * off the variable would both leak `_fp0` into the tooltip and put a
+   * different address in it than the box beside it shows.
+   */
   private variableText(variable: Variable): string {
     const lang = this.props.lang;
-    const value = this.formatValue(variable.getValue(), variable.type);
+    const type = displayTypeOf(variable);
+    const value = this.variableValue(variable, type);
     const target = this.pointerTarget(variable);
     return (
-      `${variable.name} : ${variable.type} = ${value}${target}\n` +
-      `${translate(lang, 'atAddress')} ${variable.address}`
+      `${variable.name} : ${type} = ${value}${target}\n` +
+      `${translate(lang, 'atAddress')} ${formatAddress(
+        displayAddressOf(variable)
+      )}`
     );
+  }
+
+  /**
+   * What a variable holds. A pointer is an address whichever kind it is, so it
+   * is always shown as one; a function pointer is named as well, because the
+   * address on its own says nothing about which function was chosen.
+   */
+  private variableValue(variable: Variable, type: string): string {
+    const held = variable.getValue();
+    const functionInfo = functionPointerInfoOf(variable);
+    if (functionInfo !== null && held != null && !Array.isArray(held)) {
+      // The engine stores an `int` as a boxed number, so a null callback would
+      // print as a bare `0` if this went through the generic path.
+      const address = formatAddress(Number(held.valueOf()));
+      return functionInfo.pointee === null
+        ? address
+        : `${functionInfo.pointee} (${address})`;
+    }
+    const pointerValue = displayPointerValueOf(variable);
+    if (pointerValue !== null) {
+      return formatAddress(pointerValue);
+    }
+    return this.formatValue(held, type);
   }
 
   /** For a pointer, the variable it points at - the arrow the canvas draws. */
@@ -500,10 +670,13 @@ export default class Editor extends React.Component<Props, State> {
           element !== null &&
           typeof element === 'object' &&
           typeof element.getValue === 'function'
-            ? this.formatValue(element.getValue(), element.type)
+            ? this.variableValue(element, displayTypeOf(element))
             : this.formatValue(element, '')
         );
       return `[${shown.join(', ')}${value.length > 8 ? ', …' : ''}]`;
+    }
+    if (typeof value === 'number' && type.indexOf('*') !== -1) {
+      return formatAddress(value);
     }
     if (typeof value === 'number' && type.indexOf('char') !== -1) {
       return `'${String.fromCharCode(value)}' (${value})`;
