@@ -19,8 +19,8 @@ const markFor = (kind: Expansion['kind']) =>
       kind === 'macro'
         ? 'plivet-macro-expansion'
         : kind === 'directive'
-        ? 'plivet-directive-line'
-        : 'plivet-excluded-region',
+          ? 'plivet-directive-line'
+          : 'plivet-excluded-region',
   });
 
 const decorationsFor = (

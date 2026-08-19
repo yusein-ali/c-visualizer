@@ -49,7 +49,7 @@ export class DebugExtensions {
       stepHighlightField,
       expansionField,
       errorLineField,
-      this.readOnly.of(EditorState.readOnly.of(false)),
+      this.readOnly.of(DebugExtensions.readOnlyExtension(false)),
     ];
     if (typeof options.hoverText !== 'undefined') {
       this.extensions.push(plivetHoverTooltip(options.hoverText));
@@ -85,8 +85,26 @@ export class DebugExtensions {
    */
   setReadOnly(view: EditorView, readOnly: boolean): void {
     view.dispatch({
-      effects: this.readOnly.reconfigure(EditorState.readOnly.of(readOnly)),
+      effects: this.readOnly.reconfigure(
+        DebugExtensions.readOnlyExtension(readOnly)
+      ),
     });
+  }
+
+  /**
+   * Read-only is two things, and the second one matters for a course page.
+   * `EditorState.readOnly` stops the edit; the `read-only` attribute is the
+   * hook interactive-code's stylesheet already styles - the same attribute
+   * `InteractiveEditor.forceReadOnly()` sets - so an embedded PLIVET looks
+   * frozen the way every other frozen editor on the page does.
+   */
+  private static readOnlyExtension(readOnly: boolean): Extension {
+    return readOnly
+      ? [
+          EditorState.readOnly.of(true),
+          EditorView.editorAttributes.of({ 'read-only': 'true' }),
+        ]
+      : EditorState.readOnly.of(false);
   }
 }
 

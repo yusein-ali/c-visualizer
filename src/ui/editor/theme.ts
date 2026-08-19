@@ -41,9 +41,10 @@ const chrome = {
   '&.cm-focused .cm-cursor': {
     borderLeftColor: colour('caret', 'body-color', '#212529'),
   },
-  '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection': {
-    backgroundColor: plain('selection-bg', 'rgba(13, 110, 253, 0.25)'),
-  },
+  '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection':
+    {
+      backgroundColor: plain('selection-bg', 'rgba(13, 110, 253, 0.25)'),
+    },
   '.cm-activeLine': {
     backgroundColor: plain('active-line-bg', 'rgba(0, 0, 0, 0.04)'),
   },
@@ -135,6 +136,16 @@ export const debugTheme = EditorView.baseTheme({
     height: '0.7em',
     borderRadius: '50%',
     backgroundColor: 'var(--plivet-breakpoint-color, #d90000)',
+  },
+  // Standalone, these are the rules interactive-code.css applies to a frozen
+  // editor; embedded, its stylesheet says the same thing about the same
+  // attribute and this simply agrees with it.
+  '&[read-only] .cm-scroller': {
+    backgroundColor:
+      'var(--plivet-editor-readonly-bg, var(--interactive-editor-readonly-bg, var(--bs-secondary-bg, #f0f0f0)))',
+  },
+  '&[read-only] .cm-content': {
+    caretColor: 'transparent',
   },
   '.plivet-step-line': {
     backgroundColor: 'var(--plivet-step-line-bg, rgba(255, 214, 0, 0.22))',
