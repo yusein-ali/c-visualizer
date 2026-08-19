@@ -2,9 +2,7 @@ import * as React from 'react';
 import CtrlButton from './CtrlButton';
 import { Theme } from '../../Props';
 
-interface Props {
-  lang: string;
-}
+interface Props {}
 
 interface State {
   theme: Theme;
@@ -18,7 +16,6 @@ export default class ThemeButton extends React.Component<Props, State> {
   renderLightTheme() {
     return (
       <CtrlButton
-        lang={this.props.lang}
         signal="changeTheme"
         command="dark"
         icon="star-empty"
@@ -30,7 +27,6 @@ export default class ThemeButton extends React.Component<Props, State> {
   renderDarkTheme() {
     return (
       <CtrlButton
-        lang={this.props.lang}
         signal="changeTheme"
         command="light"
         icon="star"

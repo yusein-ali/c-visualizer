@@ -96,9 +96,7 @@ describe('constructs for the editor', () => {
   if (x == 5) { return x; }
 }`;
     const all = constructs(code);
-    const found = all.filter(
-      (construct) => construct.kind === 'assignment'
-    );
+    const found = all.filter((construct) => construct.kind === 'assignment');
     expect(found.map((construct) => construct.line)).toEqual([3, 4]);
     expect(constructAt(all, 3, 2)!.kind).toBe('assignment');
     expect(constructAt(all, 4, 4)!.kind).toBe('assignment');
@@ -579,12 +577,11 @@ describe('library help', () => {
     ).toEqual([]);
   });
 
-  it('has a signature and both languages for every entry', () => {
+  it('has a signature and a description for every entry', () => {
     for (const name of libraryNames()) {
       const entry = libraryHelp(name)!;
       expect(entry.signature).toContain(name);
-      expect(entry.en.length).toBeGreaterThan(3);
-      expect(entry.ja.length).toBeGreaterThan(1);
+      expect(entry.description.length).toBeGreaterThan(3);
     }
   });
 });

@@ -1,52 +1,15 @@
+/*
+ * Only the box the editor sits in. Everything the editor draws inside itself -
+ * breakpoints, the step highlight, preprocessor marks, error lines, tooltips -
+ * is styled by the CodeMirror themes in `src/ui/editor/theme.ts`, so that the
+ * debug extensions carry their own appearance and can be attached to an editor
+ * on a page that has never heard of PLIVET.
+ */
 .editorMain {
   border: 1px black solid;
   margin: 1px;
 }
 
-.ace_gutter-cell.ace_breakpoint {
-  background-image: url('../images/breakpoint.png');
-  background-repeat: no-repeat;
-  background-position: 2px center;
-}
-
-.error_line {
-  background-color: #f2dede;
-  position: absolute;
-}
-/* Spans the preprocessor replaced, marked in the source the user typed. */
-.macro-expansion {
-  position: absolute;
-  z-index: 4;
-  border-bottom: 1px dashed #2e8b57;
-  background-color: rgba(46, 139, 87, 0.12);
-}
-
-.excluded-region {
-  position: absolute;
-  z-index: 3;
-  background-color: rgba(128, 128, 128, 0.18);
-}
-
-.macro-tooltip {
-  position: absolute;
-  z-index: 100;
-  max-width: 40em;
-  padding: 4px 8px;
-  border: 1px solid rgba(0, 0, 0, 0.2);
-  border-radius: 3px;
-  background-color: #fffbe6;
-  color: #222;
-  font-family: monospace;
-  font-size: 12px;
-  white-space: pre-wrap;
-  pointer-events: none;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
-}
-
-/* Directive lines: removed before parsing, so shown as processed, not dead. */
-.directive-line {
-  position: absolute;
-  z-index: 3;
-  background-color: rgba(70, 130, 180, 0.1);
-  border-bottom: 1px dotted rgba(70, 130, 180, 0.6);
+.editorMain .cm-editor {
+  height: 62vh;
 }

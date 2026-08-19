@@ -8,8 +8,11 @@ in-page editor, then steps forward/backward through execution while the runtime 
 (call stacks, variables, arrays, pointer arrows) is drawn live on a canvas next to the
 editor.
 
-- Primary language: **C/C++** (`c_cpp`). Java and Python interpreters are wired up but
-  still work-in-progress.
+- The only supported language is **C/C++**. The unfinished Java and Python
+  interpreters, and the machinery for choosing between languages, were removed
+  in Phase 1 of `UPGRADE_PLAN.md`.
+- The interface is **English only**. There is no locale layer: every string the
+  UI shows lives in [src/strings.ts](src/strings.ts).
 - **There is no backend.** Everything — parsing, interpretation, stepping — runs in the
   browser. `src/server.ts` is a *simulated* server: an in-process singleton with a
   `Request`/`Response` API, kept in that shape so a real remote backend could be swapped
@@ -25,9 +28,8 @@ framework-free, browser-only widget — CodeMirror 6 instead of Ace, JointJS
 instead of react-konva, the interpreter in a Web Worker, and no React at all —
 so that it can later be embedded in an A+ Sphinx extension alongside the
 `interactive-code` extension in the `ai-enabled-wearable-technology` course repo.
-Scope is narrowing to C only: the unfinished Java and Python interpreters are
-removed in Phase 1 of that plan. Do not upgrade React, react-bootstrap, Ace or
-Konva, and do not invest in Java or Python; all of it is being removed.
+Scope has narrowed to C only. Do not upgrade React, react-bootstrap, Ace or
+Konva, and do not reintroduce Java, Python or a second interface language.
 
 ## Tech stack
 
@@ -77,7 +79,7 @@ push to `master`.
 
 ```
 src/index.tsx
-  └─ AppWithLang.tsx     holds the only top-level state: lang | progLang | theme
+  └─ AppContainer.tsx    holds the only top-level state: theme
        └─ App.tsx        two-column bootstrap Grid
             ├─ EditorSide.tsx → Menu (CtrlButtons) · Editor · Console · FileForm
             └─ CanvasSide.tsx → ScaleMenu · Canvas → CanvasContent → StackRect/…
@@ -87,7 +89,7 @@ src/index.tsx
 
 `src/components/emitter.ts` wraps a single Node `EventEmitter` with a typed event union
 (`'debug' | 'changeState' | 'draw' | 'redraw' | 'changeOutput' | 'files' | 'stdin' |
-'EOF' | 'Breakpoint' | 'zoom' | 'changeTheme' | 'changeLang' | 'changeProgLang'`) and two
+'EOF' | 'Breakpoint' | 'zoom' | 'changeTheme'`) and two
 helpers: `signal(event, ...)` to emit and `slot(event, cb)` to subscribe.
 
 Components subscribe **in their constructors** and never unsubscribe (hence
@@ -100,9 +102,11 @@ only registry.
 1. `CtrlButtons` renders `CtrlButton`s that `signal('debug', <CONTROL_EVENT>)`.
    Control events: `Start | Stop | Step | StepBack | StepAll | BackAll | Exec | SyntaxCheck`.
 2. `Editor.send()` builds a `Request { controlEvent, sourcecode, stdinText,
-   lineNumOfBreakpoint, progLang }` and awaits `server.send(request)`.
-3. `server.ts` lazily `import()`s the interpreter for the selected language
-   (webpack chunks `CPP14` / `Java8` / `Python3`), drives `unicoen.ts`, and records every
+   lineNumOfBreakpoint }` and awaits `server.send(request)`.
+3. `server.ts` lazily `import()`s the CPP14 interpreter (webpack chunk `CPP14`
+   — still a dynamic import, to keep the parser out of the initial bundle and
+   to leave one branch to add if a language ever comes back), drives
+   `unicoen.ts`, and records every
    `ExecState` into `stateHistory` plus stdout into `outputsHistory`.
    **Step-back is history replay, not reverse execution** — `StepBack`/`BackAll` just
    move an index into those arrays.
@@ -134,10 +138,10 @@ change that switch when adding a state.
   Console becomes writable, and the typed text comes back as `Request.stdinText`.
 - **File uploads** — `FileForm` reads files as `ArrayBuffer` into `server.files`, which is
   handed to the interpreter via `setFileList` so C programs can `fopen` them.
-- **i18n** — `src/locales/{en,ja}.ts` plus `translate(lang, key)`. Default UI language is
-  **ja**. The starter programs live in the locale files as `sourceCodeCcpp`,
-  `sourceCodeJava`, `sourceCodePython`; `Editor.sourceCodeKey()` derives the key from the
-  `ProgLang` id, so a new language needs matching locale keys in *both* files.
+- **UI text** — one English table in [src/strings.ts](src/strings.ts), read
+  directly (`strings.howToUse`). Keys assembled at runtime — `construct${kind}`,
+  `${signal}${command}` — go through `stringFor(key)`. The starter program is
+  the `sourceCode` entry in that same table.
 - **Theming** — `'light' | 'dark'` broadcast over `changeTheme`; Ace switches
   `textmate`/`monokai`, and CSS classes `theme-light`/`theme-gray` come from
   `src/css/theme.css`.
@@ -148,7 +152,7 @@ change that switch when adding a state.
   through TSLint. Run `npm run ts-lint` (or just build: `tslint-loader` runs with `fix: true`
   during webpack, so building can rewrite your source files).
 - React class components with an explicit `interface Props` / `interface State`; shared
-  prop shapes (`LangProps`, `ProgLangProps`, `ThemeProps`) live in
+  prop shapes (`ThemeProps`) live in
   [src/components/Props.ts](src/components/Props.ts) and are combined with `&`.
 - Each component imports its own stylesheet from `src/css/`.
 - Ace modes/themes must be imported explicitly (`ace-builds/src-min-noconflict/...`) or
@@ -157,7 +161,7 @@ change that switch when adding a state.
 
 ## Testing
 
-`test/App.test.tsx` is the only test — an Enzyme `shallow` smoke render of `AppWithLang`.
+`test/App.test.tsx` is an Enzyme `shallow` smoke render of `AppContainer`.
 Jest is scoped to `roots: ['<rootDir>/test']` with `tsconfig.test.json`, CSS mapped to
 `identity-obj-proxy`, and TS diagnostic 2604 suppressed (a `react-numeric-input` typing
 quirk). New tests go under `test/` as `*.test.tsx`. There is no e2e/browser test harness;

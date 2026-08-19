@@ -4,8 +4,6 @@ emitter.setMaxListeners(20);
 export type event =
   | 'debug'
   | 'changeTheme'
-  | 'changeLang'
-  | 'changeProgLang'
   | 'changeState'
   | 'changeOutput'
   | 'zoom'

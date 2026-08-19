@@ -3,13 +3,12 @@ import ButtonToolbar from 'react-bootstrap/lib/ButtonToolbar';
 import ButtonGroup from 'react-bootstrap/lib/ButtonGroup';
 
 import CtrlButton from './CtrlButton';
-import { LangProps } from '../../Props';
 import { DEBUG_STATE } from '../../../server';
 import '../../../css/ctrlbuttons.css';
 
-type Props = {
+interface Props {
   debugState: DEBUG_STATE;
-} & LangProps;
+}
 
 interface State {
   Start: boolean;
@@ -95,12 +94,10 @@ export default class CtrlButtons extends React.Component<Props, State> {
   }
 
   render() {
-    const lang = this.props.lang;
     return (
       <ButtonToolbar style={{ marginTop: '1vh', marginBottom: '1vh' }}>
         <ButtonGroup>
           <CtrlButton
-            lang={lang}
             signal="debug"
             command="Start"
             icon="repeat"
@@ -108,7 +105,6 @@ export default class CtrlButtons extends React.Component<Props, State> {
             iconClass={this.state.Start ? 'icon-green' : undefined}
           />
           <CtrlButton
-            lang={lang}
             signal="debug"
             command="Stop"
             icon="stop"
@@ -116,7 +112,6 @@ export default class CtrlButtons extends React.Component<Props, State> {
             iconClass={this.state.Stop ? 'icon-red' : undefined}
           />
           <CtrlButton
-            lang={lang}
             signal="debug"
             command="BackAll"
             icon="backward"
@@ -124,7 +119,6 @@ export default class CtrlButtons extends React.Component<Props, State> {
             iconClass={this.state.BackAll ? 'icon-blue' : undefined}
           />
           <CtrlButton
-            lang={lang}
             signal="debug"
             command="StepBack"
             icon="arrow-left"
@@ -132,7 +126,6 @@ export default class CtrlButtons extends React.Component<Props, State> {
             iconClass={this.state.StepBack ? 'icon-blue' : undefined}
           />
           <CtrlButton
-            lang={lang}
             signal="debug"
             command={this.state.Stop ? 'Step' : 'Start'}
             icon="arrow-right"
@@ -140,7 +133,6 @@ export default class CtrlButtons extends React.Component<Props, State> {
             iconClass={this.state.Step ? 'icon-blue' : undefined}
           />
           <CtrlButton
-            lang={lang}
             signal="debug"
             command={this.state.Stop ? 'StepAll' : 'Exec'}
             icon="forward"
@@ -150,26 +142,18 @@ export default class CtrlButtons extends React.Component<Props, State> {
         </ButtonGroup>
         <ButtonGroup>
           <CtrlButton
-            lang={lang}
             signal="zoom"
             command="Out"
             icon="zoom-out"
             enable={true}
           />
           <CtrlButton
-            lang={lang}
             signal="zoom"
             command="Reset"
             icon="search"
             enable={true}
           />
-          <CtrlButton
-            lang={lang}
-            signal="zoom"
-            command="In"
-            icon="zoom-in"
-            enable={true}
-          />
+          <CtrlButton signal="zoom" command="In" icon="zoom-in" enable={true} />
         </ButtonGroup>
       </ButtonToolbar>
     );

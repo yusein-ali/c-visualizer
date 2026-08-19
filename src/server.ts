@@ -26,8 +26,7 @@ export class Request {
     public controlEvent: CONTROL_EVENT,
     public sourcecode: string,
     public stdinText?: string,
-    public lineNumOfBreakpoint?: number[],
-    public progLang?: string
+    public lineNumOfBreakpoint?: number[]
   ) {}
 }
 
@@ -76,26 +75,18 @@ class Server {
   // `reset` may replace the session's interpreter: `SyntaxCheck` runs off a
   // debounced keystroke and can land at any moment, including right after
   // `Start` has armed a session.
-  private async createInterpreter(progLang?: string): Promise<Interpreter> {
-    if (progLang === 'c_cpp') {
-      // PLIVET's own subclass, for the preprocessor unicoen.ts does not have.
-      // prettier-ignore
-      const module = await import(/* webpackChunkName: "CPP14" */ './interpreter/CPP14');
-      return new module.PlivetCPP14Interpreter();
-    } else if (progLang === 'java') {
-      // prettier-ignore
-      const module = await import(/* webpackChunkName: "Java8" */ 'unicoen.ts/dist/interpreter/Java8/Java8Interpreter');
-      return new module.Java8Interpreter();
-    } else if (progLang === 'python') {
-      // prettier-ignore
-      const module = await import(/* webpackChunkName: "Python3" */ 'unicoen.ts/dist/interpreter/Python3/Python3Interpreter');
-      return new module.Python3Interpreter();
-    }
-    throw new Error('Selected programming language is invalid.');
+  // C is the only supported language, but the interpreter still arrives
+  // through a dynamic import: it keeps the parser out of the initial bundle,
+  // and adding a language back later is a branch here rather than a rewrite.
+  private async createInterpreter(): Promise<Interpreter> {
+    // PLIVET's own subclass, for the preprocessor unicoen.ts does not have.
+    // prettier-ignore
+    const module = await import(/* webpackChunkName: "CPP14" */ './interpreter/CPP14');
+    return new module.PlivetCPP14Interpreter();
   }
-  private async reset(progLang?: string) {
+  private async reset() {
     this.count = 0;
-    const interpreter = await this.createInterpreter(progLang);
+    const interpreter = await this.createInterpreter();
     interpreter.setFileList(this.files);
     this.interpreter = interpreter;
     this.stateHistory = [];
@@ -139,12 +130,11 @@ class Server {
       sourcecode,
       stdinText,
       lineNumOfBreakpoint,
-      progLang,
     } = request;
 
     switch (controlEvent) {
       case 'Start': {
-        return this.Start(sourcecode, progLang);
+        return this.Start(sourcecode);
       }
       case 'Stop': {
         return this.Stop(sourcecode);
@@ -162,16 +152,16 @@ class Server {
         return this.StepAll(sourcecode, lineNumOfBreakpoint, stdinText);
       }
       case 'Exec': {
-        return this.Exec(sourcecode, progLang, lineNumOfBreakpoint);
+        return this.Exec(sourcecode, lineNumOfBreakpoint);
       }
       case 'SyntaxCheck': {
-        return this.SyntaxCheck(sourcecode, progLang);
+        return this.SyntaxCheck(sourcecode);
       }
     }
   }
 
-  private async Start(sourcecode: string, progLang?: string) {
-    await this.reset(progLang);
+  private async Start(sourcecode: string) {
+    await this.reset();
     if (this.interpreter === null) {
       throw new Error('interpreter is not found');
     }
@@ -393,18 +383,14 @@ class Server {
     };
   }
 
-  private async Exec(
-    sourcecode: string,
-    progLang?: string,
-    lineNumOfBreakpoint?: number[]
-  ) {
-    await this.Start(sourcecode, progLang);
+  private async Exec(sourcecode: string, lineNumOfBreakpoint?: number[]) {
+    await this.Start(sourcecode);
     return this.StepAll(sourcecode, lineNumOfBreakpoint);
   }
 
-  private async SyntaxCheck(code: string, progLang?: string) {
+  private async SyntaxCheck(code: string) {
     // Deliberately a throwaway interpreter, never `this.interpreter`.
-    const interpreter = await this.createInterpreter(progLang);
+    const interpreter = await this.createInterpreter();
     const errors: SyntaxErrorData[] = interpreter.checkSyntaxError(code);
     const ret: Response = {
       errors,

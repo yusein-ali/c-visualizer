@@ -1,11 +1,12 @@
-import Editor, {
+import {
+  HoverTextSource,
   formatAddress,
   formatFunctionDeclaration,
   formatEnumerator,
   formatRecordField,
   formatTypeDeclaration,
   formatVariableDeclaration,
-} from '../src/components/Editor';
+} from '../src/components/hoverText';
 
 describe('editor tooltip addresses', () => {
   it('formats addresses as uppercase hexadecimal', () => {
@@ -14,7 +15,7 @@ describe('editor tooltip addresses', () => {
   });
 
   it('formats both a pointer value and its own address as hexadecimal', () => {
-    const editor: any = new Editor({ lang: 'en', progLang: 'c_cpp' });
+    const editor: any = new HoverTextSource();
     const variable = {
       name: 'pointer',
       type: 'int *',
@@ -29,16 +30,13 @@ describe('editor tooltip addresses', () => {
 
   it('formats variable declarations as labelled lines', () => {
     expect(
-      formatVariableDeclaration(
-        {
-          type: 'Counter',
-          storageClasses: ['static'],
-          qualifiers: ['const', 'volatile'],
-          identifier: 'count',
-          initialValue: '1',
-        },
-        'en'
-      )
+      formatVariableDeclaration({
+        type: 'Counter',
+        storageClasses: ['static'],
+        qualifiers: ['const', 'volatile'],
+        identifier: 'count',
+        initialValue: '1',
+      })
     ).toBe(
       'type: Counter\n' +
         'storage class: static\n' +
@@ -50,17 +48,14 @@ describe('editor tooltip addresses', () => {
 
   it('formats a function declaration as its return type, name and parameters', () => {
     expect(
-      formatFunctionDeclaration(
-        {
-          returnType: 'const char *',
-          identifier: 'label',
-          parameters: [
-            { identifier: 'c', type: 'enum Color' },
-            { identifier: 'values', type: 'const int * const' },
-          ],
-        },
-        'en'
-      )
+      formatFunctionDeclaration({
+        returnType: 'const char *',
+        identifier: 'label',
+        parameters: [
+          { identifier: 'c', type: 'enum Color' },
+          { identifier: 'values', type: 'const int * const' },
+        ],
+      })
     ).toBe(
       'return type: const char *\n' +
         'identifier: label\n' +
@@ -72,25 +67,23 @@ describe('editor tooltip addresses', () => {
 
   it('says none for a function that takes no parameters', () => {
     expect(
-      formatFunctionDeclaration(
-        { returnType: 'int', identifier: 'main', parameters: [] },
-        'en'
-      )
+      formatFunctionDeclaration({
+        returnType: 'int',
+        identifier: 'main',
+        parameters: [],
+      })
     ).toBe('return type: int\nidentifier: main\nparameters: none');
   });
 
   it('formats type declarations as labelled lines', () => {
     expect(
-      formatTypeDeclaration(
-        {
-          storageClasses: ['typedef'],
-          qualifiers: ['const'],
-          type: 'enum Mode',
-          nameKind: 'typedefName',
-          name: 'ReadOnlyMode',
-        },
-        'en'
-      )
+      formatTypeDeclaration({
+        storageClasses: ['typedef'],
+        qualifiers: ['const'],
+        type: 'enum Mode',
+        nameKind: 'typedefName',
+        name: 'ReadOnlyMode',
+      })
     ).toBe(
       'type: enum Mode\n' +
         'storage class: typedef\n' +
@@ -101,16 +94,13 @@ describe('editor tooltip addresses', () => {
 
   it('calls the name a record definition introduces a tag', () => {
     expect(
-      formatTypeDeclaration(
-        {
-          storageClasses: [],
-          qualifiers: [],
-          type: 'struct Point',
-          nameKind: 'tag',
-          name: 'Point',
-        },
-        'en'
-      )
+      formatTypeDeclaration({
+        storageClasses: [],
+        qualifiers: [],
+        type: 'struct Point',
+        nameKind: 'tag',
+        name: 'Point',
+      })
     ).toBe(
       'type: struct Point\n' +
         'storage class: none\n' +
@@ -121,16 +111,13 @@ describe('editor tooltip addresses', () => {
 
   it('says none for the specifiers a type declaration leaves out', () => {
     expect(
-      formatTypeDeclaration(
-        {
-          storageClasses: [],
-          qualifiers: [],
-          type: 'struct without a tag',
-          nameKind: 'typedefName',
-          name: 'Point',
-        },
-        'en'
-      )
+      formatTypeDeclaration({
+        storageClasses: [],
+        qualifiers: [],
+        type: 'struct without a tag',
+        nameKind: 'typedefName',
+        name: 'Point',
+      })
     ).toBe(
       'type: struct without a tag\n' +
         'storage class: none\n' +
@@ -141,15 +128,12 @@ describe('editor tooltip addresses', () => {
 
   it('formats an enumeration constant as labelled lines', () => {
     expect(
-      formatEnumerator(
-        {
-          type: 'int',
-          enumeration: 'enum Mode',
-          identifier: 'FAULT',
-          value: 5,
-        },
-        'en'
-      )
+      formatEnumerator({
+        type: 'int',
+        enumeration: 'enum Mode',
+        identifier: 'FAULT',
+        value: 5,
+      })
     ).toBe(
       'type: int\n' +
         'enumeration: enum Mode\n' +
@@ -160,14 +144,11 @@ describe('editor tooltip addresses', () => {
 
   it('formats a structure or union member as labelled lines', () => {
     expect(
-      formatRecordField(
-        {
-          type: 'const int * const',
-          record: 'struct Device',
-          identifier: 'status',
-        },
-        'en'
-      )
+      formatRecordField({
+        type: 'const int * const',
+        record: 'struct Device',
+        identifier: 'status',
+      })
     ).toBe(
       'type: const int * const\n' +
         'structure or union: struct Device\n' +

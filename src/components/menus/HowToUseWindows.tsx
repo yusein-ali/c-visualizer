@@ -2,12 +2,10 @@ import * as React from 'react';
 import Button from 'react-bootstrap/lib/Button';
 import Modal from 'react-bootstrap/lib/Modal';
 
-import { LangProps } from '../Props';
-import translate from '../../locales/translate';
-interface PropsImple {
+import strings from '../../strings';
+interface Props {
   handleHideModal: any;
 }
-type Props = PropsImple & LangProps;
 
 interface State {
   isShow: boolean;
@@ -21,12 +19,12 @@ export default class HowToUseWindows extends React.Component<Props, State> {
   renderModalHeader() {
     return (
       <Modal.Header closeButton>
-        <Modal.Title>{translate(this.props.lang, 'howToUse')}</Modal.Title>
+        <Modal.Title>{strings.howToUse}</Modal.Title>
       </Modal.Header>
     );
   }
   renderModalBody() {
-    const howToText: string[] = translate(this.props.lang, 'howToText');
+    const howToText: string[] = strings.howToText;
     return (
       <Modal.Body>
         {howToText.map((m: string, i: number) => (
@@ -38,9 +36,7 @@ export default class HowToUseWindows extends React.Component<Props, State> {
   renderModalFooter() {
     return (
       <Modal.Footer>
-        <Button onClick={this.props.handleHideModal}>
-          {translate(this.props.lang, 'close')}
-        </Button>
+        <Button onClick={this.props.handleHideModal}>{strings.close}</Button>
       </Modal.Footer>
     );
   }

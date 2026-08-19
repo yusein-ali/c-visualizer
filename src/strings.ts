@@ -1,5 +1,10 @@
 // tslint:disable:max-line-length
-export default {
+/**
+ * Every piece of text the interface shows, in one table. PLIVET is
+ * English-only: there is no locale to select and no translation layer to go
+ * through, so a component reads the string it needs straight off this object.
+ */
+const strings = {
   howToUse: 'How to use',
   close: 'Close',
   debugStart: 'restart step execution',
@@ -64,7 +69,7 @@ However, the highlight of the code may be out of place.`,
   continueDebug: 'Continue',
   restart: 'Restart',
   rememberCommand: 'Remember this choice',
-  sourceCodeCcpp: String.raw`#include<stdio.h>
+  sourceCode: String.raw`#include<stdio.h>
 int recursiveToThree(int n){
   printf("%d th\n", n + 1);
   if(n < 3){
@@ -115,56 +120,13 @@ int main(){
   }
   return 0;
 }`,
-  sourceCodeJava: String.raw`import java.util.*;
-public class Main {
-  public static void main(String[] args) {
-    Scanner sc = new Scanner(System.in);
-    while (true) {
-      int n = sc.nextInt();
-      int r = sc.nextInt();
-      if (n == 0) {
-        break;
-      }
-      int[] a = new int[n];
-      int[] b = new int[n];
-      for (int i = 0; i < n; i++) {
-        a[i] = n - i;
-      }
-      for (int i = 0; i < r; i++) {
-        int p = sc.nextInt();
-        int c = sc.nextInt();
-        p--;
-        for (int j = 0; j < c; j++) {
-          b[j] = a[p + j];
-        }
-        for (int j = 0; j < p; j++) {
-          b[c + j] = a[j];
-        }
-        for (int j = 0; j < p + c; j++) {
-          a[j] = b[j];
-        }
-      }
-      System.out.println(a[0]);
-    }
-  }
-}`,
-  sourceCodePython: String.raw`while True:
-  n, r = map(int, input().split())
-  if n == 0:
-    break
-  a = [0] * n
-  b = [0] * n
-  for i in range(n):
-    a[i] = b[i] = n - i
-  for i in range(r):
-    p, c = map(int, input().split())
-    p = p - 1
-    for j in range(c):
-      b[j] = a[p + j]
-    for j in range(p):
-      b[c + j] = a[j]
-    for j in range(p + c):
-      a[j] = b[j]
-  print(a[0])
-`,
 };
+
+export default strings;
+
+/**
+ * The string under a key assembled at runtime - `construct${kind}` or
+ * `${signal}${command}` - where the compiler cannot check the key against the
+ * table.
+ */
+export const stringFor = (key: string): string => (strings as any)[key];

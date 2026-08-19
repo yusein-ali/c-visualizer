@@ -8,9 +8,9 @@ import 'ace-builds/src-min-noconflict/theme-monokai';
 
 import '../css/console.css';
 import { slot, signal } from './emitter';
-import { LangProps, Theme } from './Props';
+import { Theme } from './Props';
 import { DEBUG_STATE } from '../server';
-type Props = LangProps;
+interface Props {}
 
 interface State {
   output: string;

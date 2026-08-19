@@ -4,10 +4,10 @@ import Row from 'react-bootstrap/lib/Row';
 import Col from 'react-bootstrap/lib/Col';
 import EditorSide from './EditorSide';
 import CanvasSide from './CanvasSide';
-import { LangProps, ProgLangProps, ThemeProps } from './Props';
+import { ThemeProps } from './Props';
 import '../css/theme.css';
 import Footer from './Footer';
-type Props = LangProps & ProgLangProps & ThemeProps;
+type Props = ThemeProps;
 
 interface State {}
 
@@ -16,7 +16,7 @@ export default class App extends React.Component<Props, State> {
     super(props);
   }
   render() {
-    const { lang, progLang, theme } = this.props;
+    const { theme } = this.props;
     return (
       <Grid fluid={true}>
         <Row style={{ margin: '5px' }}>
@@ -27,7 +27,7 @@ export default class App extends React.Component<Props, State> {
             xs={12}
             className={theme === 'light' ? 'theme-light' : 'theme-gray'}
           >
-            <EditorSide lang={lang} progLang={progLang} />
+            <EditorSide />
           </Col>
           <Col
             lg={8}
@@ -36,7 +36,7 @@ export default class App extends React.Component<Props, State> {
             xs={12}
             className={theme === 'light' ? 'theme-light' : 'theme-gray'}
           >
-            <CanvasSide lang={lang} />
+            <CanvasSide />
           </Col>
         </Row>
         <Footer fromYear={2018} />

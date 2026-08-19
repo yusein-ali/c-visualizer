@@ -152,34 +152,40 @@ failures are documented so they are not confused with migration regressions.
 Deleting the unfinished interpreters before migrating anything is strictly
 cheaper than porting them, so this comes first and runs under the existing build.
 
-1. Narrow `ProgLang` in `src/components/Props.ts` to `'c_cpp'`, or remove the
-   type and the `ProgLangProps` interface entirely.
-2. Collapse `dynamicLoadInterpreter` in `src/server.ts` to its single CPP14
-   branch and drop the `progLang` parameter from `Request`, `Start`, `Exec` and
-   `SyntaxCheck`. That is eight call sites.
-3. Remove `changeProgLang` from the emitter event union and the `progLang` field
-   from `AppWithLang` state, and stop threading it through `App`, `EditorSide`
-   and `Editor`.
-4. Delete the programming-language `Switch` from `LangAndHow`. The
-   user-interface language switch (ja/en) stays; only the programming-language
-   one goes.
-5. Delete `sourceCodeJava` and `sourceCodePython` from `src/locales/en.ts` and
-   `src/locales/ja.ts`, roughly a hundred lines, and replace
-   `Editor.sourceCodeKey()` with the `sourceCodeCcpp` key directly.
-6. Simplify `Editor.componentWillReceiveProps`, which currently branches on both
-   a user-interface language change and a programming language change. With one
-   programming language it only has to handle the former. This is the harder of
-   the two legacy lifecycle methods, and Phase 9 has to rewrite it; shrinking it
-   first is worth doing.
-7. Update `README.md`, which advertises Java and Python as "now implementing".
+Both kinds of language choice go: the programming language, and the user
+interface language. Neither is wanted, and each was threaded through the same
+components, so they came out together.
+
+1. Remove `ProgLang` and `ProgLangProps` from `src/components/Props.ts`, and
+   `Lang` and `LangProps` with them. Only `Theme` and `ThemeProps` remain.
+2. Collapse `createInterpreter` in `src/server.ts` to its single CPP14 branch
+   and drop the `progLang` parameter from `Request`, `Start`, `Exec` and
+   `SyntaxCheck`.
+3. Remove `changeProgLang` and `changeLang` from the emitter event union.
+   `AppWithLang` becomes `AppContainer` and holds `theme` alone; nothing else
+   is threaded through `App`, `EditorSide` or `Editor`.
+4. Delete `LangAndHow` and the `Switch` component it was the only user of.
+   `Menu` renders `HowToUseButton` directly. `react-select` was only ever used
+   by `Switch`, so it leaves `package.json` too.
+5. Replace `src/locales/{en,ja}.ts` and `translate(lang, key)` with a single
+   English `src/strings.ts`, read as `strings.key`; keys assembled at runtime
+   go through `stringFor(key)`. `sourceCodeJava` and `sourceCodePython` are
+   deleted and `sourceCodeCcpp` becomes plain `sourceCode`, so
+   `Editor.sourceCodeKey()` is gone.
+6. Drop `Editor.componentWillReceiveProps` entirely. It existed only to swap
+   the sample program when either language changed; with no language to change,
+   the harder of the two legacy lifecycle methods disappears rather than
+   shrinking, and Phase 9 has one less thing to rewrite.
+7. `libraryHelp` entries lose their `ja` column; `en` becomes `description`.
+8. Update `README.md`, which advertised Java and Python as "now implementing".
 
 The mechanism stays even though the branches go: the interpreter is still loaded
 through a dynamic import (Phase 3, step 12). Adding a language back later means
 restoring a branch, not rebuilding an architecture.
 
-Exit criterion: no reference to Java or Python remains in `src/`, the C sample
-still loads and runs, and the `Java8` and `Python3` chunks no longer appear in
-the build output.
+Exit criterion: no reference to Java, Python or a second interface language
+remains in `src/`, the C sample still loads and runs, and the `Java8` and
+`Python3` chunks no longer appear in the build output.
 
 ## Phase 2: standardize on npm
 

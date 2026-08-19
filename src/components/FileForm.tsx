@@ -6,12 +6,11 @@ import ListGroupItem from 'react-bootstrap/lib/ListGroupItem';
 import Panel from 'react-bootstrap/lib/Panel';
 
 import '../css/fileform.css';
-import { LangProps } from './Props';
-import translate from '../locales/translate';
+import strings from '../strings';
 import { server } from '../server';
 import FileItem from './FileItem';
 import { slot } from './emitter';
-type Props = LangProps;
+interface Props {}
 
 interface State {
   filelist: Map<string, ArrayBuffer> | null;
@@ -50,7 +49,7 @@ export default class FileForm extends React.Component<Props, State> {
   }
 
   makeFileList() {
-    const text = translate(this.props.lang, 'uploadFile');
+    const text = strings.uploadFile;
     const list = [];
     list.push(<ListGroupItem key={'text'}>{text}</ListGroupItem>);
     if (this.state.filelist !== null) {

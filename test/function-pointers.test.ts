@@ -1,7 +1,7 @@
 import { ExecState } from 'unicoen.ts/dist/interpreter/Engine/ExecState';
 import { Variable } from 'unicoen.ts/dist/interpreter/Engine/Variable';
 import { CanvasDrawer } from '../src/components/canvas/CanvasDrawer';
-import Editor from '../src/components/Editor';
+import { HoverTextSource } from '../src/components/hoverText';
 import { constructAt } from '../src/interpreter/Construct';
 import { PlivetCPP14Interpreter } from '../src/interpreter/CPP14';
 import { FunctionPointerTable } from '../src/interpreter/FunctionPointerTable';
@@ -71,8 +71,8 @@ const variableNamed = (states: ExecState[], name: string): Variable | null => {
   return found;
 };
 const hoverText = (states: ExecState[], name: string): string => {
-  const editor: any = new Editor({ lang: 'en', progLang: 'c_cpp' });
-  return editor.variableText(variableNamed(states, name));
+  const hover: any = new HoverTextSource();
+  return hover.variableText(variableNamed(states, name));
 };
 
 const constructs = (code: string) => {

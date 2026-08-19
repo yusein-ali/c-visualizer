@@ -4,8 +4,8 @@
  * the rule for choosing between overlapping constructs, and nothing else - the
  * walk that produces them lives in `outline.ts`, inside the interpreter chunk.
  *
- * `kind` is a stable key the editor translates; it is not the parser's class
- * name, so the wording can change without touching the AST walk.
+ * `kind` is a stable key the editor looks up in `strings.ts`; it is not the
+ * parser's class name, so the wording can change without touching the AST walk.
  */
 export interface Construct {
   kind: string;

@@ -1,10 +1,9 @@
 import * as React from 'react';
 import Button from 'react-bootstrap/lib/Button';
 import HowToUseWindows from './HowToUseWindows';
-import { LangProps } from '../Props';
-import translate from '../../locales/translate';
+import strings from '../../strings';
 
-type Props = LangProps;
+interface Props {}
 
 interface State {
   showModal: boolean;
@@ -30,13 +29,10 @@ export default class HowToUseButton extends React.Component<Props, State> {
           className="btn btn-default btn-block"
           onClick={this.handleShowModal}
         >
-          {translate(this.props.lang, 'howToUse')}
+          {strings.howToUse}
         </Button>
         {this.state.showModal ? (
-          <HowToUseWindows
-            handleHideModal={this.handleHideModal}
-            lang={this.props.lang}
-          />
+          <HowToUseWindows handleHideModal={this.handleHideModal} />
         ) : null}
       </a>
     );

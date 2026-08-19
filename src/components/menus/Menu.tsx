@@ -1,13 +1,12 @@
 import * as React from 'react';
 import Row from 'react-bootstrap/lib/Row';
 import Col from 'react-bootstrap/lib/Col';
-import LangAndHow from './LangAndHow';
+import HowToUseButton from './HowToUseButton';
 import CtrlButtons from './controle_buttons/CtrlButtons';
-import { LangProps } from '../Props';
 import { slot } from '../emitter';
 import { DEBUG_STATE } from '../../server';
 
-type Props = LangProps;
+interface Props {}
 
 interface State {
   debugStatus: string;
@@ -31,14 +30,11 @@ export default class Menu extends React.Component<Props, State> {
   render() {
     return (
       <Row>
-        <Col lg={12} md={12} sm={12} xs={12} style={{ zIndex: 1000 }}>
-          <LangAndHow lang={this.props.lang} />
+        <Col lg={4} md={4} sm={4} xs={4}>
+          <HowToUseButton />
         </Col>
         <Col lg={12} md={12} sm={12} xs={12}>
-          <CtrlButtons
-            lang={this.props.lang}
-            debugState={this.state.debugState}
-          />
+          <CtrlButtons debugState={this.state.debugState} />
         </Col>
         <Col lg={12} md={12} sm={12} xs={12}>
           DebugStatus: {this.state.debugStatus}

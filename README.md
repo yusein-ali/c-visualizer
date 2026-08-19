@@ -2,11 +2,7 @@
 
 Programming Language Interpreter for Visualization of Execution Trace (PLIVET) is a program interpreter with visualization of execution state.
 
-PLIVET supports;
-
-- C language
-- Java (now implementing)
-- Python (now implementing)
+PLIVET supports the C language.
 
 ## For User
 
