@@ -13,6 +13,9 @@ const strings = {
   debugStepBack: 'step backward',
   debugStep: 'step forward',
   debugStepAll: 'execute all step',
+  // Before a session exists the double arrow starts one and runs it; the
+  // button had no title at all in that state.
+  debugExec: 'run to the first breakpoint',
   changeThemedark: 'change to dark theme',
   changeThemelight: 'change to light theme',
   zoomOut: 'change the font size to smaller.',
