@@ -93,6 +93,36 @@ export function matchBrace(masked: string, open: number): number {
   return -1;
 }
 
+/** Index of the `)` matching the `(` at `open`, or -1 when it is unclosed. */
+export function matchParen(masked: string, open: number): number {
+  return matchPair(masked, open, '(', ')');
+}
+
+/** Index of the `]` matching the `[` at `open`, or -1 when it is unclosed. */
+export function matchBracket(masked: string, open: number): number {
+  return matchPair(masked, open, '[', ']');
+}
+
+function matchPair(
+  masked: string,
+  open: number,
+  opening: string,
+  closing: string
+): number {
+  let depth = 0;
+  for (let i = open; i < masked.length; i += 1) {
+    if (masked[i] === opening) {
+      depth += 1;
+    } else if (masked[i] === closing) {
+      depth -= 1;
+      if (depth === 0) {
+        return i;
+      }
+    }
+  }
+  return -1;
+}
+
 /**
  * True when the span is a whole identifier rather than part of a longer one.
  * `SIZE` in `SIZEx` is the case this rules out - the same trap the macro pass
@@ -126,16 +156,6 @@ export function skipSpace(text: string, start: number): number {
     i += 1;
   }
   return i;
-}
-
-/**
- * The span replaced by spaces, every newline kept. Blanking rather than cutting
- * is what keeps the editor's highlight and breakpoints on the lines the user
- * typed - the same rule the directive pass follows.
- */
-export function blankSpan(code: string, start: number, end: number): string {
-  const removed = code.slice(start, end).replace(/[^\n]/g, ' ');
-  return code.slice(0, start) + removed + code.slice(end);
 }
 
 /** 1-based line number of an index, for reporting back to the editor. */
@@ -173,4 +193,19 @@ export function splitTopLevel(text: string, separator: string): string[] {
   }
   parts.push(text.slice(start));
   return parts;
+}
+
+/**
+ * `text` padded with spaces to the width of the span it replaces, with the
+ * span's newlines kept at the end so no line is ever moved. A replacement that
+ * does not fit is returned as it is: the pass that emits one accepts the column
+ * drift on that line, and `EnumTable` and `FunctionPointerTable` both say where.
+ */
+export function fit(text: string, original: string): string {
+  const newlines = original.replace(/[^\n]/g, '');
+  const padding = original.length - text.length - newlines.length;
+  if (padding < 0) {
+    return text + newlines;
+  }
+  return text + ' '.repeat(padding) + newlines;
 }
