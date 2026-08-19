@@ -8,6 +8,7 @@ import {
   skipSpace,
   splitTopLevel,
 } from './scan';
+import { TypeQualifier } from './DeclarationSpecifiers';
 
 /**
  * What `struct` and `union` declarations mean, read from the source rather than
@@ -64,10 +65,34 @@ export interface Member {
   type: string;
   /** Array lengths, outermost first. Empty for a scalar member. */
   lengths: number[];
+  baseQualifiers: TypeQualifier[];
+  pointerQualifiers: TypeQualifier[][];
 }
 
 /** Where each member sits: the shape `Engine.execClassDec` puts in scope. */
 export type FieldOffset = Map<string, [number, string, number]>;
+
+export interface RuntimeRecordInfo {
+  displayType: string;
+  kind: 'struct' | 'union';
+  size: number;
+  alignment: number;
+  fields: {
+    [name: string]: {
+      offset: number;
+      engineOffset: number;
+      type: string;
+      size: number;
+      alignment: number;
+      baseQualifiers: TypeQualifier[];
+      pointerQualifiers: TypeQualifier[][];
+    };
+  };
+}
+
+export interface RuntimeRecordTypes {
+  [runtimeType: string]: RuntimeRecordInfo;
+}
 
 /**
  * The bytes unicoen.ts reserves in front of a nested record for its own
@@ -78,13 +103,15 @@ export const STRUCT_INFO_SIZE = 4;
 
 export abstract class RecordTable {
   /** `struct` or `union`: the keyword this table reads. */
-  protected abstract readonly keyword: string;
+  protected abstract readonly keyword: 'struct' | 'union';
 
   private readonly members = new Map<string, Member[]>();
   /** typedef name, or tagless alias, to the key it stands for. */
   private readonly aliases = new Map<string, string>();
+  private readonly taglessKeys = new Set<string>();
   private readonly lines = new Map<string, number>();
   private readonly peers: RecordTable[] = [];
+  private readonly bodies: Array<[number, number]> = [];
 
   constructor(
     private readonly sizeof: Sizeof = basicSizeof,
@@ -118,6 +145,7 @@ export abstract class RecordTable {
         i = parsed;
       }
     }
+    this.readAliasUses(masked);
     return this;
   }
 
@@ -135,44 +163,168 @@ export abstract class RecordTable {
     return key === null ? null : this.lines.get(key)!;
   }
 
-  membersOf(name: string): Member[] | null {
+  /** The record declared on `line`, used for a tagless typedef parse node. */
+  nameAtLine(line: number): string | null {
+    for (const [name, declaredAt] of this.lines) {
+      if (declaredAt === line) {
+        return name;
+      }
+    }
+    return null;
+  }
+
+  /** The tag and every typedef name that denote the same record. */
+  namesFor(name: string): string[] {
     const key = this.resolve(name);
     if (key === null) {
-      for (const peer of this.peers) {
-        const found = peer.membersOf(name);
-        if (found !== null) {
-          return found;
+      return [];
+    }
+    const names = [key];
+    for (const [alias, target] of this.aliases) {
+      if (target === key && alias !== key) {
+        names.push(alias);
+      }
+    }
+    return names;
+  }
+
+  /** Plain record metadata retained for educational visualization. */
+  runtimeTypes(): RuntimeRecordTypes {
+    const types: RuntimeRecordTypes = {};
+    for (const name of this.members.keys()) {
+      const layout = this.layoutOf(name);
+      const displayLayout = this.displayLayoutOf(name);
+      if (layout === null || displayLayout === null) {
+        continue;
+      }
+      const fields: RuntimeRecordInfo['fields'] = {};
+      for (const member of this.ownMembers(name)!) {
+        const engineField = layout.get(member.name)!;
+        const displayField = displayLayout.fields.get(member.name)!;
+        fields[member.name] = {
+          offset: displayField.offset,
+          engineOffset: engineField[0],
+          type: member.type.replace(/^\s*(struct|union)\s+/, ''),
+          size: displayField.size,
+          alignment: displayField.alignment,
+          baseQualifiers: member.baseQualifiers,
+          pointerQualifiers: member.pointerQualifiers,
+        };
+      }
+      for (const runtimeName of this.namesFor(name)) {
+        types[runtimeName] = {
+          displayType:
+            runtimeName === name && !this.taglessKeys.has(name)
+              ? `${this.keyword} ${name}`
+              : `${runtimeName} (${this.keyword})`,
+          kind: this.keyword,
+          size: displayLayout.size,
+          alignment: displayLayout.alignment,
+          fields,
+        };
+      }
+    }
+    return types;
+  }
+
+  /**
+   * Removes array suffixes from record members before unicoen.ts parses them.
+   * Their real lengths remain in this table; the mapper only needs a scalar
+   * placeholder so it does not discard the rest of the translation unit.
+   */
+  rewriteForParser(code: string): string {
+    const chars = code.split('');
+    const masked = mask(code);
+    for (const [start, end] of this.bodies) {
+      let braceDepth = 0;
+      let parenDepth = 0;
+      let statementStart = start;
+      for (let i = start; i < end; i += 1) {
+        const char = masked[i];
+        if (char === '{') {
+          braceDepth += 1;
+        } else if (char === '}') {
+          braceDepth -= 1;
+        } else if (char === '(') {
+          parenDepth += 1;
+        } else if (char === ')') {
+          parenDepth -= 1;
+        } else if (char === ';' && braceDepth === 0 && parenDepth === 0) {
+          statementStart = i + 1;
+        } else if (char === '[' && braceDepth === 0 && parenDepth === 0) {
+          const close = masked.indexOf(']', i + 1);
+          const before = masked.slice(statementStart, i);
+          if (close !== -1 && close < end && !before.includes('=')) {
+            for (let at = i; at <= close; at += 1) {
+              if (chars[at] !== '\n') {
+                chars[at] = ' ';
+              }
+            }
+            i = close;
+          }
         }
       }
-      return null;
     }
-    return this.members.get(key)!;
+    return chars.join('');
+  }
+
+  membersOf(name: string): Member[] | null {
+    const owner = this.ownerOf(name);
+    return owner === null ? null : owner.ownMembers(name);
   }
 
   /** Byte width of the record itself, bookkeeping bytes not included. */
   sizeOf(name: string, seen: Set<string> = new Set()): number {
-    const members = this.membersOf(name);
-    if (members === null) {
+    const owner = this.ownerOf(name);
+    if (owner === null) {
       return 0;
     }
-    if (seen.has(name)) {
+    if (owner !== this) {
+      // A union nested in a struct is still laid out by the union's rule.
+      return owner.sizeOf(name, seen);
+    }
+    const key = this.resolve(name)!;
+    if (seen.has(key)) {
       return 0; // a record cannot contain itself by value; do not recurse
     }
-    seen.add(name);
-    return this.sizeOfAll(members.map((m) => this.sizeOfMember(m, seen)));
+    const path = new Set(seen);
+    path.add(key);
+    const members = this.ownMembers(name)!;
+    return this.sizeOfAll(
+      members.map((member) => this.sizeOfMember(member, new Set(path)))
+    );
+  }
+
+  /** Source-language size including member alignment and trailing padding. */
+  displaySizeOf(name: string): number {
+    const layout = this.displayLayoutOf(name);
+    return layout === null ? 0 : layout.size;
+  }
+
+  displayAlignmentOf(name: string): number {
+    const layout = this.displayLayoutOf(name);
+    return layout === null ? 1 : layout.alignment;
   }
 
   /**
-   * Where every member sits. `null` when no record of this kind goes by that
-   * name, so a caller can fall back to whatever it did before.
+   * Where every member sits. `null` when no record goes by that name, so a
+   * caller can fall back to whatever it did before.
    */
   layoutOf(name: string, seen: Set<string> = new Set()): FieldOffset | null {
-    const members = this.membersOf(name);
-    if (members === null) {
+    const owner = this.ownerOf(name);
+    if (owner === null) {
       return null;
     }
-    seen.add(name);
-    const sizes = members.map((m) => this.sizeOfMember(m, seen));
+    if (owner !== this) {
+      return owner.layoutOf(name, seen);
+    }
+    const key = this.resolve(name)!;
+    const path = new Set(seen);
+    path.add(key);
+    const members = this.ownMembers(name)!;
+    const sizes = members.map((member) =>
+      this.sizeOfMember(member, new Set(path))
+    );
     const offsets = this.offsetsOf(sizes);
     const layout: FieldOffset = new Map();
     members.forEach((member, index) => {
@@ -187,7 +339,7 @@ export abstract class RecordTable {
   /** How wide the whole record is, given its member sizes. */
   protected abstract sizeOfAll(sizes: number[]): number;
 
-  /** The key `name` stands for, following typedefs. */
+  /** The key `name` stands for in this table, following typedefs. */
   private resolve(name: string): string | null {
     const bare = name
       .replace(new RegExp(`^\\s*${this.keyword}\\s+`), '')
@@ -199,29 +351,113 @@ export abstract class RecordTable {
     return alias !== undefined && this.members.has(alias) ? alias : null;
   }
 
+  private ownMembers(name: string): Member[] | null {
+    const key = this.resolve(name);
+    return key === null ? null : this.members.get(key)!;
+  }
+
+  /** The table that declared `name`: this one, or a linked one. */
+  private ownerOf(name: string): RecordTable | null {
+    if (this.resolve(name) !== null) {
+      return this;
+    }
+    for (const peer of this.peers) {
+      if (peer.resolve(name) !== null) {
+        return peer;
+      }
+    }
+    return null;
+  }
+
   private sizeOfMember(member: Member, seen: Set<string>): number {
     const count = member.lengths.reduce((a, b) => a * b, 1);
     if (member.type.includes('*')) {
       return this.sizeof(member.type) * count;
     }
-    const record = this.recordSize(member.type, seen);
-    if (record !== null) {
-      return (record + this.infoSize) * count;
+    const owner = this.ownerOf(member.type);
+    if (owner !== null) {
+      return (owner.sizeOf(member.type, seen) + this.infoSize) * count;
     }
     return this.sizeof(member.type) * count;
   }
 
-  /** Size of a member that is itself a record, asking peers too. */
-  private recordSize(type: string, seen: Set<string>): number | null {
-    if (this.membersOf(type) !== null) {
-      return this.sizeOf(type, seen);
+  /** C-like aligned layout used only by the educational memory canvas. */
+  private displayLayoutOf(
+    name: string,
+    seen: Set<string> = new Set()
+  ): {
+    fields: Map<string, { offset: number; size: number; alignment: number }>;
+    size: number;
+    alignment: number;
+  } | null {
+    const owner = this.ownerOf(name);
+    if (owner === null) {
+      return null;
     }
-    for (const peer of this.peers) {
-      if (peer.membersOf(type) !== null) {
-        return peer.sizeOf(type, seen);
+    if (owner !== this) {
+      return owner.displayLayoutOf(name, seen);
+    }
+    const key = this.resolve(name)!;
+    if (seen.has(key)) {
+      return { fields: new Map(), size: 0, alignment: 1 };
+    }
+    const path = new Set(seen);
+    path.add(key);
+    const fields = new Map<
+      string,
+      { offset: number; size: number; alignment: number }
+    >();
+    let cursor = 0;
+    let widest = 0;
+    let recordAlignment = 1;
+    for (const member of this.ownMembers(name)!) {
+      const shape = this.displayShapeOfMember(member, new Set(path));
+      recordAlignment = Math.max(recordAlignment, shape.alignment);
+      const offset =
+        this.keyword === 'union' ? 0 : alignAddress(cursor, shape.alignment);
+      fields.set(member.name, { offset, ...shape });
+      cursor = offset + shape.size;
+      widest = Math.max(widest, shape.size);
+    }
+    const contentSize = this.keyword === 'union' ? widest : cursor;
+    return {
+      fields,
+      size: alignAddress(contentSize, recordAlignment),
+      alignment: recordAlignment,
+    };
+  }
+
+  private displayShapeOfMember(
+    member: Member,
+    seen: Set<string>
+  ): { size: number; alignment: number } {
+    const count = member.lengths.reduce((a, b) => a * b, 1);
+    if (member.type.includes('*')) {
+      return { size: 4 * count, alignment: 4 };
+    }
+    const owner = this.ownerOf(member.type);
+    if (owner !== null) {
+      const nested = owner.displayLayoutOf(member.type, seen);
+      return nested === null
+        ? { size: 0, alignment: 1 }
+        : { size: nested.size * count, alignment: nested.alignment };
+    }
+    const size = this.sizeof(member.type);
+    return { size: size * count, alignment: Math.max(1, Math.min(size, 8)) };
+  }
+
+  private readAliasUses(masked: string): void {
+    const pattern = new RegExp(
+      `\\btypedef\\b([^;]*?)\\b${this.keyword}\\s+([A-Za-z_]\\w*)\\s+([A-Za-z_]\\w*)\\s*;`,
+      'g'
+    );
+    let match = pattern.exec(masked);
+    while (match !== null) {
+      if (this.members.has(match[2])) {
+        this.aliases.set(match[3], match[2]);
       }
+      match = pattern.exec(masked);
     }
-    return null;
   }
 
   /**
@@ -244,6 +480,7 @@ export abstract class RecordTable {
     if (close === -1) {
       return null;
     }
+    this.bodies.push([i + 1, close]);
     const members = parseMembers(masked.slice(i + 1, close));
     const after = masked.slice(close + 1, indexOfSemicolon(masked, close + 1));
     const declared = declaratorNames(after);
@@ -255,6 +492,9 @@ export abstract class RecordTable {
       return close + 1;
     }
     this.members.set(key, members);
+    if (tag === '') {
+      this.taglessKeys.add(key);
+    }
     this.lines.set(key, lineAt(masked, at));
     if (isTypedef) {
       for (const alias of declared) {
@@ -308,14 +548,19 @@ export function parseMembers(body: string): Member[] {
   const members: Member[] = [];
   for (const raw of splitTopLevel(body, ';')) {
     const declaration = raw.split(':')[0].trim();
-    if (declaration === '' || declaration.includes('(')) {
+    const normalizedDeclaration = declaration.replace(
+      /\b_Atomic\s*\(([^)]+)\)/g,
+      '_Atomic $1'
+    );
+    if (normalizedDeclaration === '' || normalizedDeclaration.includes('(')) {
       continue;
     }
-    if (declaration.includes('{')) {
+    if (normalizedDeclaration.includes('{')) {
       continue;
     }
-    const parts = splitTopLevel(declaration, ',');
+    const parts = splitTopLevel(normalizedDeclaration, ',');
     let baseType: string | null = null;
+    let declarationQualifiers: TypeQualifier[] = [];
     for (const part of parts) {
       const parsed = splitDeclarator(part);
       if (parsed === null) {
@@ -323,6 +568,7 @@ export function parseMembers(body: string): Member[] {
       }
       if (baseType === null) {
         baseType = parsed.prefix;
+        declarationQualifiers = parsed.baseQualifiers;
       }
       if (baseType === '') {
         continue;
@@ -331,6 +577,8 @@ export function parseMembers(body: string): Member[] {
         name: parsed.name,
         type: (baseType + ' ' + '*'.repeat(parsed.stars)).trim(),
         lengths: parsed.lengths,
+        baseQualifiers: declarationQualifiers,
+        pointerQualifiers: parsed.pointerQualifiers,
       });
     }
   }
@@ -343,6 +591,8 @@ interface Declarator {
   stars: number;
   name: string;
   lengths: number[];
+  baseQualifiers: TypeQualifier[];
+  pointerQualifiers: TypeQualifier[][];
 }
 
 /** Takes one declarator apart from the right: `char *name[8]`. */
@@ -371,10 +621,50 @@ function splitDeclarator(text: string): Declarator | null {
     return null;
   }
   t = t.slice(0, i).trim();
-  let stars = 0;
-  while (t.endsWith('*')) {
-    stars += 1;
-    t = t.slice(0, t.length - 1).trim();
+  const firstStar = t.indexOf('*');
+  const baseText = firstStar === -1 ? t : t.slice(0, firstStar);
+  const pointerText = firstStar === -1 ? '' : t.slice(firstStar);
+  const baseQualifiers = qualifiersIn(baseText);
+  const prefix = stripQualifiers(baseText);
+  const pointerQualifiers: TypeQualifier[][] = [];
+  if (pointerText !== '') {
+    for (const level of pointerText.split('*').slice(1)) {
+      pointerQualifiers.push(qualifiersIn(level));
+    }
   }
-  return { prefix: t, stars, name, lengths };
+  return {
+    prefix,
+    stars: pointerQualifiers.length,
+    name,
+    lengths,
+    baseQualifiers,
+    pointerQualifiers,
+  };
+}
+
+function qualifiersIn(text: string): TypeQualifier[] {
+  const qualifiers: TypeQualifier[] = [];
+  for (const word of text.match(/[A-Za-z_][A-Za-z0-9_]*/g) || []) {
+    if (
+      word === 'const' ||
+      word === 'volatile' ||
+      word === 'restrict' ||
+      word === '_Atomic'
+    ) {
+      qualifiers.push(word);
+    }
+  }
+  return qualifiers;
+}
+
+function stripQualifiers(text: string): string {
+  return text
+    .replace(/\b_Atomic\s*\(([^)]+)\)/g, '$1')
+    .replace(/\b(const|volatile|restrict|_Atomic)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function alignAddress(address: number, alignment: number): number {
+  return Math.ceil(address / alignment) * alignment;
 }
