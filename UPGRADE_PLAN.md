@@ -347,7 +347,13 @@ are exported as a standalone array that attaches to any `EditorView`.
 4. Replace `pointerConnectionManager`'s manual three-point spline arrows with
    JointJS links and a router. This is the largest single deletion in the plan.
 5. Replace the zoom slider and spinner with paper scaling.
-6. Address redraw cost before considering this phase done. The current code
+6. Add expression-expansion visualization to the canvas for the current
+   statement when it contains binary or ternary operators. Extend `StepModel`
+   with plain-data expression nodes and evaluation results from the Worker, then
+   render the operands, operators, evaluation order and intermediate values in
+   JointJS without sending interpreter or AST class instances across the Worker
+   boundary.
+7. Address redraw cost before considering this phase done. The current code
    rebuilds the entire scene per step; an SVG graph cannot absorb that during a
    run. Either diff the graph against the previous `StepModel`, or suspend
    redraws while `debugState` is `Executing` and draw once on stop. Measure
