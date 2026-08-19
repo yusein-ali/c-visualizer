@@ -433,6 +433,37 @@ int main(){ return OFF + FAULT; }`;
     );
   });
 
+  it('explains struct and union members as fields, not variables', () => {
+    const code = `struct Point {
+  const int x;
+  char name[8];
+};
+union Value {
+  long whole;
+  char letter;
+};`;
+    const found = constructs(code);
+    expect(
+      found
+        .filter((construct) => construct.kind === 'recordField')
+        .map((construct) => construct.recordField)
+    ).toEqual([
+      { type: 'const int', record: 'struct Point', identifier: 'x' },
+      { type: 'char[8]', record: 'struct Point', identifier: 'name' },
+      { type: 'long', record: 'union Value', identifier: 'whole' },
+      { type: 'char', record: 'union Value', identifier: 'letter' },
+    ]);
+    expect(constructAt(found, 2, 12)!.kind).toBe('recordField');
+    expect(constructAt(found, 6, 9)!.kind).toBe('recordField');
+    expect(
+      found.filter(
+        (construct) =>
+          construct.kind === 'variableDec' &&
+          (construct.line === 2 || construct.line === 3 || construct.line === 6)
+      )
+    ).toEqual([]);
+  });
+
   it('answers for the enum itself away from an enumerator', () => {
     const found = constructs('enum Mode { OFF, ON };');
     expect(constructAt(found, 1, 2)!.kind).toBe('typeDec');

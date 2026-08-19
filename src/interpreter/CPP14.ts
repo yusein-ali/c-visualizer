@@ -252,6 +252,12 @@ function displayedTypes(
       Object.assign({}, declaration, { type: display(declaration.type) })
     );
   }
+  if (typeof construct.recordField !== 'undefined') {
+    shown.recordField = Object.assign({}, construct.recordField, {
+      type: display(construct.recordField.type),
+      record: display(construct.recordField.record),
+    });
+  }
   if (typeof construct.declaredFunction !== 'undefined') {
     const declared = construct.declaredFunction;
     shown.declaredFunction = Object.assign({}, declared, {

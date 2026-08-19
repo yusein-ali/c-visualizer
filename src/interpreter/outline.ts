@@ -20,6 +20,7 @@ import {
   EnumeratorDetail,
   FunctionDeclarationDetail,
   ParameterDetail,
+  RecordFieldDetail,
   TypeDeclarationDetail,
   VariableDeclarationDetail,
 } from './Construct';
@@ -547,6 +548,80 @@ const enumeratorText = (declaration: EnumeratorDetail): string =>
     `value: ${declaration.value}`,
   ].join('\n');
 
+const recordFieldText = (declaration: RecordFieldDetail): string =>
+  [
+    `type: ${declaration.type}`,
+    `structure or union: ${declaration.record}`,
+    `identifier: ${declaration.identifier}`,
+  ].join('\n');
+
+/** The source-level name of a `UniClassDec`, which represents both records. */
+function recordTypeOf(node: any, source: string): string {
+  const spelling = sourceForRange(source, node.codeRange);
+  const definition = /\b(struct|union)\s*(?:([A-Za-z_]\w*)\s*)?\{/.exec(
+    spelling
+  );
+  if (definition !== null) {
+    return typeof definition[2] === 'undefined'
+      ? `${definition[1]} without a tag`
+      : `${definition[1]} ${definition[2]}`;
+  }
+  const name = typeof node.className === 'string' ? node.className : '';
+  return name === '' ? 'structure or union without a tag' : name;
+}
+
+/**
+ * Record members use declaration syntax, but they are not objects in scope.
+ * Keep the complete qualified type and the containing record, and deliberately
+ * omit the storage class and initial value that belong to variable tooltips.
+ */
+function recordFieldDetails(
+  node: any,
+  source: string,
+  specifiers: DeclarationSpecifiers | undefined,
+  record: string
+): RecordFieldDetail[] {
+  if (!Array.isArray(node.variables) || node.variables.length === 0) {
+    return [];
+  }
+  const first = node.variables[0];
+  return node.variables.map((variable: any) => {
+    const info =
+      typeof specifiers === 'undefined'
+        ? null
+        : specifiers.infoForVariable(
+            node.codeRange,
+            variable.codeRange,
+            first.codeRange
+          );
+    const declared = declarationType(node, variable, info, source);
+    // RecordTable blanks array suffixes before parsing because unicoen.ts
+    // otherwise drops the rest of the translation unit. Recover the suffix
+    // from the untouched source for the declaration tooltip.
+    const declarationEnd = offsetOf(source, node.codeRange.end) + 1;
+    const declarator = source.slice(
+      offsetOf(source, variable.codeRange.begin),
+      declarationEnd
+    );
+    const identifierAt = declarator.indexOf(declared.identifier);
+    const suffix =
+      identifierAt === -1
+        ? null
+        : /^\s*((?:\[[^\]]*\]\s*)+)/.exec(
+            declarator.slice(identifierAt + declared.identifier.length)
+          );
+    const arrays = suffix === null ? '' : suffix[1].replace(/\s+/g, '');
+    return {
+      type:
+        arrays === '' || declared.qualifiedType.endsWith(arrays)
+          ? declared.qualifiedType
+          : declared.qualifiedType + arrays,
+      record,
+      identifier: declared.identifier,
+    };
+  });
+}
+
 /**
  * The enumeration constants an enum body declares, marked where they are
  * declared. The value is the interesting part: a reader looking at
@@ -703,43 +778,69 @@ export function outline(
   specifiers?: DeclarationSpecifiers
 ): Construct[] {
   const constructs: Construct[] = [];
-  const visit = (node: any, automaticStorage: boolean = false) => {
+  const visit = (
+    node: any,
+    automaticStorage: boolean = false,
+    containingRecord: string | null = null
+  ) => {
     if (node === null || typeof node !== 'object') {
       return;
     }
     if (Array.isArray(node)) {
-      node.forEach((child) => visit(child, automaticStorage));
+      node.forEach((child) => visit(child, automaticStorage, containingRecord));
       return;
     }
     if (typeof node.fields === 'undefined') {
       return;
     }
-    const kind = kindOf(node);
+    const isRecordField =
+      containingRecord !== null && node instanceof UniVariableDec;
+    const kind = isRecordField ? 'recordField' : kindOf(node);
     const range = node.codeRange;
     if (kind !== null && range && range.begin && range.end) {
       const declarations =
         kind === 'variableDec'
           ? variableDetails(node, source, specifiers, automaticStorage)
           : [];
+      const fields = isRecordField
+        ? recordFieldDetails(node, source, specifiers, containingRecord!)
+        : [];
       const declaredFunction =
         kind === 'functionDec'
           ? functionDetail(node, source, specifiers)
           : null;
-      constructs.push({
-        kind,
-        detail:
-          declaredFunction === null
-            ? detailOf(node, declarations)
-            : functionText(declaredFunction),
-        variableDeclarations:
-          declarations.length === 0 ? undefined : declarations,
-        declaredFunction:
-          declaredFunction === null ? undefined : declaredFunction,
-        line: range.begin.y,
-        column: range.begin.x,
-        endLine: range.end.y,
-        endColumn: range.end.x + 1,
-      });
+      if (kind === 'recordField') {
+        node.variables.forEach((variable: any, index: number) => {
+          const variableRange = variable.codeRange;
+          if (variableRange && variableRange.begin && variableRange.end) {
+            constructs.push({
+              kind,
+              detail: recordFieldText(fields[index]),
+              recordField: fields[index],
+              line: variableRange.begin.y,
+              column: variableRange.begin.x,
+              endLine: variableRange.end.y,
+              endColumn: variableRange.end.x + 1,
+            });
+          }
+        });
+      } else {
+        constructs.push({
+          kind,
+          detail:
+            declaredFunction === null
+              ? detailOf(node, declarations)
+              : functionText(declaredFunction),
+          variableDeclarations:
+            declarations.length === 0 ? undefined : declarations,
+          declaredFunction:
+            declaredFunction === null ? undefined : declaredFunction,
+          line: range.begin.y,
+          column: range.begin.x,
+          endLine: range.end.y,
+          endColumn: range.end.x + 1,
+        });
+      }
       if (kind === 'variableDec') {
         node.variables.forEach((variable: any, index: number) => {
           const variableRange = variable.codeRange;
@@ -761,9 +862,15 @@ export function outline(
       node instanceof UniClassDec
         ? false
         : automaticStorage || node instanceof UniFunctionDec;
+    const childRecord =
+      node instanceof UniClassDec
+        ? recordTypeOf(node, source)
+        : node instanceof UniFunctionDec
+        ? null
+        : containingRecord;
     for (const field of Array.from(node.fields.keys()) as string[]) {
       if (field !== 'comments' && field !== 'codeRange') {
-        visit(node[field], childAutomaticStorage);
+        visit(node[field], childAutomaticStorage, childRecord);
       }
     }
   };

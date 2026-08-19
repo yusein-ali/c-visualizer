@@ -17,6 +17,8 @@ export interface Construct {
   declaredTypes?: TypeDeclarationDetail[];
   /** The same, for the constant an `enumerator` declares. */
   enumerator?: EnumeratorDetail;
+  /** The same, for the member a `recordField` declares. */
+  recordField?: RecordFieldDetail;
   /** The same, for the function a `functionDec` declares. */
   declaredFunction?: FunctionDeclarationDetail;
   /** 1-based line, 0-based column, as the parser reports them. */
@@ -59,6 +61,18 @@ export interface EnumeratorDetail {
   enumeration: string;
   identifier: string;
   value: number;
+}
+
+/**
+ * What a member of a structure or union declares. Members are not variables:
+ * they have no storage until an object of the containing type is created.
+ */
+export interface RecordFieldDetail {
+  /** The complete, qualified type of the member. */
+  type: string;
+  /** The structure or union this member belongs to. */
+  record: string;
+  identifier: string;
 }
 
 /**

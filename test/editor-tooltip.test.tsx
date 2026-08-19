@@ -2,6 +2,7 @@ import Editor, {
   formatAddress,
   formatFunctionDeclaration,
   formatEnumerator,
+  formatRecordField,
   formatTypeDeclaration,
   formatVariableDeclaration,
 } from '../src/components/Editor';
@@ -154,6 +155,23 @@ describe('editor tooltip addresses', () => {
         'enumeration: enum Mode\n' +
         'identifier: FAULT\n' +
         'value: 5'
+    );
+  });
+
+  it('formats a structure or union member as labelled lines', () => {
+    expect(
+      formatRecordField(
+        {
+          type: 'const int * const',
+          record: 'struct Device',
+          identifier: 'status',
+        },
+        'en'
+      )
+    ).toBe(
+      'type: const int * const\n' +
+        'structure or union: struct Device\n' +
+        'identifier: status'
     );
   });
 });

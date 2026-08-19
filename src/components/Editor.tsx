@@ -41,6 +41,7 @@ import {
   constructAt,
   EnumeratorDetail,
   FunctionDeclarationDetail,
+  RecordFieldDetail,
   TypeDeclarationDetail,
   VariableDeclarationDetail,
 } from '../interpreter/Construct';
@@ -132,6 +133,17 @@ export const formatEnumerator = (
     `${translate(lang, 'enumeration')}: ${declaration.enumeration}`,
     `${translate(lang, 'identifier')}: ${declaration.identifier}`,
     `${translate(lang, 'value')}: ${declaration.value}`,
+  ].join('\n');
+
+/** A structure or union member, described where its name is declared. */
+export const formatRecordField = (
+  declaration: RecordFieldDetail,
+  lang: string
+): string =>
+  [
+    `${translate(lang, 'declarationType')}: ${declaration.type}`,
+    `${translate(lang, 'record')}: ${declaration.record}`,
+    `${translate(lang, 'identifier')}: ${declaration.identifier}`,
   ].join('\n');
 
 /**
@@ -517,6 +529,15 @@ export default class Editor extends React.Component<Props, State> {
       ) {
         return `${name}\n${formatEnumerator(
           construct.enumerator,
+          this.props.lang
+        )}`;
+      }
+      if (
+        construct.kind === 'recordField' &&
+        typeof construct.recordField !== 'undefined'
+      ) {
+        return `${name}\n${formatRecordField(
+          construct.recordField,
           this.props.lang
         )}`;
       }
