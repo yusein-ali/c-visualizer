@@ -11,11 +11,87 @@ export interface Construct {
   kind: string;
   /** The declared type, the called name - whatever makes the kind concrete. */
   detail: string;
+  /** Source-level details retained for variable-declaration tooltips. */
+  variableDeclarations?: VariableDeclarationDetail[];
+  /** The same, for the types a `typeDec` declares - one per name it gives. */
+  declaredTypes?: TypeDeclarationDetail[];
+  /** The same, for the constant an `enumerator` declares. */
+  enumerator?: EnumeratorDetail;
+  /** The same, for the function a `functionDec` declares. */
+  declaredFunction?: FunctionDeclarationDetail;
   /** 1-based line, 0-based column, as the parser reports them. */
   line: number;
   column: number;
   endLine: number;
   endColumn: number;
+}
+
+/**
+ * What a type declaration says, field by field. A C declaration always names a
+ * complete type - only the qualifiers may be absent - so a tooltip that shows
+ * the type alone hides half of what the compiler read.
+ */
+export interface TypeDeclarationDetail {
+  /** `typedef`, which C counts among the storage-class specifiers. */
+  storageClasses: string[];
+  qualifiers: string[];
+  /** The type being named: `enum Mode`, `struct Sensor`, `int *`. */
+  type: string;
+  /**
+   * What C calls the name this declaration introduces. A typedef declarator
+   * defines a typedef name (6.7.8); a record or enumeration definition names
+   * a tag (6.7.2.3), which lives in its own name space. Neither is a "type
+   * name" - that term is taken, and means a type written without an
+   * identifier (6.7.7), which is what `type` above holds.
+   */
+  nameKind: 'typedefName' | 'tag';
+  name: string;
+}
+
+/**
+ * What an enumerator declares. C calls `RED` in `enum Color { RED }` an
+ * enumeration constant (6.4.4.3), and gives it type `int` - not the enumerated
+ * type - which is worth saying where a reader meets it.
+ */
+export interface EnumeratorDetail {
+  type: string;
+  /** The enumeration it belongs to, named as a reader would recognise it. */
+  enumeration: string;
+  identifier: string;
+  value: number;
+}
+
+/**
+ * What a function declaration says: the type it returns, the identifier it
+ * declares - 6.9.1 calls the name a function definition introduces exactly
+ * that - and the parameters it takes.
+ */
+export interface FunctionDeclarationDetail {
+  /** The return type as the source spells it, qualifiers included. */
+  returnType: string;
+  identifier: string;
+  parameters: ParameterDetail[];
+}
+
+/**
+ * One entry of the parameter type list. C calls these parameters (3.16); it
+ * records "formal argument" as a deprecated name for the same thing, and
+ * reserves "argument" for the expression a call passes. Each is reported the
+ * way a declaration reads - the identifier, then the type that identifier has,
+ * qualifiers in the place they were written.
+ */
+export interface ParameterDetail {
+  identifier: string;
+  type: string;
+}
+
+export interface VariableDeclarationDetail {
+  type: string;
+  storageClasses: string[];
+  qualifiers: string[];
+  identifier: string;
+  /** The initializer as written, or null when the object is uninitialized. */
+  initialValue: string | null;
 }
 
 /**

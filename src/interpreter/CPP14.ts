@@ -1,11 +1,24 @@
 import { Interpreter } from 'unicoen.ts/dist/interpreter/Interpreter';
 import { CPP14Mapper } from 'unicoen.ts/dist/interpreter/CPP14/CPP14Mapper';
+import { ExecState } from 'unicoen.ts/dist/interpreter/Engine/ExecState';
 import { SyntaxErrorData } from 'unicoen.ts/dist/interpreter/mapper/SyntaxErrorData';
 import { PlivetCPP14Engine } from './CPP14Engine';
 import { Construct } from './Construct';
+import { DeclarationSpecifiers } from './DeclarationSpecifiers';
+import { DesignatedInitializers } from './DesignatedInitializers';
+import { EnumTable, Enumerator, RuntimeEnumTypes } from './EnumTable';
+import {
+  FunctionPointerTable,
+  RuntimeFunctionPointerTypes,
+  signatureOf,
+} from './FunctionPointerTable';
 import { Expansion } from './Expansion';
-import { outline } from './outline';
-import { preprocess, preprocessSource } from './preprocess';
+import { enumeratorDeclarations, outline, typeDeclarations } from './outline';
+import { preprocessSource } from './preprocess';
+import { RuntimeRecordTypes } from './RecordTable';
+import { annotateRuntimeVariables } from './RuntimeTypeInfo';
+import { StructTable } from './StructTable';
+import { UnionTable } from './UnionTable';
 
 /**
  * PLIVET's C interpreter: the stock mapper and engine behaviour, with the
@@ -21,12 +34,44 @@ import { preprocess, preprocessSource } from './preprocess';
  * its parser stay in their own chunk.
  */
 export class PlivetCPP14Interpreter extends Interpreter {
+  private readonly plivetEngine: PlivetCPP14Engine;
+  private enumTypes: RuntimeEnumTypes;
+  private recordTypes: RuntimeRecordTypes;
+  private functionPointerTypes: RuntimeFunctionPointerTypes;
+
   constructor() {
-    super(new PlivetCPP14Engine(), new CPP14Mapper());
+    const engine = new PlivetCPP14Engine();
+    super(engine, new CPP14Mapper());
+    this.plivetEngine = engine;
+    this.enumTypes = {};
+    this.recordTypes = {};
+    this.functionPointerTypes = {};
   }
 
   preProcess(code: string): string {
-    return preprocess(code);
+    return this.prepare(code).code;
+  }
+
+  startStepExecution(code: string): ExecState {
+    return annotateRuntimeVariables(
+      this.plivetEngine.expandRecordArrays(super.startStepExecution(code)),
+      this.enumTypes,
+      this.recordTypes,
+      (address) => this.plivetEngine.declarationInfoAt(address),
+      this.functionPointerTypes,
+      (address) => this.plivetEngine.functionNameAt(address)
+    );
+  }
+
+  stepExecute(): ExecState {
+    return annotateRuntimeVariables(
+      this.plivetEngine.expandRecordArrays(super.stepExecute()),
+      this.enumTypes,
+      this.recordTypes,
+      (address) => this.plivetEngine.declarationInfoAt(address),
+      this.functionPointerTypes,
+      (address) => this.plivetEngine.functionNameAt(address)
+    );
   }
 
   /**
@@ -35,7 +80,7 @@ export class PlivetCPP14Interpreter extends Interpreter {
    * syntax check, which already runs on every edit.
    */
   getExpansions(code: string): Expansion[] {
-    return preprocessSource(code).expansions;
+    return this.prepare(code).expansions;
   }
 
   /**
@@ -46,11 +91,76 @@ export class PlivetCPP14Interpreter extends Interpreter {
    * written: this runs on every edit.
    */
   getConstructs(code: string): Construct[] {
+    const prepared = this.prepare(code);
+    const sourceTypes = typeDeclarations(prepared.source).concat(
+      enumeratorDeclarations(prepared.enumConstants)
+    );
     try {
-      return outline(this.mapper.parseToUniTree(preprocess(code)));
+      const parsed = outline(
+        this.mapper.parseToUniTree(prepared.code),
+        prepared.source,
+        prepared.declarationSpecifiers
+      );
+      // Where both readers describe the same type declaration the source one
+      // wins: the mapper keeps only the type a typedef renames, so its mark
+      // says `Mode` where the source says `ReadOnlyMode = const enum Mode`.
+      const described = sourceTypes
+        .filter((construct) => construct.kind === 'typeDec')
+        .map((construct) => construct.line);
+      return sourceTypes.concat(
+        this.displaySyntheticTypes(parsed)
+          .filter(
+            (construct) =>
+              construct.kind !== 'typeDec' ||
+              described.indexOf(construct.line) === -1
+          )
+          .map((construct) =>
+            sourceColumns(construct, prepared.functionPointers)
+          )
+      );
     } catch (e) {
-      return [];
+      return sourceTypes;
     }
+  }
+
+  /**
+   * Enums and function pointers execute under collision-free names such as
+   * `_e0` and `_fp0`, but those names are an implementation detail. Construct
+   * descriptions are shown directly in editor tooltips, so translate every
+   * synthetic token back to the spelling students wrote before returning them
+   * to the UI.
+   */
+  private displaySyntheticTypes(constructs: Construct[]): Construct[] {
+    const enumTypes = Object.keys(this.enumTypes).filter((type) =>
+      /^_e\d+$/.test(type)
+    );
+    const pointerTypes = Object.keys(this.functionPointerTypes);
+    const display = (text: string): string => {
+      let shown = text;
+      for (const runtimeType of enumTypes) {
+        shown = shown.replace(
+          new RegExp(`\\b${runtimeType}\\b`, 'g'),
+          this.enumTypes[runtimeType].displayType
+        );
+      }
+      for (const runtimeType of pointerTypes) {
+        const info = this.functionPointerTypes[runtimeType];
+        // The array bounds belong inside the parentheses: an array of function
+        // pointers is `int (*ops[2])(int, int)`, never `int (*)(int, int)[2]`.
+        shown = shown.replace(
+          new RegExp(`\\b${runtimeType}\\b((?:\\[[^\\]]*\\])*)`, 'g'),
+          (_whole: string, arraySuffix: string) =>
+            signatureOf(
+              info.returnType,
+              info.parameters,
+              '*'.repeat(info.depth),
+              arraySuffix
+            )
+        );
+      }
+      return shown;
+    };
+    return constructs.map((construct) => displayedTypes(construct, display));
   }
 
   /**
@@ -61,6 +171,115 @@ export class PlivetCPP14Interpreter extends Interpreter {
    * the right lines.
    */
   checkSyntaxError(code: string): SyntaxErrorData[] {
-    return super.checkSyntaxError(preprocess(code));
+    return super.checkSyntaxError(this.prepare(code).code);
   }
+
+  /** Runs every source pass once and gives the engine fresh record metadata. */
+  private prepare(
+    code: string
+  ): {
+    code: string;
+    expansions: Expansion[];
+    source: string;
+    declarationSpecifiers: DeclarationSpecifiers;
+    functionPointers: FunctionPointerTable;
+    enumConstants: Enumerator[];
+  } {
+    const preprocessed = preprocessSource(code);
+    const declarationSpecifiers = new DeclarationSpecifiers();
+    const declarations = declarationSpecifiers.rewrite(preprocessed.code);
+    // Read where the qualifiers have been blanked - `int (* const op)(void)`
+    // is otherwise a declarator whose name reads as `const` - but before the
+    // enum pass, so a function returning `enum Color` still says so.
+    const functionPointers = new FunctionPointerTable().read(declarations);
+    this.functionPointerTypes = functionPointers.runtimeTypes();
+    const enumTable = new EnumTable();
+    const enums = enumTable.rewrite(declarations);
+    this.enumTypes = enumTable.runtimeTypes();
+    const designatedInitializers = new DesignatedInitializers();
+    const initializers = designatedInitializers.rewrite(enums.code);
+    const structs = new StructTable();
+    const unions = new UnionTable();
+    structs.link(unions);
+    unions.link(structs);
+    // Read the source before qualifier words are blanked so record members
+    // retain their own const/volatile/restrict placement, but after function
+    // pointers become named types, which is the only form a member can have.
+    const recordSource = functionPointers.apply(preprocessed.code);
+    structs.read(recordSource);
+    unions.read(recordSource);
+    this.recordTypes = Object.assign(
+      {},
+      structs.runtimeTypes(),
+      unions.runtimeTypes()
+    );
+    this.plivetEngine.setRecordTables(structs, unions);
+    this.plivetEngine.setDeclarationSpecifiers(declarationSpecifiers);
+    this.plivetEngine.setDesignatedInitializers(designatedInitializers);
+    const recordsForParser = unions.rewriteForParser(
+      structs.rewriteForParser(functionPointers.apply(initializers))
+    );
+    return {
+      code: recordsForParser,
+      expansions: preprocessed.expansions.concat(enums.expansions),
+      source: preprocessed.code,
+      declarationSpecifiers,
+      functionPointers,
+      enumConstants: enumTable.declaredConstants(),
+    };
+  }
+}
+
+/**
+ * A construct with every type it names translated. The one-line detail is not
+ * the only text a tooltip shows any more: the editor reads the type out of the
+ * declaration details, so a synthetic name left there reaches the reader even
+ * when the summary line is clean.
+ */
+function displayedTypes(
+  construct: Construct,
+  display: (text: string) => string
+): Construct {
+  const shown: Partial<Construct> = { detail: display(construct.detail) };
+  if (typeof construct.variableDeclarations !== 'undefined') {
+    shown.variableDeclarations = construct.variableDeclarations.map(
+      (declaration) =>
+        Object.assign({}, declaration, { type: display(declaration.type) })
+    );
+  }
+  if (typeof construct.declaredTypes !== 'undefined') {
+    shown.declaredTypes = construct.declaredTypes.map((declaration) =>
+      Object.assign({}, declaration, { type: display(declaration.type) })
+    );
+  }
+  if (typeof construct.declaredFunction !== 'undefined') {
+    const declared = construct.declaredFunction;
+    shown.declaredFunction = Object.assign({}, declared, {
+      returnType: display(declared.returnType),
+      parameters: declared.parameters.map((parameter) =>
+        Object.assign({}, parameter, { type: display(parameter.type) })
+      ),
+    });
+  }
+  return Object.assign({}, construct, shown);
+}
+
+/**
+ * A construct's columns come from the parser, which read a source where an
+ * indirect call may have gained a `(*` and a `)`. Every other pass pads in
+ * place, so this is the only correction a position needs before it is matched
+ * against where the cursor actually is.
+ */
+function sourceColumns(
+  construct: Construct,
+  functionPointers: FunctionPointerTable
+): Construct {
+  const column = functionPointers.columnShift(construct.line, construct.column);
+  const endColumn = functionPointers.columnShift(
+    construct.endLine,
+    construct.endColumn
+  );
+  return column === construct.column && endColumn === construct.endColumn
+    ? construct
+    : Object.assign({}, construct, { column, endColumn });
 }
