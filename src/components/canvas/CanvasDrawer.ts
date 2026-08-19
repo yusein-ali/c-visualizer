@@ -5,9 +5,60 @@ import { Vector } from 'vector2d';
 import { signal } from '../emitter';
 import Hashids from 'hashids';
 import stringHash from 'string-hash';
+import { RuntimeDeclarationInfo } from '../../interpreter/DeclarationSpecifiers';
+import {
+  declarationInfoOf,
+  displayAddressOf,
+  displayPointerValueOf,
+  displayTypeOf,
+  enumInfoOf,
+  functionPointerInfoOf,
+} from '../../interpreter/RuntimeTypeInfo';
 
 export type CanvasRow = CanvasCell[];
 export type CanvasTable = CanvasRow[];
+
+function qualifiedDisplayType(
+  displayType: string,
+  declaration: RuntimeDeclarationInfo | null
+): string {
+  if (declaration === null) {
+    return displayType;
+  }
+  // Only the trailing run counts. A function pointer spells its own star
+  // inside the declarator - `int (*)(int, int)` - and appending another would
+  // make it a pointer to a function pointer.
+  const trailing = /\s*(\*+)\s*$/.exec(displayType);
+  const stars = trailing === null ? 0 : trailing[1].length;
+  const baseType = displayType.replace(/\s*\*+\s*$/, '').trim();
+  let baseQualifiers =
+    declaration.baseQualifiers === undefined
+      ? declaration.qualifiers
+      : declaration.baseQualifiers;
+  if (
+    stars === 0 &&
+    baseQualifiers.length === 0 &&
+    (declaration.pointerQualifiers || []).length > 0
+  ) {
+    // A qualifier applied to a pointer typedef is spelled before the alias
+    // even though semantically it binds the typedef's outer pointer.
+    baseQualifiers = declaration.qualifiers;
+  }
+  let result = [
+    ...declaration.storageClasses,
+    ...baseQualifiers,
+    baseType,
+  ].join(' ');
+  const pointerQualifiers = declaration.pointerQualifiers || [];
+  for (let level = 0; level < stars; level += 1) {
+    result += ' *';
+    const qualifiers = pointerQualifiers[level] || [];
+    if (qualifiers.length > 0) {
+      result += ` ${qualifiers.join(' ')}`;
+    }
+  }
+  return result;
+}
 
 const hashids = new Hashids('', 6, '1234567890abcdef'); // all lowercase
 class Connection {
@@ -379,26 +430,59 @@ export class CanvasVariable {
   }
 
   protected init(variable: Variable) {
-    const { type, name, address } = variable;
+    const { type, name } = variable;
+    const address = displayAddressOf(variable);
     const value = variable.getValue();
-    let valueStr = value.toString();
+    let valueStr =
+      value === null || typeof value === 'undefined'
+        ? 'uninitialized'
+        : value.toString();
+    const enumInfo = enumInfoOf(variable);
+    const functionInfo = functionPointerInfoOf(variable);
+    const declarationInfo = declarationInfoOf(variable);
+
+    if (functionInfo !== null && value != null) {
+      // A function pointer holds an address like any other pointer, so it is
+      // shown like one; the name is what makes the address mean something.
+      const hex = '0x' + Number(value.valueOf()).toString(16).toUpperCase();
+      valueStr =
+        functionInfo.pointee === null
+          ? hex
+          : `${functionInfo.pointee} (${hex})`;
+    }
+    if (enumInfo !== null && enumInfo.scalar) {
+      const names = enumInfo.namesByValue[String(value.valueOf())];
+      if (typeof names !== 'undefined') {
+        valueStr = `${names.join(' / ')} (${valueStr})`;
+      }
+    }
 
     const rawType = this.getTypedef(type);
-    if (rawType.indexOf('*') !== -1 && value != null) {
-      valueStr = '0x' + value.toString(16).toUpperCase();
+    if (functionInfo === null && rawType.indexOf('*') !== -1 && value != null) {
+      const pointerValue = displayPointerValueOf(variable);
+      valueStr =
+        '0x' +
+        (pointerValue === null ? value : pointerValue)
+          .toString(16)
+          .toUpperCase();
     }
     if (rawType === 'char' && value != null) {
       valueStr += ` '${String.fromCharCode(valueStr)}'`;
     }
 
     const addressStr = `&${name}(0x${address.toString(16).toUpperCase()}) `;
-    this.pushCell(type);
+    const displayType = displayTypeOf(variable);
+    this.pushCell(qualifiedDisplayType(displayType, declarationInfo));
     this.pushCell(name);
     const valueCell = this.pushCell(valueStr);
     const addrCell = this.pushCell(addressStr);
-    if (this.isTypePtr()) {
+    if (functionInfo === null && this.isTypePtr()) {
       // valueはアドレス値
-      pointerConnectionManager.addPtrVariable(value, valueCell.key);
+      const pointerValue = displayPointerValueOf(variable);
+      pointerConnectionManager.addPtrVariable(
+        pointerValue === null ? value : pointerValue,
+        valueCell.key
+      );
     }
     pointerConnectionManager.addVariableAddr(address, addrCell.key);
   }
@@ -431,10 +515,13 @@ export class CanvasArrayVariable extends CanvasVariable {
   }
 
   protected init(variable: Variable) {
-    const { type, name, address } = variable;
+    const { name } = variable;
+    const address = displayAddressOf(variable);
+    const declarationInfo = declarationInfoOf(variable);
     const valueStr = '0x' + address.toString(16).toUpperCase();
     const addressStr = `&${name}(SYSTEM)`;
-    this.pushCell(type);
+    const displayType = displayTypeOf(variable);
+    this.pushCell(qualifiedDisplayType(displayType, declarationInfo));
     this.pushCell(name);
     const valueCell = this.pushCell(valueStr);
     this.pushCell(addressStr);
