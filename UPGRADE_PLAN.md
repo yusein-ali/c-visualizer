@@ -235,7 +235,6 @@ and `npm run build` produces a working production bundle without legacy OpenSSL
 flags.
 
 ## Phase 4: TypeScript and linting
-
 1. Upgrade TypeScript to 5.x and the Babel TypeScript preset together. Keep
    `strict`, `noUnusedLocals`, `noUnusedParameters`, `noImplicitReturns`.
 2. Remove TSLint, its plugins and configs, and `tslint-loader`.
@@ -352,7 +351,8 @@ are exported as a standalone array that attaches to any `EditorView`.
    with plain-data expression nodes and evaluation results from the Worker, then
    render the operands, operators, evaluation order and intermediate values in
    JointJS without sending interpreter or AST class instances across the Worker
-   boundary.
+   boundary. Include also the assignment if applicable so that expression expansion forms a 
+   complete statement.  
 7. Address redraw cost before considering this phase done. The current code
    rebuilds the entire scene per step; an SVG graph cannot absorb that during a
    run. Either diff the graph against the previous `StepModel`, or suspend
