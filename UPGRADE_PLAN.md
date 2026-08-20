@@ -723,6 +723,21 @@ protocol in `baseline/README.md` before declaring the exit criterion met.
     window rather than a thing floating in it. Only the icons are shared -
     `controls.css` is not imported here - so a canvas mounted alone still
     paints its own buttons.
+20. Put a pointer's ends down on the blank top of the address cell. **Done.**
+    Both ends stopped just outside the node - three pixels off its border, at
+    the middle of the row - so the head was drawn in the gutter beside the
+    table rather than on the thing it names, and it met the border rather than
+    the cell. The address column spans the caption band as well as the
+    object's own, because the address belongs to the whole object, and its
+    upper half is blank: the caption starts at the name column beside it. That
+    is the one part of a row an arrow can be put down on without covering
+    something, so an arrow that meets a node on the address side - which is
+    every arrival in the left-hand column, every crossing into the right-hand
+    one, and every departure from it - now ends twelve pixels inside the node
+    on that band, with the whole head over the cell. An end that meets a node
+    on the other side stops outside it as before: the value is written out to
+    the edge of its cell, and there is nothing to land on. Links are drawn
+    over the nodes (`z`), so a head inside one is a head a reader can see.
 
 Exit criterion: the visualization matches the Phase 0 screenshots, folding and
 zoom work, and run-to-breakpoint does not regress against Phase 6.
@@ -987,7 +1002,8 @@ it, and can be taken in any order or dropped.
    and `extractModel` keeps the ones an object in scope answers to - so a call
    to `printf` reports its arguments and not itself. Six is the most a line
    gets; past that the canvas is the thing that shows a frame.
-2. **A teaching linter.** `src/ui/editor/diagnostics.ts` maps `SyntaxErrorData`
+
+2. **A teaching linter.** **Done.** `src/ui/editor/diagnostics.ts` maps `SyntaxErrorData`
    and nothing else, yet a `@codemirror/lint` diagnostic also carries
    `severity`, `actions` - one-click fixes - and `renderMessage` for structured
    DOM. Add the static checks that `Construct.ts` and `RuntimeTypeInfo.ts`
@@ -1001,6 +1017,24 @@ it, and can be taken in any order or dropped.
    teacher can add the next rule cheaply. Where PLIVET is embedded and a host
    toolchain is reachable, real compiler warnings can arrive from it instead of
    being reimplemented here; see Phase 13.
+
+   `src/interpreter/TeachingLint.ts` holds the table and the one walk over it.
+   A rule is `{ name, severity, enter, leave }`; the walk keeps the scope, so a
+   rule asks what a name was declared as rather than finding out for itself.
+   The five are there - `scanf` without an address, an assignment used as a
+   condition, a format string disagreeing with its arguments, a read before a
+   value arrives, and a function that can reach its end without returning - and
+   the two severities are a distinction rather than a mood: `error` is for what
+   C leaves undefined, `warning` for legal C that is nearly always a mistake.
+   Where a rule cannot tell - a `switch` whose cases fall into each other - it
+   says nothing, because a lesson a reader can see is wrong teaches worse than
+   no lesson at all. Fixes are offered as an offset from the finding, so an
+   edit above one moves the fix with it, and only where the text at that range
+   in the reader's own file is still what the rule thinks it is: the tree is
+   parsed from a rewritten source, and the two agree on lines but not always on
+   columns. `lintGutter()` is in the debug array, and the library entry a
+   message points at is looked up by the application and formatted by the
+   editor - `libraryHelp` stays the one place that knows what `scanf` is.
 3. **Runtime diagnostics.** The same lint API, raised at the step that goes
    wrong rather than after the run: division by zero, an index past the end of
    an array, a dereference of a pointer with no target, a read of uninitialised
@@ -1234,7 +1268,7 @@ Recorded here so the constraints above are not quietly dropped. Not in scope now
 Then Phase 12, once the acceptance checklist passes:
 
 17. Inline value widgets under the current step. **Done.**
-18. Teaching linter with quick fixes and a lint gutter.
+18. Teaching linter with quick fixes and a lint gutter. **Done.**
 19. Runtime diagnostics carried from the Worker with their positions.
 20. Construct tooltips: the static half - clauses, enclosure, conversions.
 21. Construct tooltips: the runtime half - conditions, iterations, arguments,

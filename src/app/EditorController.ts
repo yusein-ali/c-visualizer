@@ -2,6 +2,7 @@ import {
   Request,
   CONTROL_EVENT,
   InterpreterClient,
+  LintDiagnosticModel,
   Response,
   DEBUG_STATE,
   StepModel,
@@ -9,8 +10,9 @@ import {
 } from '../core';
 import strings from '../strings';
 import { Expansion } from '../interpreter/Expansion';
-import { PlivetEditor, rangeOf } from '../ui/editor';
+import { PlivetEditor, rangeOf, TeachingDiagnostic } from '../ui/editor';
 import { HoverTextSource } from './hoverText';
+import { libraryHelp } from './libraryHelp';
 import { Bus } from './emitter';
 import type { ZOOM_COMMAND } from '../ui/controls';
 
@@ -35,6 +37,19 @@ export interface EditorControllerOptions {
   /** The program the editor opens with. */
   doc?: string;
 }
+
+/**
+ * The library entry a rule pointed at, looked up.
+ *
+ * The rule runs in the Worker and names the function; `libraryHelp` is the one
+ * place that knows what the function is, and lives on this side. The editor
+ * formats what it is handed and looks nothing up.
+ */
+const withLibraryHelp = (lint: LintDiagnosticModel): TeachingDiagnostic => {
+  const help = typeof lint.help === 'undefined' ? null : libraryHelp(lint.help);
+  const { help: _named, ...rest } = lint;
+  return help === null ? rest : { ...rest, help };
+};
 
 export class EditorController {
   private readonly bus: Bus;
@@ -118,8 +133,11 @@ export class EditorController {
       this.client
         .send(request)
         .then((response: Response) => {
-          const { errors, expansions, constructs } = response;
-          this.setSyntaxError(errors);
+          const { errors, expansions, constructs, lints } = response;
+          this.setSyntaxError(
+            errors,
+            typeof lints === 'undefined' ? [] : lints
+          );
           this.setExpansions(
             typeof expansions === 'undefined' ? [] : expansions
           );
@@ -212,7 +230,19 @@ export class EditorController {
     this.editor.debug.showExpansions(this.editor.view, expansions);
   }
 
-  setSyntaxError(errors: SyntaxErrorModel[]) {
-    this.editor.debug.showDiagnostics(this.editor.view, errors);
+  /**
+   * What the parser refused and what the teaching rules found, in one call:
+   * the linter holds one set of diagnostics, and two calls would mean each
+   * replacing the other.
+   */
+  setSyntaxError(
+    errors: SyntaxErrorModel[],
+    lints: LintDiagnosticModel[] = []
+  ) {
+    this.editor.debug.showDiagnostics(
+      this.editor.view,
+      errors,
+      lints.map(withLibraryHelp)
+    );
   }
 }

@@ -21,6 +21,7 @@ import {
   annotateRuntimeVariables,
 } from './RuntimeTypeInfo';
 import { StructTable } from './StructTable';
+import { LintDiagnostic, teachingDiagnostics } from './TeachingLint';
 import { UnionTable } from './UnionTable';
 
 /**
@@ -167,6 +168,27 @@ export class PlivetCPP14Interpreter extends Interpreter {
       return shown;
     };
     return constructs.map((construct) => displayedTypes(construct, display));
+  }
+
+  /**
+   * What a compiler would warn about, for the editor to raise as lint.
+   *
+   * Read from the same parse as the constructs, and from the same prepared
+   * source: `const char *s` is not a declaration the mapper can read until the
+   * qualifier pass has been over it. A program that does not parse produces
+   * nothing rather than throwing - the syntax errors are the diagnostics worth
+   * showing while the code is half written.
+   */
+  getLints(code: string): LintDiagnostic[] {
+    const prepared = this.prepare(code);
+    try {
+      return teachingDiagnostics(
+        this.mapper.parseToUniTree(prepared.code),
+        code
+      );
+    } catch {
+      return [];
+    }
   }
 
   /**

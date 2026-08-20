@@ -5,6 +5,7 @@ import { extractModel } from './extractModel';
 import { StepModel, emptyStepModel } from './model';
 import { Construct } from '../interpreter/Construct';
 import { Expansion } from '../interpreter/Expansion';
+import { LintDiagnostic } from '../interpreter/TeachingLint';
 
 export type CONTROL_EVENT =
   | 'Exec'
@@ -63,6 +64,8 @@ export interface Response {
   expansions?: Expansion[];
   /** Parsed statements, for the editor to explain. Syntax checks only. */
   constructs?: Construct[];
+  /** What the teaching rules found in a program that parses. Checks only. */
+  lints?: LintDiagnostic[];
 }
 
 /**
@@ -89,6 +92,7 @@ interface StepResult {
 interface ExpansionSource {
   getExpansions(code: string): Expansion[];
   getConstructs(code: string): Construct[];
+  getLints(code: string): LintDiagnostic[];
 }
 
 function reportsExpansions(
@@ -97,7 +101,8 @@ function reportsExpansions(
   const source = interpreter as unknown as ExpansionSource;
   return (
     typeof source.getExpansions === 'function' &&
-    typeof source.getConstructs === 'function'
+    typeof source.getConstructs === 'function' &&
+    typeof source.getLints === 'function'
   );
 }
 
@@ -420,6 +425,12 @@ export class Server {
       constructs: reportsExpansions(interpreter)
         ? interpreter.getConstructs(code)
         : [],
+      // A program that does not parse has syntax errors to fix first, and a
+      // teaching rule reading a broken tree would only add noise to them.
+      lints:
+        reportsExpansions(interpreter) && errors.length === 0
+          ? interpreter.getLints(code)
+          : [],
       sourcecode: code,
       model: emptyStepModel(),
       debugState: 'Stop',

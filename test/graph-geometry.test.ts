@@ -1,6 +1,7 @@
 import {
   CellModel,
   FoldState,
+  MEMORY_CAPTION_HEIGHT,
   MemoryRegion,
   MemorySegmentModel,
   MemoryGeometry,
@@ -377,22 +378,31 @@ describe('memory geometry', () => {
     const [arrow] = geometry.arrows;
 
     // Both ends are in the left column, so the line leaves and arrives on
-    // that column's left-hand edge and is held out beyond it in between,
+    // that column's left-hand side and is held out beyond it in between,
     // rather than crossing back over the segments it connects.
-    expect(arrow.from.x).toBeLessThanOrEqual(stack.x);
-    expect(arrow.to.x).toBeLessThanOrEqual(stack.x);
+    const addressColumn = stack.columns[0];
+    expect(addressColumn.key).toBe('address');
+    for (const end of [arrow.from, arrow.to]) {
+      // Inside the node, in the address column: the head is drawn whole and
+      // over white rather than half over the border of the node.
+      expect(end.x).toBeGreaterThan(stack.x);
+      expect(end.x).toBeLessThan(stack.x + addressColumn.width);
+    }
     // Out of the row, straight down the gutter, and back in at the row it
     // names: both turns are on the same line, clear of the column.
     expect(arrow.vertices).toHaveLength(2);
-    expect(arrow.vertices![0].x).toBeLessThan(arrow.to.x);
+    expect(arrow.vertices![0].x).toBeLessThan(stack.x);
     expect(arrow.vertices![0].x).toBe(arrow.vertices![1].x);
     expect(arrow.vertices![0].y).toBe(arrow.from.y);
     expect(arrow.vertices![1].y).toBe(arrow.to.y);
     // And it stays on the map.
     expect(arrow.vertices![0].x).toBeGreaterThan(0);
-    // It is the rows it joins, not the address column inside them.
-    expect(arrow.from.y).toBe(value.y + value.height / 2);
-    expect(arrow.to.y).toBe(address.y + address.height / 2);
+    // It is put down on the blank top of the address cell, above the address
+    // itself and beside the caption, where it covers nothing.
+    expect(arrow.from.y).toBe(value.y - MEMORY_CAPTION_HEIGHT / 2);
+    expect(arrow.to.y).toBe(address.y - MEMORY_CAPTION_HEIGHT / 2);
+    expect(arrow.to.y).toBeLessThan(address.y);
+    expect(arrow.to.y).toBeGreaterThan(address.y - MEMORY_CAPTION_HEIGHT);
   });
 
   it('turns an arrow between the columns towards the side it is going', () => {
@@ -405,7 +415,9 @@ describe('memory geometry', () => {
     const [arrow] = geometry.arrows;
 
     expect(arrow.from.x).toBeGreaterThanOrEqual(stack.x + stack.width);
-    expect(arrow.to.x).toBeLessThanOrEqual(heap.x);
+    // It arrives inside the heap, in its address column.
+    expect(arrow.to.x).toBeGreaterThan(heap.x);
+    expect(arrow.to.x).toBeLessThan(heap.x + heap.columns[0].width);
     // Out of the stack, down the space between the columns, into the heap.
     expect(arrow.vertices).toHaveLength(2);
     arrow.vertices!.forEach((vertex) => {
@@ -426,8 +438,10 @@ describe('memory geometry', () => {
     const [arrow] = geometry.arrows;
 
     // It leaves by the side that faces where it is going, not by the far one,
-    // and never crosses the node it came from.
-    expect(arrow.from.x).toBeLessThanOrEqual(heap.x);
+    // and never crosses the node it came from. That side is the heap's
+    // address column, so it starts on the blank top of its own address cell.
+    expect(arrow.from.x).toBeGreaterThan(heap.x);
+    expect(arrow.from.x).toBeLessThan(heap.x + heap.columns[0].width);
     expect(arrow.to.x).toBeGreaterThanOrEqual(stack.x + stack.width);
     expect(arrow.vertices).toHaveLength(2);
     arrow.vertices!.forEach((vertex) => {

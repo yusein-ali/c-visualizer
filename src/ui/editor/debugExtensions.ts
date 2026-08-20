@@ -11,8 +11,10 @@ import {
   breakpointGutter,
   breakpointRows,
 } from './breakpoints';
+import { lintGutter } from '@codemirror/lint';
 import {
   SyntaxError,
+  TeachingDiagnostic,
   errorLineField,
   showDiagnostics as markDiagnostics,
 } from './diagnostics';
@@ -54,6 +56,9 @@ export class DebugExtensions {
       inlineValueField,
       expansionField,
       errorLineField,
+      // The gutter is what makes a warning visible without hovering for one.
+      // A reader who does not know a rule exists never hovers to find out.
+      lintGutter(),
       this.readOnly.of(DebugExtensions.readOnlyExtension(false)),
     ];
     if (typeof options.hoverText !== 'undefined') {
@@ -82,8 +87,12 @@ export class DebugExtensions {
     markExpansions(view, expansions);
   }
 
-  showDiagnostics(view: EditorView, errors: SyntaxError[]): void {
-    markDiagnostics(view, errors);
+  showDiagnostics(
+    view: EditorView,
+    errors: SyntaxError[],
+    found: TeachingDiagnostic[] = []
+  ): void {
+    markDiagnostics(view, errors, found);
   }
 
   /**

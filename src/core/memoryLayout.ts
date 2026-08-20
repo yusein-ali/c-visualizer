@@ -1,5 +1,5 @@
 import { FoldState } from './foldState';
-import { ArrowGeometry, CellGeometry, connectionColor } from './layout';
+import { ArrowGeometry, CellGeometry, Point, connectionColor } from './layout';
 import {
   CELL_HEIGHT,
   CellModel,
@@ -23,9 +23,10 @@ import { formatAddress } from './variables';
  * segment.
  *
  * An object is a two-band row: what it is, written small, above what it is
- * called and what it holds. The value ends the row, so a pointer's arrow
- * always leaves from the right-hand edge and arrives at the address column of
- * whatever it names.
+ * called and what it holds. The address column spans both bands and its upper
+ * half is left blank, which is where a pointer's arrow is put down: the head
+ * lands inside the address cell of whatever the pointer names, whole and over
+ * white, rather than stopping at the border of the node.
  *
  * Like `layout`, this knows nothing about the interpreter and nothing about a
  * renderer. It produces coordinates and text; JointJS draws them.
@@ -395,8 +396,10 @@ type Side = 'left' | 'right';
 /**
  * Where a cell's own row meets the edges of the segment it is in. A pointer is
  * one object naming another, and the address it holds is written in its row
- * already - so the line is drawn from row to row, along the edge of the nodes,
- * rather than threaded into the address column.
+ * already - so the line is drawn from row to row rather than threaded through
+ * the table, and it is the edges of the nodes that say where it runs. The ends
+ * themselves are placed by `endpointOf`, a little inside the node where the
+ * address column is.
  */
 interface Anchor {
   /** Which column of segments the row is in. */
@@ -407,6 +410,13 @@ interface Anchor {
 
 /** Just outside the node, so that a router sees a point and not an obstacle. */
 const CLEARANCE = 3;
+
+/**
+ * How far inside the address column an arrow that meets a node on that side is
+ * taken. Far enough that the whole head is over the cell rather than half of
+ * it over the border the cell is drawn with.
+ */
+const ADDRESS_INSET_X = 12;
 
 /**
  * Which way out of a column its own arrows go: away from the middle of the
@@ -441,14 +451,34 @@ interface Routed {
 
 const middleOf = (cell: CellGeometry): number => cell.y + MEMORY_ROW_HEIGHT / 2;
 
-const edgeOf = (anchor: Anchor, side: Side): number =>
-  side === 'left' ? anchor.left - CLEARANCE : anchor.right + CLEARANCE;
+/**
+ * The blank upper half of a row's address cell. The address is written in the
+ * object's own band, but its cell spans the caption above it as well - the
+ * address belongs to the whole object - and nothing is written in that half:
+ * the caption starts at the name column, beside it. It is the one part of a
+ * row an arrow can be put down on without covering something.
+ */
+const addressBandOf = (cell: CellGeometry): number =>
+  cell.y - MEMORY_CAPTION_HEIGHT / 2;
+
+/**
+ * Where an arrow meets a row. The address column is the node's left-hand one,
+ * so an arrow meeting a node on that side is taken inside and put down in the
+ * top of the address cell, where its head is drawn whole and over white. The
+ * other side is the value's, which is written out to the edge of the cell, so
+ * an arrow meeting a node there stops just outside it as before.
+ */
+const endpointOf = (cell: CellGeometry, anchor: Anchor, side: Side): Point =>
+  side === 'left'
+    ? { x: anchor.left + ADDRESS_INSET_X, y: addressBandOf(cell) }
+    : { x: anchor.right + CLEARANCE, y: middleOf(cell) };
 
 /**
  * One pointer, from the row of the object holding the address to the row of
  * the object at it. Which side of each row it touches is the caller's
  * decision: what is on the left of the map should not be reached by crossing
- * everything to its right.
+ * everything to its right. What that side means for the end itself - inside
+ * the address cell, or just outside the value's - is `endpointOf`'s.
  */
 function pointerArrow(
   fromCell: CellGeometry,
@@ -460,8 +490,8 @@ function pointerArrow(
   toSide: Side,
   laneX?: number
 ): ArrowGeometry {
-  const from = { x: edgeOf(fromAnchor, fromSide), y: middleOf(fromCell) };
-  const to = { x: edgeOf(toAnchor, toSide), y: middleOf(toCell) };
+  const from = endpointOf(fromCell, fromAnchor, fromSide);
+  const to = endpointOf(toCell, toAnchor, toSide);
   const arrow: ArrowGeometry = {
     key: `${fromCell.key}-${toCell.key}`,
     from,

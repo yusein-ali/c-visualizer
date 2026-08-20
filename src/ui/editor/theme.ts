@@ -239,6 +239,21 @@ export const debugTheme = EditorView.baseTheme({
   '&dark .plivet-error-line': {
     backgroundColor: 'var(--plivet-error-line-bg, rgba(187, 85, 85, 0.28))',
   },
+  // The teaching rules' own panel inside a lint tooltip: the finding, then
+  // the library entry it points at, set apart from it.
+  '.plivet-lint-message': {
+    maxWidth: '40em',
+    whiteSpace: 'normal',
+  },
+  '.plivet-lint-signature': {
+    display: 'block',
+    marginTop: '0.4em',
+    fontFamily:
+      'var(--plivet-editor-font, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace)',
+  },
+  '.plivet-lint-description': {
+    opacity: '0.8',
+  },
   '.plivet-macro-expansion': {
     borderBottom: '1px dashed #2e8b57',
     backgroundColor: 'rgba(46, 139, 87, 0.12)',

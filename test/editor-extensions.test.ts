@@ -6,7 +6,11 @@ import {
   setBreakpoints,
   toggleBreakpoint,
 } from '../src/ui/editor/breakpoints';
-import { diagnosticsFor } from '../src/ui/editor/diagnostics';
+import {
+  diagnosticsFor,
+  errorLineField,
+  teachingDiagnosticsFor,
+} from '../src/ui/editor/diagnostics';
 import {
   expansionAt,
   expansionField,
@@ -248,6 +252,82 @@ describe('attaching to an editor somebody else built', () => {
     debugExtensions.setReadOnly(view, false);
     expect(view.state.readOnly).toBe(false);
 
+    view.destroy();
+  });
+});
+
+describe('teaching diagnostics', () => {
+  const state = EditorState.create({ doc });
+  const scanfLint = {
+    rule: 'scanf-address',
+    severity: 'error' as const,
+    message: 'scanf stores through the pointer it is given',
+    line: 2,
+    column: 6,
+    endLine: 2,
+    endColumn: 7,
+    fix: {
+      label: 'Pass &n',
+      text: '&n',
+      line: 2,
+      column: 6,
+      endLine: 2,
+      endColumn: 7,
+    },
+  };
+
+  it('spans exactly what the rule reported', () => {
+    const [found] = teachingDiagnosticsFor(state.doc, [scanfLint]);
+    expect(state.sliceDoc(found.from, found.to)).toBe('n');
+    expect(found.severity).toBe('error');
+    expect(found.source).toBe('plivet/scanf-address');
+  });
+
+  it('offers no action for a rule that has no fix', () => {
+    const { fix: _fix, ...withoutFix } = scanfLint;
+    const [found] = teachingDiagnosticsFor(state.doc, [withoutFix]);
+    expect(found.actions).toBeUndefined();
+  });
+
+  it('applies the fix where the finding has moved to', () => {
+    const view = new EditorView({ state });
+    const [found] = teachingDiagnosticsFor(view.state.doc, [scanfLint]);
+    // An edit above the finding moves it down; the action is handed where it
+    // ended up, and edits relative to that rather than to where it was.
+    view.dispatch({ changes: { from: 0, insert: '// a note\n' } });
+    const moved = view.state.doc.line(3);
+    found.actions![0].apply(view, moved.from + 6, moved.from + 7);
+    expect(view.state.doc.line(3).text).toBe('  int &n = 0;');
+    view.destroy();
+  });
+
+  it('shows the library entry beside the message when one was found', () => {
+    const [found] = teachingDiagnosticsFor(state.doc, [
+      {
+        ...scanfLint,
+        help: {
+          signature: 'int scanf(const char* format, ...)',
+          description: 'reads formatted input',
+        },
+      },
+    ]);
+    const view = new EditorView({ state });
+    const rendered = found.renderMessage!(view) as HTMLElement;
+    expect(rendered.textContent).toContain('int scanf(');
+    expect(rendered.textContent).toContain('reads formatted input');
+    view.destroy();
+  });
+
+  it('keeps the syntax errors when teaching findings are shown beside them', () => {
+    const view = new EditorView({ state: EditorState.create({ doc }) });
+    const debugExtensions = new DebugExtensions();
+    attachDebugExtensions(view, debugExtensions);
+    debugExtensions.showDiagnostics(
+      view,
+      [{ line: 2, charPositionInLine: 2, msg: 'no' }],
+      [scanfLint]
+    );
+    expect(view.state.field(errorLineField).size).toBe(1);
     view.destroy();
   });
 });
