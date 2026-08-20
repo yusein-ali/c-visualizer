@@ -1,13 +1,92 @@
 {
-  "extends": ["config:base"],
-  "rebaseStalePrs": true,
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
   "prCreation": "not-pending",
-  "automerge": true,
-  "major": {
-    "automerge": false
-  },
-  "minor": {
-    "groupName": "all dependencies"
-  },
-  "automergeType": "branch-push"
+  "rebaseWhen": "behind-base-branch",
+  "automergeType": "branch-push",
+  "packageRules": [
+    {
+      "description": "A patch or minor update that passes CI - lint, types, tests and a build - lands on its own. A major does not: it is read first.",
+      "matchUpdateTypes": ["minor", "patch"],
+      "automerge": true
+    },
+    {
+      "matchUpdateTypes": ["major"],
+      "automerge": false
+    },
+    {
+      "description": "unicoen.ts is frozen upstream: PLIVET's C interpreter is a subclass of it, and what a release would change is the parser everything else is built on. It moves by hand or not at all.",
+      "matchPackageNames": ["unicoen.ts", "@types/unicoen.ts"],
+      "enabled": false
+    },
+    {
+      "description": "Build tooling. Webpack, Babel and the loaders move together or not at all - a loader ahead of the webpack it plugs into is the usual way this breaks.",
+      "groupName": "build tooling",
+      "matchPackageNames": [
+        "webpack",
+        "webpack-*",
+        "@babel/*",
+        "*-loader",
+        "html-webpack-plugin",
+        "fork-ts-checker-webpack-plugin",
+        "core-js",
+        "cross-env",
+        "shx",
+        "license-checker-rseidelsohn"
+      ]
+    },
+    {
+      "description": "Tests. Jest and ts-jest are a compatible set - Phase 11 of UPGRADE_PLAN.md is what happens when they are not - so they are updated as one.",
+      "groupName": "test tooling",
+      "matchPackageNames": [
+        "jest",
+        "jest-*",
+        "ts-jest",
+        "@types/jest",
+        "identity-obj-proxy"
+      ]
+    },
+    {
+      "description": "Lint and format. typescript-eslint tracks both ESLint and TypeScript, so a lone bump of either is the one that fails.",
+      "groupName": "lint and format",
+      "matchPackageNames": [
+        "eslint",
+        "@eslint/*",
+        "typescript-eslint",
+        "eslint-config-*",
+        "prettier",
+        "lint-staged",
+        "globals",
+        "typescript"
+      ]
+    },
+    {
+      "description": "The editor. The @codemirror packages share one document model and are versioned against each other.",
+      "groupName": "codemirror",
+      "matchPackageNames": ["@codemirror/*"]
+    },
+    {
+      "description": "The visualization.",
+      "groupName": "jointjs",
+      "matchPackageNames": ["@joint/*", "vector2d"]
+    },
+    {
+      "description": "What the interpreter and the browser build need underneath them: the Node builtins webpack 5 no longer polyfills on its own, and the two small libraries the core uses.",
+      "groupName": "runtime support",
+      "matchPackageNames": [
+        "assert",
+        "buffer",
+        "process",
+        "util",
+        "hashids",
+        "string-hash",
+        "@types/string-hash"
+      ]
+    },
+    {
+      "description": "The Node baseline is what CI pins and what `engines` states; moving it is a decision, not an update.",
+      "matchDepTypes": ["engines"],
+      "automerge": false
+    }
+  ]
 }

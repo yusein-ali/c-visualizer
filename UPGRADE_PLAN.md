@@ -695,17 +695,14 @@ what does not need a browser.
 
 ## Phase 11: tests, CI and maintenance
 
-**Status: partly complete.** Nineteen Jest suites cover the debug extensions, the
-tooltips, the console, the control bar, the shell, the upload panel, the
-`DEBUG_STATE` enablement mapping, the preprocessor and the interpreter end to
-end, and CI runs `npm ci` and `npm test` on the pinned Node. Jest 29 and ts-jest
-29 are installed as a compatible set, and ts-jest is configured through
-`transform`; this also lets `npm ci` work without the former `legacy-peer-deps`
-workaround. Enzyme and the React 16 adapter left with React in Phase 9, and the
-widget tests that replaced the smoke render drive real DOM nodes. Still open:
-running lint, typecheck and build in CI, the second non-blocking Node major, and
-dependency grouping in `renovate.json`, which still has no `unicoen.ts`
-exclusion.
+**Status: complete.** Twenty-three Jest suites and 371 tests cover the portable
+core, the debug extensions, the tooltips, the console, the control bar, the
+shell, the upload panel, the `DEBUG_STATE` enablement mapping, the bus, the
+interpreter client, two instances on one page, the preprocessor and the
+interpreter end to end - and, since this phase, the whole application at once.
+CI runs `npm ci`, lint, typecheck, test and build on the pinned Node, and
+repeats all of it on the next major as an advisory job. `npm audit` reports
+nothing.
 
 1. Upgrade Jest and its TypeScript support as a compatible set, moving the
    deprecated ts-jest `globals` configuration into `transform`. **Done.** Enzyme
@@ -715,21 +712,71 @@ exclusion.
 2. Unit-test `src/core/` directly: `extractModel` against recorded `ExecState`
    fixtures, `layout` geometry, the breakpoint line-number conversion, the
    `DEBUG_STATE` to enablement mapping, and history replay for step-back.
+   **Done**, in the phases that wrote the code: `core.test.ts` runs a real
+   interpreter and checks `extractModel`, `layout`, the fold state and step
+   history, including a session that steps back through a run longer than the
+   history holds; `graph-geometry.test.ts` covers the geometry the paper is
+   given; `editor-extensions.test.ts` covers the line-number conversion in both
+   directions; `ctrl-buttons.test.ts` covers the enablement mapping for all six
+   buttons in every state.
 3. Test the debug extension array against a headless `EditorView`.
+   **Done**, also earlier: `editor-extensions.test.ts` builds real
+   `EditorState`s and views for the breakpoint field, the diagnostics, the
+   preprocessor marks, the step highlight, and `attachDebugExtensions` against
+   a view somebody else built.
 4. Keep a small DOM-level smoke test that constructs a `Plivet` instance and
-   steps once.
+   steps once. **Done.** `test/smoke.test.ts` builds one into a `div` and
+   presses the buttons a reader presses: the arrow to start and step, the
+   double arrow to run to EOF, the square to stop. Behind it is the real
+   `Server` on this thread - `spawnWorker` is mocked with a Worker-shaped
+   object rather than the interpreter being faked - so a step has to reach the
+   counter, the console and the canvas, and the document has to lock and
+   release with the session. It is the only test that would notice a signal
+   nobody carries any more.
 5. CI runs `npm ci`, lint, typecheck, test and build on the pinned Node and npm
-   baseline.
+   baseline. **Done**, in that order: lint and types fail fastest and read
+   clearest, the build is the slowest and last. The build step's absence was a
+   webpack 4 limitation Phase 3 removed; the comment saying so is gone with it.
 6. Add a second, non-blocking CI job for the next supported Node major so future
-   runtime problems are visible early.
+   runtime problems are visible early. **Done.** The same five steps run again
+   on Node 26 under `continue-on-error`, so a failure there is a warning rather
+   than a merge block.
 7. Configure dependency updates in small groups: build tooling, tests, editor and
    graph libraries, interpreter dependencies. `unicoen.ts` is frozen upstream and
-   should be excluded from automated updates.
+   should be excluded from automated updates. **Done.** `renovate.json` groups
+   build tooling, test tooling, lint and format, `@codemirror/*`, JointJS and
+   the runtime support packages, each with the reason it is a group - a loader
+   ahead of its webpack, ts-jest ahead of its Jest, typescript-eslint behind
+   either of the two it tracks. `unicoen.ts` is disabled outright: PLIVET's
+   interpreter is a subclass of it. Patch and minor updates automerge on a
+   green CI that now checks five things rather than one; majors and the
+   `engines` baseline do not.
 8. Run `npm audit` and review findings manually. Do not use forceful automatic
-   upgrades that can cross major versions without tests.
+   upgrades that can cross major versions without tests. **Done**, and what it
+   found was a lockfile holding transitive dependencies older than the ranges
+   their parents allow: thirteen advisories, two of them critical, every one of
+   them in development dependencies. `npm install` does not move a lockfile
+   that already satisfies the ranges, and `npm audit fix` had nothing to
+   propose that it would; `npm update` refreshed them inside those same ranges
+   and nine of the thirteen went with it. `@babel/core` was pinned
+   below its fix and moved to 7.28.5 -> 7.29.7. The last three were one
+   advisory - `uuid` under `sockjs` under `webpack-dev-server` - reachable only
+   by crossing a major, so it was crossed by hand rather than by
+   `npm audit fix --force`: webpack-dev-server 6 wants the webpack and Node
+   this project already has, and the dev server was started against both pages
+   to check it. `npm audit` reports nothing now.
+
+Maintenance done with them: `.travis.yml` was still in the tree, asking for
+Node 10 on a distribution Travis retired, and the README still carried its
+build badge. Both are gone, and the badge points at the workflow that actually
+runs.
 
 Exit criterion: the Phase 0 checklist is covered by automated tests wherever it
-can be, and CI is green from a clean dependency cache.
+can be, and CI is green from a clean dependency cache. Met - `npm ci` from an
+empty cache, then lint, typecheck, 23 suites and 371 tests, and a production
+build, all green, with the parts the checklist has that jsdom cannot hold - the
+canvas, the Worker, the browser - checked in Chrome at the end of Phases 8, 9
+and 10.
 
 ## Phase 12: teaching features
 

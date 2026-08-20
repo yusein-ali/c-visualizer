@@ -83,9 +83,10 @@ npm run lint        # eslint over the whole tree
 npm run format      # prettier --write (the only command that rewrites source)
 ```
 
-CI (`.github/workflows/test.yml`) runs `npm ci` and `npm test` on Node 24.15.0
-for every push/PR to `master`. `deploy-to-gh-pages.yml` builds and publishes `dist/` on
-push to `master`.
+CI (`.github/workflows/test.yml`) runs `npm ci`, lint, typecheck, test and build
+on Node 24.15.0 for every push/PR to `master`, and repeats the same run on the
+next Node major as an advisory job that may fail without blocking.
+`deploy-to-gh-pages.yml` builds and publishes `dist/` on push to `master`.
 
 ## Architecture
 

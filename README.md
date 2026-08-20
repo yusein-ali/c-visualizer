@@ -1,4 +1,4 @@
-# PLIVET <a href="http://doge.mit-license.org"><img src="http://img.shields.io/:license-mit-blue.svg"></a> [![Build Status](https://secure.travis-ci.org/RYOSKATE/PLIVET.svg?branch=master)](http://travis-ci.org/RYOSKATE/PLIVET)
+# PLIVET <a href="http://doge.mit-license.org"><img src="http://img.shields.io/:license-mit-blue.svg"></a> [![Node.js CI](https://github.com/yusein-ali/PLIVET/actions/workflows/test.yml/badge.svg)](https://github.com/yusein-ali/PLIVET/actions/workflows/test.yml)
 
 Programming Language Interpreter for Visualization of Execution Trace (PLIVET) is a program interpreter with visualization of execution state.
 

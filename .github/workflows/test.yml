@@ -7,7 +7,10 @@ on:
     branches: [master]
 
 jobs:
-  build:
+  # The gate. Everything `package.json` can check, in the order a failure is
+  # cheapest to read: lint and types before the tests, the build last.
+  check:
+    name: Node ${{ matrix.node-version }}
     runs-on: ubuntu-latest
 
     strategy:
@@ -21,9 +24,39 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
+      # `npm ci` rather than `npm install`: the lockfile is the baseline this
+      # pins, and a run that quietly resolved something else would not be
+      # checking what a reader installs.
       - name: Install dependencies
         run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
       - run: npm test
-      # `npm run build` is deliberately absent: webpack 4 cannot run on Node 24
-      # (css-loader 5 requires postcss/package.json, which the package `exports`
-      # map blocks). Phase 3 of UPGRADE_PLAN.md restores the build and this step.
+      - run: npm run build
+
+  # The warning. Node 24 is what `engines` supports and what the job above
+  # gates on; this one runs everything again on the next major so a runtime
+  # problem shows up before the baseline moves to it. It may fail - that is
+  # what it is for - and a failure here does not block a merge.
+  next-node:
+    name: Node ${{ matrix.node-version }} (advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    strategy:
+      matrix:
+        node-version: [26.x]
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
