@@ -1,0 +1,118 @@
+/*
+ * The console, and only the console: every rule sits under `.plivet-console`,
+ * so dropping this component into a page cannot restyle anything around it.
+ *
+ * Colours are named through the same fallback chain as the editor theme in
+ * `src/ui/editor/theme.ts`,
+ *
+ *     --plivet-console-*  ->  --interactive-editor-*  ->  --bs-*  ->  a literal
+ *
+ * so standalone the literals win, while in a course page the interactive-code
+ * stylesheet has already defined the middle pair and the console matches the
+ * editor above it. The dark modifier changes only the literal at the end of
+ * each chain, so a host's own value still outranks it.
+ */
+
+.plivet-console {
+  --plivet-console-surface: var(
+    --plivet-console-bg,
+    var(--interactive-editor-bg, var(--bs-body-bg, #ffffff))
+  );
+  --plivet-console-ink: var(
+    --plivet-console-color,
+    var(--interactive-editor-color, var(--bs-body-color, #212529))
+  );
+  --plivet-console-field: var(
+    --plivet-console-input-bg,
+    var(--bs-tertiary-bg, #fffbe6)
+  );
+
+  box-sizing: border-box;
+  height: 18vh;
+  margin: 1px;
+  overflow-y: auto;
+  border: 1px black solid;
+  background-color: var(--plivet-console-surface);
+  color: var(--plivet-console-ink);
+  font-family: var(
+    --plivet-console-font,
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    monospace
+  );
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.plivet-console--dark {
+  --plivet-console-surface: var(
+    --plivet-console-bg,
+    var(--interactive-editor-bg, var(--bs-body-bg, #272822))
+  );
+  --plivet-console-ink: var(
+    --plivet-console-color,
+    var(--interactive-editor-color, var(--bs-body-color, #f8f8f2))
+  );
+  --plivet-console-field: var(
+    --plivet-console-input-bg,
+    var(--bs-tertiary-bg, #3e3d32)
+  );
+}
+
+/*
+ * The transcript is what the program printed, and nothing else: the
+ * interpreter echoes every value it reads into its own stdout, so a submitted
+ * line comes back in the next response rather than being written here.
+ */
+.plivet-console-output {
+  margin: 0;
+  padding: 4px 6px 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+.plivet-console-input {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  min-height: 1.4em;
+  /* Taller input scrolls inside itself rather than pushing the transcript out
+     of the box. */
+  max-height: 6em;
+  padding: 0 6px 4px;
+  border: 0;
+  outline: 0;
+  resize: none;
+  overflow-y: auto;
+  background-color: transparent;
+  color: inherit;
+  font: inherit;
+  caret-color: transparent;
+}
+
+/*
+ * Idle, the field is an invisible continuation of the transcript. It is only
+ * when the program blocks on a read that it says so.
+ */
+.plivet-console--accepting .plivet-console-input {
+  background-color: var(--plivet-console-field);
+  caret-color: currentColor;
+}
+
+.plivet-console-input::placeholder {
+  color: inherit;
+  opacity: 0.55;
+  font-style: italic;
+}
+
+.plivet-console-input:disabled {
+  color: inherit;
+  opacity: 1;
+  -webkit-text-fill-color: currentColor;
+}

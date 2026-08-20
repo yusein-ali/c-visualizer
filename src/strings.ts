@@ -30,6 +30,10 @@ const strings = {
     'PVC.js adaptively changes its layout to correspond with the size of the browser window.',
   ],
   uploadFile: 'The uploaded file will be displayed here.',
+  consoleInputLabel: 'standard input',
+  // The console only accepts input while a read is blocked, so the hint is
+  // also how the user learns that the program is waiting for one.
+  consoleInputHint: 'Enter to submit, Shift+Enter for another line',
   atAddress: 'address',
   constructIf: 'if statement',
   constructFor: 'for loop',

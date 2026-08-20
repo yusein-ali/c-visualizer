@@ -28,8 +28,8 @@ framework-free, browser-only widget — CodeMirror 6 instead of Ace, JointJS
 instead of react-konva, the interpreter in a Web Worker, and no React at all —
 so that it can later be embedded in an A+ Sphinx extension alongside the
 `interactive-code` extension in the `ai-enabled-wearable-technology` course repo.
-Scope has narrowed to C only. Do not upgrade React, react-bootstrap, Ace or
-Konva, and do not reintroduce Java, Python or a second interface language.
+Scope has narrowed to C only. Do not upgrade React, react-bootstrap or Konva,
+and do not reintroduce Java, Python, Ace or a second interface language.
 
 ## Tech stack
 
@@ -38,6 +38,7 @@ Konva, and do not reintroduce Java, Python or a second interface language.
 | Language      | TypeScript 5.9, `strict`, `noUnusedLocals`/`noUnusedParameters`/`noImplicitReturns`                                               |
 | UI            | React 16 **class components** (no hooks anywhere), `react-bootstrap` 0.33 / Bootstrap **3**                                       |
 | Code editor   | CodeMirror 6 — `src/ui/editor/`, framework-free; `Editor.tsx` is only the wiring                                                  |
+| Console       | Plain DOM — `src/ui/console/`, framework-free; `Console.tsx` is only the wiring                                                   |
 | Visualization | Konva via `react-konva` (`Stage` / `Layer` / shapes)                                                                              |
 | Interpreter   | [`unicoen.ts`](https://www.npmjs.com/package/unicoen.ts) 0.5.0 — deep imports like `unicoen.ts/dist/interpreter/Engine/ExecState` |
 | Build         | webpack 5 + babel-loader (transpile only) + `fork-ts-checker-webpack-plugin` (types)                                              |
@@ -120,7 +121,8 @@ lineNumOfBreakpoint }` and awaits `server.send(request)`.
 4. `Editor.recieve()` (note the spelling) fans the `Response` out:
    `signal('changeState', debugState, step)` → Menu + CtrlButtons enablement,
    `signal('changeOutput', …)` → Console, `signal('draw', execState)` → Canvas,
-   `signal('files', …)` → FileForm. It also highlights the current line in Ace.
+   `signal('files', …)` → FileForm. It also highlights the current statement in
+   the editor.
 5. `Canvas` stores the `ExecState` and constructs a `CanvasDrawer`, which turns stacks
    into `CanvasStack` → `CanvasRow` → `CanvasCell` (with `CanvasVariable` /
    `CanvasArrayVariable`) and resolves pointer values into `CanvasArrow`s via the
@@ -133,23 +135,26 @@ change that switch when adding a state.
 
 ### Other pieces
 
-- **Breakpoints** — `Editor.componentDidMount` hooks Ace's `guttermousedown` (only within
-  25px of the gutter's left edge) and toggles `session.setBreakpoint(row, …)`.
-  `lineNumOfBreakpoint` holds **0-based** Ace rows; `unicoen.ts` `codeRange.begin.y` is
-  **1-based** — the `- 1` conversions in `Editor` and `server.StepAll` are deliberate.
-- **Syntax check** — `Editor.onChange` fires a debounced (1s, compare-then-run)
-  `SyntaxCheck`; errors become Ace annotations plus highlighted lines.
+- **Breakpoints** — a CodeMirror gutter in [src/ui/editor/breakpoints.ts](src/ui/editor/breakpoints.ts),
+  outside the line numbers, toggled by a click near its left edge.
+  `lineNumOfBreakpoint` holds **0-based** rows; `unicoen.ts` `codeRange.begin.y` is
+  **1-based** — the conversions in [src/ui/editor/positions.ts](src/ui/editor/positions.ts)
+  and `server.StepAll` are deliberate.
+- **Syntax check** — every edit schedules a debounced (1s, compare-then-run)
+  `SyntaxCheck`; errors become `@codemirror/lint` diagnostics plus highlighted lines.
 - **Stdin** — when the interpreter blocks on input, `debugState` becomes `'stdin'`, the
-  Console becomes writable, and the typed text comes back as `Request.stdinText`.
+  Console's `textarea` becomes writable, and the line submitted with Enter comes back as
+  `Request.stdinText`. The interpreter echoes what it reads into its own stdout, so the
+  console never writes the typed line into the transcript itself.
 - **File uploads** — `FileForm` reads files as `ArrayBuffer` into `server.files`, which is
   handed to the interpreter via `setFileList` so C programs can `fopen` them.
 - **UI text** — one English table in [src/strings.ts](src/strings.ts), read
   directly (`strings.howToUse`). Keys assembled at runtime — `construct${kind}`,
   `${signal}${command}` — go through `stringFor(key)`. The starter program is
   the `sourceCode` entry in that same table.
-- **Theming** — `'light' | 'dark'` broadcast over `changeTheme`; Ace switches
-  `textmate`/`monokai`, and CSS classes `theme-light`/`theme-gray` come from
-  `src/css/theme.css`.
+- **Theming** — `'light' | 'dark'` broadcast over `changeTheme`; the editor
+  reconfigures its CodeMirror theme, the console flips a `plivet-console--dark`
+  class, and CSS classes `theme-light`/`theme-gray` come from `src/css/theme.css`.
 
 ## Conventions
 
@@ -159,9 +164,10 @@ change that switch when adding a state.
 - React class components with an explicit `interface Props` / `interface State`; shared
   prop shapes (`ThemeProps`) live in
   [src/components/Props.ts](src/components/Props.ts) and are combined with `&`.
-- Each component imports its own stylesheet from `src/css/`.
-- Ace modes/themes must be imported explicitly (`ace-builds/src-min-noconflict/...`) or
-  they will not be bundled.
+- React components import their stylesheet from `src/css/`. Framework-free code
+  under `src/ui/` carries its own appearance instead — a CodeMirror theme for the
+  editor, a colocated `console.css` for the console — so that a module can be
+  lifted into another page without a stylesheet to register alongside it.
 - The webpack configs are commented in Japanese; keep them intact when editing.
 
 ## Testing
