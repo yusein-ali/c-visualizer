@@ -1,16 +1,9 @@
 import * as React from 'react';
 import { Stage } from 'react-konva';
 import { slot } from '../emitter';
-import { ExecState } from 'unicoen.ts/dist/interpreter/Engine/ExecState';
 import CanvasContent from './CanvasContent';
 import '../../css/canvas.css';
-import {
-  FoldState,
-  StepModel,
-  emptyStepModel,
-  extractModel,
-  layout,
-} from '../../core';
+import { FoldState, StepModel, emptyStepModel, layout } from '../../core';
 
 interface Props {
   width: number;
@@ -26,9 +19,10 @@ interface State {
  * interpreter last reported and the folds this reader has opened, and lays the
  * one out under the other.
  *
- * Reading the execution state and placing the cells both belong to `src/core`.
- * What is left here is the Konva stage, and Phase 8 replaces it with a JointJS
- * paper reading the same geometry.
+ * The step arrives already read: `extractModel` runs in the Worker, and
+ * placing the cells belongs to `src/core`. What is left here is the Konva
+ * stage, and Phase 8 replaces it with a JointJS paper reading the same
+ * geometry.
  */
 export default class Canvas extends React.Component<Props, State> {
   /**
@@ -40,9 +34,7 @@ export default class Canvas extends React.Component<Props, State> {
   constructor(props: Props) {
     super(props);
     this.state = { model: emptyStepModel() };
-    slot('draw', (execState?: ExecState | null) =>
-      this.setState({ model: extractModel(execState) })
-    );
+    slot('draw', (model: StepModel) => this.setState({ model }));
   }
 
   private toggleFold = (group: string) => {

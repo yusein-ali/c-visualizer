@@ -1,6 +1,6 @@
+import { formatAddress } from '../src/core';
 import {
   HoverTextSource,
-  formatAddress,
   formatFunctionDeclaration,
   formatEnumerator,
   formatRecordField,
@@ -14,18 +14,31 @@ describe('editor tooltip addresses', () => {
     expect(formatAddress(0xabcd)).toBe('0xABCD');
   });
 
-  it('formats both a pointer value and its own address as hexadecimal', () => {
+  it('says what a variable holds and where it lives', () => {
     const editor: any = new HoverTextSource();
-    const variable = {
-      name: 'pointer',
-      type: 'int *',
-      address: 0x1234,
-      getValue: () => 0xabcd,
-    };
 
-    expect(editor.variableText(variable)).toBe(
-      'pointer : int * = 0xABCD\naddress 0x1234'
-    );
+    expect(
+      editor.variableText({
+        name: 'pointer',
+        type: 'int *',
+        value: '0xABCD',
+        address: 0x1234,
+      })
+    ).toBe('pointer : int * = 0xABCD\naddress 0x1234');
+  });
+
+  it('follows a pointer to the variable it points at', () => {
+    const editor: any = new HoverTextSource();
+
+    expect(
+      editor.variableText({
+        name: 'pointer',
+        type: 'int *',
+        value: '0xABCD',
+        address: 0x1234,
+        target: { name: 'count', value: '7' },
+      })
+    ).toBe('pointer : int * = 0xABCD → count = 7\naddress 0x1234');
   });
 
   it('formats variable declarations as labelled lines', () => {

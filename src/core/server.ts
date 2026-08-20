@@ -1,7 +1,8 @@
-import { SyntaxErrorData } from 'unicoen.ts/dist/interpreter/mapper/SyntaxErrorData';
 import { ExecState } from 'unicoen.ts/dist/interpreter/Engine/ExecState';
 import { Interpreter } from 'unicoen.ts/dist/interpreter/Interpreter';
 import { HISTORY_LIMIT, StepHistory } from './history';
+import { extractModel } from './extractModel';
+import { StepModel, emptyStepModel } from './model';
 import { Construct } from '../interpreter/Construct';
 import { Expansion } from '../interpreter/Expansion';
 
@@ -21,29 +22,47 @@ export type DEBUG_STATE =
   | 'EOF'
   | 'Stop'
   | 'Executing';
-export class Request {
-  constructor(
-    public controlEvent: CONTROL_EVENT,
-    public sourcecode: string,
-    public stdinText?: string,
-    public lineNumOfBreakpoint?: number[]
-  ) {}
+
+/**
+ * Both messages are plain data rather than classes: they cross the Worker
+ * boundary through `structuredClone`, which keeps an object's fields and
+ * throws its prototype away.
+ */
+export interface Request {
+  controlEvent: CONTROL_EVENT;
+  sourcecode: string;
+  stdinText?: string;
+  lineNumOfBreakpoint?: number[];
 }
 
-export class Response {
-  constructor(
-    public output: string,
-    public sourcecode: string,
-    public debugState: DEBUG_STATE,
-    public step: number,
-    public errors: SyntaxErrorData[],
-    public files: Map<string, ArrayBuffer>,
-    public execState?: ExecState,
-    /** Preprocessor replacements, for the editor to mark. Syntax checks only. */
-    public expansions?: Expansion[],
-    /** Parsed statements, for the editor to explain. Syntax checks only. */
-    public constructs?: Construct[]
-  ) {}
+/**
+ * A syntax error as the editor's linter reads it. `SyntaxErrorData` holds its
+ * accessor as an instance property, and a function is the one thing
+ * `structuredClone` refuses to carry, so the message is unwrapped here.
+ */
+export interface SyntaxErrorModel {
+  line: number;
+  charPositionInLine: number;
+  msg: string;
+}
+
+export interface Response {
+  output: string;
+  sourcecode: string;
+  debugState: DEBUG_STATE;
+  step: number;
+  errors: SyntaxErrorModel[];
+  /**
+   * The step as the interface reads it. Always present: a state the
+   * interpreter has none for - a stopped session, a syntax check - is an empty
+   * model rather than a missing one, because everything downstream of here
+   * draws it.
+   */
+  model: StepModel;
+  /** Preprocessor replacements, for the editor to mark. Syntax checks only. */
+  expansions?: Expansion[];
+  /** Parsed statements, for the editor to explain. Syntax checks only. */
+  constructs?: Construct[];
 }
 
 /**
@@ -52,6 +71,19 @@ export class Response {
  * as the run starts, so what stopped it has to be reported separately.
  */
 export type RUN_EVENT = 'EOF' | 'stdin' | 'Breakpoint';
+
+/**
+ * Where a step of the session left it, before it is spelled out for the
+ * caller. A run steps hundreds of times between the two responses it sends,
+ * and extracting a model for every one of those steps would be the price of
+ * running rather than the price of showing.
+ */
+interface StepResult {
+  execState?: ExecState;
+  output: string;
+  debugState: DEBUG_STATE;
+  step: number;
+}
 
 /** Implemented by interpreters that can describe their source. */
 interface ExpansionSource {
@@ -69,19 +101,35 @@ function reportsExpansions(
   );
 }
 
+/**
+ * How many steps a run takes before it lets the Worker read its messages. The
+ * `Stop` button is the only thing waiting on the other side, and a run that
+ * checked for it every step would spend more time on the check than on the
+ * program; a run that never checked could not be stopped at all.
+ */
+const RUN_SLICE = 5000;
+
+/** Lets the Worker's message queue drain. A microtask would not. */
+const pause = (): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, 0));
+
 export class Server {
-  private timer: NodeJS.Timeout | null = null;
   private isExecuting: boolean = false;
   private files: Map<string, ArrayBuffer> = new Map();
   private count: number = 0;
+  /**
+   * Which run is the current one. A run outlives the command that started it,
+   * so stopping or restarting cannot reach into it - it retires the number the
+   * run was started under, and the run reads that before every step.
+   */
+  private runToken: number = 0;
   private interpreter: Interpreter | null = null;
   private readonly history: StepHistory;
 
   /**
    * Where a run that stopped on its own is reported. The application sets it;
    * nothing here knows what the interface does with it, which is what keeps
-   * this file free of `src/components` and lets it move into a Worker in
-   * Phase 6.
+   * this file free of `src/components` and lets it run in a Worker.
    */
   public onRunEvent: ((event: RUN_EVENT, response: Response) => void) | null =
     null;
@@ -105,6 +153,8 @@ export class Server {
     return new module.PlivetCPP14Interpreter();
   }
   private async reset() {
+    // A restart retires a run still in flight, the same way stopping does.
+    this.runToken += 1;
     this.count = 0;
     const interpreter = await this.createInterpreter();
     interpreter.setFileList(this.files);
@@ -112,35 +162,15 @@ export class Server {
     this.history.clear();
   }
 
-  private addFile(file: File) {
-    const reader = new FileReader();
-    return new Promise((resolve, reject) => {
-      reader.onerror = () => {
-        reader.abort();
-        reject(new DOMException('Problem parsing input file.'));
-      };
-
-      reader.onload = () => {
-        if (reader.result instanceof ArrayBuffer) {
-          this.files.set(file.name, reader.result);
-          resolve(reader.result);
-        } else {
-          reject(new DOMException('Problem loading input file.'));
-        }
-      };
-
-      reader.readAsArrayBuffer(file);
-    });
-  }
-
-  public async upload(files: FileList) {
-    await Promise.all(Array.from(files).map((file) => this.addFile(file)));
-    return this.files;
-  }
-
-  public delete(filename: string) {
-    this.files.delete(filename);
-    return this.files;
+  /**
+   * The uploaded files, sent once when they change rather than read from disk
+   * here: reading a `File` belongs to the page that owns the input element.
+   */
+  public setFiles(files: Map<string, ArrayBuffer>) {
+    this.files = files;
+    if (this.interpreter !== null) {
+      this.interpreter.setFileList(files);
+    }
   }
 
   public async send(request: Request): Promise<Response> {
@@ -149,25 +179,32 @@ export class Server {
 
     switch (controlEvent) {
       case 'Start': {
-        return this.Start(sourcecode);
+        return this.respond(await this.Start(sourcecode), sourcecode);
       }
       case 'Stop': {
-        return this.Stop(sourcecode);
+        return this.respond(this.Stop(), sourcecode);
       }
       case 'BackAll': {
-        return this.BackAll(sourcecode);
+        return this.respond(this.BackAll(), sourcecode);
       }
       case 'StepBack': {
-        return this.StepBack(sourcecode);
+        return this.respond(this.StepBack(), sourcecode);
       }
       case 'Step': {
-        return this.Step(sourcecode, stdinText);
+        return this.respond(this.Step(stdinText), sourcecode);
       }
       case 'StepAll': {
-        return this.StepAll(sourcecode, lineNumOfBreakpoint, stdinText);
+        return this.respond(
+          this.StepAll(sourcecode, lineNumOfBreakpoint, stdinText),
+          sourcecode
+        );
       }
       case 'Exec': {
-        return this.Exec(sourcecode, lineNumOfBreakpoint);
+        await this.Start(sourcecode);
+        return this.respond(
+          this.StepAll(sourcecode, lineNumOfBreakpoint),
+          sourcecode
+        );
       }
       case 'SyntaxCheck': {
         return this.SyntaxCheck(sourcecode);
@@ -175,7 +212,33 @@ export class Server {
     }
   }
 
-  private async Start(sourcecode: string) {
+  /**
+   * A step spelled out for the caller. This is where the interpreter's own
+   * objects are left behind and the model that crosses the Worker boundary is
+   * built, so it is the only place a `Response` is made.
+   */
+  private respond(result: StepResult, sourcecode: string): Response {
+    return {
+      model: extractModel(result.execState),
+      output: result.output,
+      sourcecode,
+      debugState: result.debugState,
+      step: result.step,
+      errors: [],
+    };
+  }
+
+  /** The step held in the history, for the commands that only look back. */
+  private held(step: number, debugState: DEBUG_STATE): StepResult {
+    return {
+      execState: this.history.stateAt(step),
+      output: this.history.outputAt(step),
+      debugState,
+      step,
+    };
+  }
+
+  private async Start(sourcecode: string): Promise<StepResult> {
     await this.reset();
     if (this.interpreter === null) {
       throw new Error('interpreter is not found');
@@ -184,233 +247,172 @@ export class Server {
     const output = this.interpreter.getStdout();
     this.record(execState, output);
     this.isExecuting = true;
-    const res: Response = {
-      execState,
-      output,
-      sourcecode,
-      debugState: 'First',
-      step: this.count,
-      errors: [],
-      files: this.files,
-    };
-    return res;
+    return { execState, output, debugState: 'First', step: this.count };
   }
 
-  private Stop(sourcecode: string) {
-    if (this.timer !== null) {
-      clearTimeout(this.timer);
-    }
+  private Stop(): StepResult {
+    this.runToken += 1;
     this.interpreter = null;
-    const ret: Response = {
-      sourcecode,
-      execState: undefined,
-      debugState: 'Stop',
-      output: '',
-      step: this.count,
-      errors: [],
-      files: this.files,
-    };
-    return ret;
+    return { output: '', debugState: 'Stop', step: this.count };
   }
 
-  private BackAll(sourcecode: string) {
+  private BackAll(): StepResult {
     this.count = 0;
-    const execState = this.history.stateAt(this.count);
-    const output = this.history.outputAt(this.count);
-    const ret: Response = {
-      execState,
-      output,
-      sourcecode,
-      debugState: 'First',
-      step: this.count,
-      errors: [],
-      files: this.files,
-    };
-    return ret;
+    return this.held(this.count, 'First');
   }
 
-  private StepBack(sourcecode: string) {
+  private StepBack(): StepResult {
     // Only into a step still held: past the window the states were dropped and
     // there is nothing to step back to. `BackAll` still reaches the first.
     if (1 <= this.count && this.history.has(this.count - 1)) {
       this.count -= 1;
     }
-    const execState = this.history.stateAt(this.count);
-    const output = this.history.outputAt(this.count);
-    const ret: Response = {
-      execState,
-      output,
-      sourcecode,
-      debugState: 'Debugging',
-      step: this.count,
-      errors: [],
-      files: this.files,
-    };
-    return ret;
+    return this.held(this.count, 'Debugging');
   }
 
-  private Step(sourcecode: string, stdinText?: string) {
+  private Step(stdinText?: string): StepResult {
     ++this.count;
     if (this.count < this.history.length) {
       // Stepping forward out of a stretch that has been dropped - the run was
       // long enough to evict it - resumes at the oldest step still held.
       this.count = this.history.nextRetained(this.count);
-      const execState = this.history.stateAt(this.count);
-      const output = this.history.outputAt(this.count);
-      const ret: Response = {
-        execState,
-        output,
-        sourcecode,
-        debugState: 'Debugging',
-        step: this.count,
-        errors: [],
-        files: this.files,
-      };
-      return ret;
+      return this.held(this.count, 'Debugging');
     }
-    if (this.isExecuting) {
-      if (this.interpreter === null) {
-        throw new Error('engine is not found');
-      }
-      if (this.interpreter.getIsWaitingForStdin()) {
-        if (stdinText === undefined) {
-          // The program is blocked in scanf, which is a generator that yielded
-          // with the waiting flag set. Resuming it now consumes the read with
-          // an empty string and clears the flag, so the scanf is silently gone
-          // and the variable keeps its old value. Stepping has to be a no-op
-          // until the console submits a line.
-          --this.count;
-          const waiting: Response = {
-            sourcecode,
-            output: this.history.outputAt(this.count),
-            execState: this.history.stateAt(this.count),
-            debugState: 'stdin',
-            step: this.count,
-            errors: [],
-            files: this.files,
-          };
-          return waiting;
-        }
-        this.interpreter.stdin(stdinText);
-        //  console.log(`stdin:${stdinText}`);
-      }
-      const state: ExecState | null = this.interpreter.stepExecute();
-      // let maxSkip = 10;
-      // while (state.getCurrentExpr().codeRange == null && 0 < --maxSkip) {
-      //   state = this.engine.stepExecute();
-      // }
-      if (state === null) {
-        // The engine has no step iterator, so it is not the one `Start` armed.
-        // Report the last known good state: a null ExecState reaches the canvas
-        // through the `draw` signal and takes the whole UI down with it.
-        this.isExecuting = false;
-        this.count = Math.max(this.history.length - 1, 0);
-        const dead: Response = {
-          sourcecode,
-          output: this.history.outputAt(this.count),
-          execState: this.getLastHistory(),
-          debugState: 'EOF',
-          step: this.count,
-          errors: [],
-          files: this.files,
-        };
-        return dead;
-      }
-      const execState = state;
-      const output = this.interpreter.getStdout();
-      this.record(execState, output);
-      //  console.log(`output:${output}`);
-      // let stateText = `Step:${this.count} | Value:${execState.getCurrentValue()}`;
-      let debugState: DEBUG_STATE = 'Debugging';
-      if (this.interpreter.getIsWaitingForStdin()) {
-        debugState = 'stdin';
-      } else if (!this.interpreter.isStepExecutionRunning()) {
-        debugState = 'EOF';
-        this.isExecuting = false;
-      }
-      const ret: Response = {
-        execState,
-        output,
-        sourcecode,
-        debugState,
-        step: this.count,
-        errors: [],
-        files: this.files,
-      };
-      return ret;
+    if (!this.isExecuting) {
+      return this.atEnd();
     }
-    this.count = Math.max(this.history.length - 1, 0);
-    const output = this.history.outputAt(this.count);
-    const ret: Response = {
-      output,
-      sourcecode,
-      execState: this.getLastHistory(),
-      debugState: 'EOF',
-      step: this.count,
-      errors: [],
-      files: this.files,
-    };
-    return ret;
+    if (this.interpreter === null) {
+      throw new Error('engine is not found');
+    }
+    if (this.interpreter.getIsWaitingForStdin()) {
+      if (stdinText === undefined) {
+        // The program is blocked in scanf, which is a generator that yielded
+        // with the waiting flag set. Resuming it now consumes the read with
+        // an empty string and clears the flag, so the scanf is silently gone
+        // and the variable keeps its old value. Stepping has to be a no-op
+        // until the console submits a line.
+        --this.count;
+        return this.held(this.count, 'stdin');
+      }
+      this.interpreter.stdin(stdinText);
+    }
+    const state: ExecState | null = this.interpreter.stepExecute();
+    if (state === null) {
+      // The engine has no step iterator, so it is not the one `Start` armed.
+      // Report the last known good state: a step with no model at all reaches
+      // the canvas and takes the whole visualization down with it.
+      this.isExecuting = false;
+      return this.atEnd();
+    }
+    const output = this.interpreter.getStdout();
+    this.record(state, output);
+    let debugState: DEBUG_STATE = 'Debugging';
+    if (this.interpreter.getIsWaitingForStdin()) {
+      debugState = 'stdin';
+    } else if (!this.interpreter.isStepExecutionRunning()) {
+      debugState = 'EOF';
+      this.isExecuting = false;
+    }
+    return { execState: state, output, debugState, step: this.count };
   }
 
+  /** The last step recorded, for a session that has nowhere left to go. */
+  private atEnd(): StepResult {
+    this.count = Math.max(this.history.length - 1, 0);
+    return {
+      execState: this.history.lastState(),
+      output: this.history.outputAt(this.count),
+      debugState: 'EOF',
+      step: this.count,
+    };
+  }
+
+  /**
+   * Starts a run and answers immediately: what stops it - the end of the
+   * program, a read, a breakpoint - is reported through `onRunEvent` whenever
+   * it happens.
+   */
   private StepAll(
     sourcecode: string,
     lineNumOfBreakpoint?: number[],
     stdinText?: string
-  ) {
-    const currentCount = this.count;
+  ): StepResult {
+    const executing = this.held(this.count, 'Executing');
+    this.runToken += 1;
+    void this.run(this.runToken, sourcecode, lineNumOfBreakpoint, stdinText);
+    return executing;
+  }
+
+  /**
+   * The run itself: a straight loop, because this is a Worker and there is no
+   * interface on this thread to keep alive. It used to be one step per
+   * `setTimeout`, which capped a run at a thousand steps a second whatever the
+   * program did.
+   */
+  private async run(
+    token: number,
+    sourcecode: string,
+    lineNumOfBreakpoint?: number[],
+    stdinText?: string
+  ): Promise<void> {
+    // Let the `Executing` answer go out before the run begins.
+    await pause();
     // Only the first step of the run may consume the submitted line: it is the
     // one the program is blocked on. Every later step runs with no input, and
     // the guard in Step stops the run at the next scanf.
     let pendingStdin = stdinText;
-    const loop = () => {
-      const ret: Response = this.Step(sourcecode, pendingStdin);
+    let taken = 0;
+    while (this.runToken === token) {
+      const result = this.Step(pendingStdin);
       pendingStdin = undefined;
-      if (ret.debugState === 'EOF') {
-        this.report('EOF', ret);
+      if (result.debugState === 'EOF' || result.debugState === 'stdin') {
+        this.report(result.debugState, result, sourcecode);
         return;
-      } else if (ret.debugState === 'stdin') {
-        this.report('stdin', ret);
-        return;
-      } else if (typeof lineNumOfBreakpoint !== 'undefined') {
-        if (typeof ret.execState !== 'undefined') {
-          const nextExpr = ret.execState.getNextExpr();
-          const { codeRange } = nextExpr;
-          if (codeRange) {
-            if (lineNumOfBreakpoint.includes(codeRange.begin.y - 1)) {
-              this.report('Breakpoint', ret);
-              return;
-            }
-          }
-        }
       }
-      this.timer = global.setTimeout(loop.bind(this), 1);
-    };
-    loop();
-    const execState = this.history.stateAt(currentCount);
-    const output = this.history.outputAt(currentCount);
-    const debugState: DEBUG_STATE = 'Executing';
-    return {
-      execState,
-      output,
-      sourcecode,
-      debugState,
-      step: currentCount,
-      errors: [],
-      files: this.files,
-    };
+      if (
+        typeof lineNumOfBreakpoint !== 'undefined' &&
+        this.stoppedAtBreakpoint(result, lineNumOfBreakpoint)
+      ) {
+        this.report('Breakpoint', result, sourcecode);
+        return;
+      }
+      taken += 1;
+      if (taken % RUN_SLICE === 0) {
+        await pause();
+      }
+    }
   }
 
-  private async Exec(sourcecode: string, lineNumOfBreakpoint?: number[]) {
-    await this.Start(sourcecode);
-    return this.StepAll(sourcecode, lineNumOfBreakpoint);
+  /**
+   * Whether the statement about to run is one the reader marked. Asked of the
+   * `ExecState` rather than of a model: a run reaches this once per step, and
+   * building a model to read one code range out of it would make every step of
+   * every run pay for the visualization of the one step that stops.
+   */
+  private stoppedAtBreakpoint(
+    result: StepResult,
+    lineNumOfBreakpoint: number[]
+  ): boolean {
+    if (typeof result.execState === 'undefined') {
+      return false;
+    }
+    const { codeRange } = result.execState.getNextExpr();
+    return (
+      Boolean(codeRange) && lineNumOfBreakpoint.includes(codeRange.begin.y - 1)
+    );
   }
 
-  private async SyntaxCheck(code: string) {
+  private async SyntaxCheck(code: string): Promise<Response> {
     // Deliberately a throwaway interpreter, never `this.interpreter`.
     const interpreter = await this.createInterpreter();
-    const errors: SyntaxErrorData[] = interpreter.checkSyntaxError(code);
-    const ret: Response = {
+    const errors: SyntaxErrorModel[] = interpreter
+      .checkSyntaxError(code)
+      .map(({ line, charPositionInLine, getMsg }) => ({
+        line,
+        charPositionInLine,
+        msg: getMsg(),
+      }));
+    return {
       errors,
       expansions: reportsExpansions(interpreter)
         ? interpreter.getExpansions(code)
@@ -419,26 +421,20 @@ export class Server {
         ? interpreter.getConstructs(code)
         : [],
       sourcecode: code,
-      execState: undefined,
+      model: emptyStepModel(),
       debugState: 'Stop',
       output: '',
       step: this.count,
-      files: this.files,
     };
-    return ret;
   }
 
   private record(execState: ExecState, output: string) {
     this.history.push(execState, output);
   }
 
-  private getLastHistory() {
-    return this.history.lastState();
-  }
-
-  private report(event: RUN_EVENT, response: Response) {
+  private report(event: RUN_EVENT, result: StepResult, sourcecode: string) {
     if (this.onRunEvent !== null) {
-      this.onRunEvent(event, response);
+      this.onRunEvent(event, this.respond(result, sourcecode));
     }
   }
 }

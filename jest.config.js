@@ -16,6 +16,10 @@ module.exports = {
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx'],
   moduleNameMapper: {
     '\\.(css|less)$': 'identity-obj-proxy',
+    // `spawnWorker` is one line of `import.meta`, which is module syntax the
+    // CommonJS build these tests run under cannot express. Nothing under test
+    // starts a Worker; anything that tried would get this instead.
+    '/spawnWorker$': '<rootDir>/test/spawnWorker.stub.ts',
     // hashids' "main" is its ESM build, which Jest cannot parse. webpack
     // picks the browser/import build on its own; only Jest needs the CJS one.
     '^hashids$': 'hashids/cjs',

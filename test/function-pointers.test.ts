@@ -1,6 +1,5 @@
 import { ExecState } from 'unicoen.ts/dist/interpreter/Engine/ExecState';
-import { Variable } from 'unicoen.ts/dist/interpreter/Engine/Variable';
-import { extractModel } from '../src/core';
+import { extractModel, extractVariables, VariableModel } from '../src/core';
 import { HoverTextSource } from '../src/components/hoverText';
 import { constructAt } from '../src/interpreter/Construct';
 import { PlivetCPP14Interpreter } from '../src/interpreter/CPP14';
@@ -50,17 +49,15 @@ const rowFor = (states: ExecState[], name: string): string[] => {
   return found[found.length - 1] || [];
 };
 /** The last state a named variable appears in, as the editor would find it. */
-const variableNamed = (states: ExecState[], name: string): Variable | null => {
-  let found: Variable | null = null;
+const variableNamed = (
+  states: ExecState[],
+  name: string
+): VariableModel | null => {
+  let found: VariableModel | null = null;
   for (const state of states) {
-    for (const stack of state.getStacks()) {
-      for (const variable of stack.getVariables()) {
-        if (
-          variable.getName() === name &&
-          typeof variable.parentName === 'undefined'
-        ) {
-          found = variable;
-        }
+    for (const variable of extractVariables(state)) {
+      if (variable.name === name) {
+        found = variable;
       }
     }
   }

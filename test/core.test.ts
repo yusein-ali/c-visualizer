@@ -70,6 +70,34 @@ int main(void) {
 }
 `;
 
+/**
+ * Whether a value would survive `structuredClone`: the check the Worker
+ * boundary actually applies. A class instance loses its prototype and a
+ * function is refused outright, so neither may appear in a message.
+ */
+const plain = (value: unknown): boolean => {
+  if (value === null) {
+    return true;
+  }
+  if (Array.isArray(value)) {
+    return value.every(plain);
+  }
+  switch (typeof value) {
+    case 'string':
+    case 'number':
+    case 'boolean':
+    case 'undefined':
+      return true;
+    case 'object':
+      return (
+        Object.getPrototypeOf(value) === Object.prototype &&
+        Object.values(value as object).every(plain)
+      );
+    default:
+      return false;
+  }
+};
+
 describe('extractModel', () => {
   const states = execute(pointerProgram);
 
@@ -108,6 +136,7 @@ describe('extractModel', () => {
     expect(extractModel(null)).toEqual({
       stacks: [],
       pointers: [],
+      variables: [],
       codeRange: null,
     });
     expect(extractModel(undefined).stacks).toEqual([]);
@@ -115,28 +144,6 @@ describe('extractModel', () => {
 
   it('produces only what survives structuredClone', () => {
     const model = modelWith(states, (m) => 0 < m.stacks.length);
-    const plain = (value: unknown): boolean => {
-      if (value === null) {
-        return true;
-      }
-      if (Array.isArray(value)) {
-        return value.every(plain);
-      }
-      switch (typeof value) {
-        case 'string':
-        case 'number':
-        case 'boolean':
-        case 'undefined':
-          return true;
-        case 'object':
-          return (
-            Object.getPrototypeOf(value) === Object.prototype &&
-            Object.values(value as object).every(plain)
-          );
-        default:
-          return false;
-      }
-    };
     expect(plain(model)).toBe(true);
     expect(JSON.parse(JSON.stringify(model))).toEqual(model);
   });
@@ -329,7 +336,7 @@ int main(void) {
     const walked: number[] = [];
     for (let step = 0; step < 8; step += 1) {
       const back = await send(server, 'StepBack');
-      expect(back.execState).toBeDefined();
+      expect(back.model.codeRange).not.toBeNull();
       walked.push(back.step);
     }
     // Down to the beginning, and then it stays there.
@@ -344,7 +351,7 @@ int main(void) {
     }
     const home = await send(server, 'BackAll');
     expect(home.step).toBe(0);
-    expect(home.execState).toBeDefined();
+    expect(home.model.codeRange).not.toBeNull();
   });
 
   it('never answers with a state it has dropped', async () => {
@@ -357,13 +364,23 @@ int main(void) {
     // Forward across the gap the eviction left, and on to the head.
     for (let step = 0; step < 40; step += 1) {
       const forward = await send(server, 'Step');
-      expect(forward.execState).toBeDefined();
+      expect(forward.model.codeRange).not.toBeNull();
     }
     // Backward from wherever that ended up.
     for (let step = 0; step < 10; step += 1) {
       const back = await send(server, 'StepBack');
-      expect(back.execState).toBeDefined();
+      expect(back.model.codeRange).not.toBeNull();
     }
+  });
+
+  it('answers with nothing structuredClone would refuse', async () => {
+    const server = new Server();
+    // A step carries the model, a syntax check carries the errors, the
+    // expansions and the constructs: between them that is every field of a
+    // response, and all of them cross the Worker boundary.
+    expect(plain(await send(server, 'Start'))).toBe(true);
+    expect(plain(await send(server, 'Step'))).toBe(true);
+    expect(plain(await send(server, 'SyntaxCheck'))).toBe(true);
   });
 
   it('forgets the previous session when a new one starts', async () => {

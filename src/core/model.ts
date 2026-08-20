@@ -74,9 +74,26 @@ export interface CodeRangeModel {
   end: { x: number; y: number };
 }
 
+/**
+ * A variable as the editor's tooltip says it: display types, display
+ * addresses, and the value already spelled out. The tooltip runs on the main
+ * thread and the interpreter runs in the Worker, so what it reads has to be
+ * text by the time it arrives.
+ */
+export interface VariableModel {
+  name: string;
+  type: string;
+  value: string;
+  address: number;
+  /** For a pointer, the variable it points at. */
+  target?: { name: string; value: string };
+}
+
 export interface StepModel {
   stacks: StackModel[];
   pointers: PointerModel[];
+  /** Every variable in scope, innermost frame last. */
+  variables: VariableModel[];
   /**
    * Where the next statement to execute is, which is what the editor
    * highlights and what a breakpoint is compared against.
@@ -87,6 +104,7 @@ export interface StepModel {
 export const emptyStepModel = (): StepModel => ({
   stacks: [],
   pointers: [],
+  variables: [],
   codeRange: null,
 });
 

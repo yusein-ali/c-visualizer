@@ -7,8 +7,7 @@ export type event =
   | 'changeState'
   | 'changeOutput'
   | 'zoom'
-  | 'draw'
-  | 'files';
+  | 'draw';
 export const slot = (
   event: event,
   listener: (...args: any[]) => void

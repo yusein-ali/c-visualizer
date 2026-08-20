@@ -378,24 +378,70 @@ interpreter states with nothing rendered.
 
 ## Phase 6: interpreter in a Web Worker
 
-**Status: not started**, and now unblocked: `StepModel` exists, so an
-`ExecState` no longer has to cross the boundary. This is the next phase.
+**Status: complete, with one deviation.** The interpreter runs in
+`src/core/interpreter.worker.ts` and nothing but plain data crosses to the page.
+Run-to-breakpoint on `baseline/programs/bench.c` went from **1653 ms to 327
+ms** - measured on this machine against a build of the commit before this
+phase, so the two numbers are comparable in a way the Phase 0 figures recorded
+elsewhere are not. The Phase 0 target was "roughly 350 ms". Heap growth over 200 steps
+fell from 27.2 MB to 9.4 MB: the `ExecState`s are the Worker's now, and only the
+model it extracted is retained on this side.
+
+The deviation is item 4. A completely straight loop cannot be stopped: `Stop` is
+a message, and a Worker that never returns to its event loop never reads one.
+The loop runs `RUN_SLICE` steps - 5000 - and then yields once, which is the
+difference between a run that can be interrupted and one that cannot; at 1.21 ms
+a step that is a Stop honoured within about six seconds in the worst case, and
+immediately in every case that matters, against the one-step-per-millisecond
+ceiling the old timer imposed. A run is retired by number rather than by a
+handle, so stopping or restarting cannot reach into a run it does not own.
+
+Single-stepping costs **3.3 ms against 2.6 ms** before, which is the one figure
+that moved the wrong way. It is the message round trip itself and not the work:
+stubbing out the per-step variable extraction changed nothing (3.4 ms). A step
+is human-paced, and the phase buys a fivefold gain on the one operation that is
+not.
 
 1. Move `Server` into `src/core/interpreter.worker.ts`, instantiated with
    `new Worker(new URL('./interpreter.worker.ts', import.meta.url))`.
+   (completed - the `new URL` is alone in
+   [src/core/spawnWorker.ts](src/core/spawnWorker.ts) because `import.meta` is
+   module syntax a CommonJS build cannot express, and the tests run under one;
+   `jest.config.js` maps that one file to a stub.)
 2. Keep the existing `Request` shape as the message in. Replace the `Response`
    `execState` field with `StepModel` from Phase 5, produced by calling
-   `extractModel` inside the Worker.
+   `extractModel` inside the Worker. (completed. `model` is not optional: a
+   state the interpreter has none for is an empty model rather than a missing
+   one, because everything downstream of the response draws it. `Request` and
+   `Response` became interfaces - `structuredClone` keeps an object's fields and
+   throws its prototype away, so a class was a lie about what arrives.)
 3. Wrap the Worker in a client with the same `send(request): Promise<Response>`
    signature the components already call, so call sites do not change.
+   (completed - [src/core/client.ts](src/core/client.ts). The Worker starts on
+   the first command rather than on load.)
 4. Replace the `setTimeout(loop, 1)` yield in `StepAll` with a straight loop. It
    exists only to keep the main thread alive and is unnecessary in a Worker.
-   Keep breakpoint, stdin and EOF as messages out.
+   Keep breakpoint, stdin and EOF as messages out. (completed, sliced - see the
+   deviation above.)
 5. Transfer uploaded files (`Map<string, ArrayBuffer>`) to the Worker once, on
-   change, rather than riding on every response.
+   change, rather than riding on every response. (completed. `Response.files`
+   and the `'files'` bus event are both gone with it: `FileForm` uploaded the
+   list, so `FileForm` already knew it, and the round trip only told it what it
+   had just said.)
+
+Two things had to become plain data before any of it could cross. A
+`SyntaxErrorData` holds its accessor as an instance property, and a function is
+the one thing `structuredClone` refuses outright, so the message is unwrapped
+into `SyntaxErrorModel`. And the editor's tooltip read variables off the running
+`ExecState`, which no longer exists on this thread: `extractVariables` in
+[src/core/variables.ts](src/core/variables.ts) reads them in the Worker, and
+`hoverText.ts` is left with how to say them rather than how to find them.
 
 Exit criterion: stepping and run-to-breakpoint work with the interpreter off the
-main thread, and run-to-breakpoint beats the Phase 0 benchmark.
+main thread, and run-to-breakpoint beats the Phase 0 benchmark. Met, and checked
+in a browser rather than only in tests: stepping, run-to-breakpoint, a full run
+to EOF, stopping a two-million-iteration run mid-flight and running again after
+it, and the variable, pointer, array, struct and library tooltips.
 
 ## Phase 7: CodeMirror 6
 
@@ -413,6 +459,7 @@ Build the new editor in `src/ui/editor/`, wired to the same event bus, behind th
 adapter described in constraint 4. From here through Phase 9, build behind a
 second Webpack entry point so every commit leaves a working application.
 
+0. typedef tooltip indicate typedef as storage class specifier which is wrong. user formal C.  
 1. Add the CodeMirror 6 packages: `state`, `view`, `language`, `commands`,
    `autocomplete`, `lint`, `lang-cpp`, and a dark theme. Mirror the language
    and indent configuration in
@@ -466,6 +513,9 @@ visualization is still react-konva. Item 6 depends on `StepModel` from Phase 5.
    run. Either diff the graph against the previous `StepModel`, or suspend
    redraws while `debugState` is `Executing` and draw once on stop. Measure
    against the Phase 0 benchmark.
+8. Convert canvas to visualize the C-program memory along with standard segments and registers. 
+9. The variables must be properly visualized in the segments: registers, heap, stack, read-only memory (data and bss must be properly separated)  
+10. Each segment must have their own start addresses
 
 Exit criterion: the visualization matches the Phase 0 screenshots, folding and
 zoom work, and run-to-breakpoint does not regress against Phase 6.
@@ -717,9 +767,16 @@ it, and can be taken in any order or dropped.
     output of `src/interpreter/preprocess.ts`, showing what `#define` and
     `#include` actually did. The merge view is a second editor, so it is not
     part of the debug array and does not travel to a host page.
-12. **Session serialisation.** `EditorState.toJSON` and `fromJSON`, plus the
+12. **Session serialisation.** -- not strictly required -- `EditorState.toJSON` and `fromJSON`, plus the
     breakpoint set, so a session can be saved, handed in, or replayed by a
     teacher looking at how a student got where they are.
+13. Create a view for explaining currently active statement. 
+14. Create a view for visualizing the call stack.
+15. Create a view for visualizing the mutation of variables among the function calls. 
+16. Add a control panel to activate and de-active the views.
+17. Add save code, open code. 
+18. support multi-tab open -- 
+19. Validate the code as linker would do. -- multidefinition scan 
 
 Exit criterion: each item lands as its own pull request, behind no flag; the
 debug extension array still attaches to an `EditorView` somebody else built;

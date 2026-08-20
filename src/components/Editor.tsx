@@ -2,11 +2,17 @@ import * as React from 'react';
 
 import '../css/editor.css';
 import { signal, slot } from './emitter';
-import { Request, CONTROL_EVENT, server, Response, DEBUG_STATE } from '../core';
+import {
+  Request,
+  CONTROL_EVENT,
+  server,
+  Response,
+  DEBUG_STATE,
+  StepModel,
+  SyntaxErrorModel,
+} from '../core';
 import strings from '../strings';
-import { ExecState } from 'unicoen.ts/dist/interpreter/Engine/ExecState';
 import { Theme } from './Props';
-import { SyntaxErrorData } from 'unicoen.ts/dist/interpreter/mapper/SyntaxErrorData';
 import { Expansion } from '../interpreter/Expansion';
 import { PlivetEditor, rangeOf } from '../ui/editor';
 import { HoverTextSource } from './hoverText';
@@ -148,17 +154,16 @@ export default class Editor extends React.Component<Props, State> {
 
   recieve(response: Response) {
     try {
-      const { debugState, execState, output, step, files } = response;
+      const { debugState, model, output, step } = response;
       this.setDebugging(debugState !== 'Stop');
-      this.hover.setExecState(debugState === 'Stop' ? undefined : execState);
+      this.hover.setVariables(model.variables);
       if (debugState === 'Executing') {
         return;
       }
       signal('changeState', debugState, step);
       signal('changeOutput', output);
-      signal('draw', execState);
-      signal('files', files);
-      this.setHighlightOnCode(debugState, execState);
+      signal('draw', model);
+      this.setHighlightOnCode(debugState, model);
     } catch (e) {
       console.log(e);
       alert(e);
@@ -180,16 +185,16 @@ export default class Editor extends React.Component<Props, State> {
     }
   }
 
-  setHighlightOnCode(debugState: DEBUG_STATE, execState?: ExecState) {
+  setHighlightOnCode(debugState: DEBUG_STATE, model: StepModel) {
     if (this.editor === null) {
       return;
     }
-    if (debugState === 'Stop' || typeof execState === 'undefined') {
+    if (debugState === 'Stop') {
       this.editor.debug.showStep(this.editor.view, null);
       return;
     }
-    const codeRange = execState.getNextExpr().codeRange;
-    if (!codeRange) {
+    const { codeRange } = model;
+    if (codeRange === null) {
       return;
     }
     // At end of file there is no statement left to point at, so the highlight
@@ -217,7 +222,7 @@ export default class Editor extends React.Component<Props, State> {
     }
   }
 
-  setSyntaxError(errors: SyntaxErrorData[]) {
+  setSyntaxError(errors: SyntaxErrorModel[]) {
     if (this.editor !== null) {
       this.editor.debug.showDiagnostics(this.editor.view, errors);
     }

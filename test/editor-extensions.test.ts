@@ -106,7 +106,7 @@ describe('diagnostics', () => {
   it('spans from the reported column to the end of the line', () => {
     const state = EditorState.create({ doc });
     const [diagnostic] = diagnosticsFor(state.doc, [
-      { line: 2, charPositionInLine: 2, getMsg: () => 'expected ;' },
+      { line: 2, charPositionInLine: 2, msg: 'expected ;' },
     ]);
     expect(state.sliceDoc(diagnostic.from, diagnostic.to)).toBe('int n = 0;');
     expect(diagnostic.severity).toBe('error');

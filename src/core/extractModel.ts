@@ -20,6 +20,7 @@ import {
   emptyStepModel,
   foldGroupOf,
 } from './model';
+import { extractVariables, formatAddress } from './variables';
 
 /**
  * Reading an execution state as text.
@@ -166,7 +167,7 @@ function valueTextOf(variable: Variable, getTypedef: Typedef): string {
   if (functionInfo !== null && value != null) {
     // A function pointer holds an address like any other pointer, so it is
     // shown like one; the name is what makes the address mean something.
-    const hex = '0x' + Number(value.valueOf()).toString(16).toUpperCase();
+    const hex = formatAddress(Number(value.valueOf()));
     valueStr =
       functionInfo.pointee === null ? hex : `${functionInfo.pointee} (${hex})`;
   }
@@ -180,9 +181,7 @@ function valueTextOf(variable: Variable, getTypedef: Typedef): string {
   const rawType = getTypedef(type);
   if (functionInfo === null && rawType.indexOf('*') !== -1 && value != null) {
     const pointerValue = displayPointerValueOf(variable);
-    valueStr =
-      '0x' +
-      (pointerValue === null ? value : pointerValue).toString(16).toUpperCase();
+    valueStr = formatAddress(pointerValue === null ? value : pointerValue);
   }
   if (rawType === 'char' && value != null) {
     valueStr += ` '${String.fromCharCode(valueStr)}'`;
@@ -218,7 +217,7 @@ function scalarRows(
     foldGroup
   );
   const addressCell = cell(
-    `&${name}(0x${address.toString(16).toUpperCase()}) `,
+    `&${name}(${formatAddress(address)}) `,
     key,
     'address',
     foldGroup
@@ -261,12 +260,7 @@ function aggregateRows(
   const nameCell = cell(name, key, 'name', foldGroup);
   // An aggregate holds its own address: the arrow from it points at itself,
   // which is what shows that the name and the storage are the same thing.
-  const valueCell = cell(
-    '0x' + address.toString(16).toUpperCase(),
-    key,
-    'value',
-    foldGroup
-  );
+  const valueCell = cell(formatAddress(address), key, 'value', foldGroup);
   const addressCell = cell(`&${name}(SYSTEM)`, key, 'address', foldGroup);
   // The triangle itself is the layout's to draw: which way it points is fold
   // state, and fold state is not part of the model. The cell is as wide as the
@@ -360,6 +354,7 @@ export function extractModel(execState?: ExecState | null): StepModel {
   return {
     stacks,
     pointers: addresses.resolve(),
+    variables: extractVariables(execState),
     codeRange: codeRangeOf(execState),
   };
 }

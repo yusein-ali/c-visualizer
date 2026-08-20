@@ -9,7 +9,6 @@ import '../css/fileform.css';
 import strings from '../strings';
 import { server } from '../core';
 import FileItem from './FileItem';
-import { slot } from './emitter';
 interface Props {}
 
 interface State {
@@ -22,9 +21,6 @@ export default class FileForm extends React.Component<Props, State> {
     this.state = { filelist: null };
     this.onFileSelected = this.onFileSelected.bind(this);
     this.onFileDelete = this.onFileDelete.bind(this);
-    slot('files', (filelist: Map<string, ArrayBuffer>) => {
-      this.setState({ filelist });
-    });
   }
 
   async onFileSelected(e: React.FormEvent<FormControl>) {

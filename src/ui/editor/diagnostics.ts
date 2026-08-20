@@ -9,12 +9,15 @@ import { offsetAt, rowRange } from './positions';
  * absolute offsets, which is the one conversion this migration adds.
  *
  * The shape is structural on purpose: `SyntaxErrorData` is a class from
- * unicoen.ts, and nothing in the editor should depend on the interpreter.
+ * unicoen.ts, and nothing in the editor should depend on the interpreter. It
+ * is plain data for a second reason since the interpreter moved into a Worker:
+ * the class holds its accessor as an instance property, and a function is the
+ * one thing `structuredClone` refuses to carry.
  */
 export interface SyntaxError {
   line: number;
   charPositionInLine: number;
-  getMsg(): string;
+  msg: string;
 }
 
 /**
@@ -33,7 +36,7 @@ export const diagnosticsFor = (
       from,
       to: Math.max(line.to, from),
       severity: 'error' as const,
-      message: error.getMsg(),
+      message: error.msg,
     };
   });
 

@@ -1,5 +1,3 @@
-import { ExecState } from 'unicoen.ts/dist/interpreter/Engine/ExecState';
-import { Variable } from 'unicoen.ts/dist/interpreter/Engine/Variable';
 import strings, { stringFor } from '../strings';
 import { Expansion } from '../interpreter/Expansion';
 import {
@@ -11,12 +9,7 @@ import {
   TypeDeclarationDetail,
   VariableDeclarationDetail,
 } from '../interpreter/Construct';
-import {
-  displayAddressOf,
-  displayPointerValueOf,
-  displayTypeOf,
-  functionPointerInfoOf,
-} from '../interpreter/RuntimeTypeInfo';
+import { formatAddress, VariableModel } from '../core';
 import { libraryHelp } from './libraryHelp';
 import { expansionAt, HoverContext } from '../ui/editor';
 
@@ -28,10 +21,11 @@ import { expansionAt, HoverContext } from '../ui/editor';
  * The knowledge is all on this side - what the preprocessor did, what the
  * parser saw, what a variable holds right now - so replacing Ace with
  * CodeMirror did not touch a line of it.
+ *
+ * All of it arrives as plain data. Reading a variable off the running engine
+ * is `extractVariables` in `src/core`, which runs in the Worker; what is left
+ * here is how to say it.
  */
-
-export const formatAddress = (address: number): string =>
-  `0x${address.toString(16).toUpperCase()}`;
 
 export const formatVariableDeclaration = (
   declaration: VariableDeclarationDetail
@@ -120,7 +114,7 @@ export const formatFunctionDeclaration = (
 export class HoverTextSource {
   private expansions: Expansion[] = [];
   private constructs: Construct[] = [];
-  private execState?: ExecState;
+  private variables: VariableModel[] = [];
 
   setExpansions(expansions: Expansion[]): void {
     this.expansions = expansions;
@@ -132,8 +126,8 @@ export class HoverTextSource {
 
   /** The values as they are right now, which is what a reader wants while
    * stepping. Cleared when the session stops, so a stale frame is never read. */
-  setExecState(execState?: ExecState): void {
-    this.execState = execState;
+  setVariables(variables: VariableModel[]): void {
+    this.variables = variables;
   }
 
   /**
@@ -213,142 +207,30 @@ export class HoverTextSource {
     return construct.detail === '' ? name : `${name} — ${construct.detail}`;
   }
 
-  /** The variable of that name in the innermost frame that has one. */
-  private variableNamed(name: string): Variable | null {
-    if (typeof this.execState === 'undefined' || name === '') {
+  /**
+   * The variable of that name in the innermost frame that has one. The frames
+   * arrive outermost first, so the last match is the innermost.
+   */
+  private variableNamed(name: string): VariableModel | null {
+    if (name === '') {
       return null;
     }
-    const stacks = this.execState.getStacks();
-    for (let i = stacks.length - 1; 0 <= i; i -= 1) {
-      for (const variable of stacks[i].getVariables()) {
-        // A bare word never refers to a struct member: those are recorded
-        // under the member name with the struct as their parent.
-        if (
-          variable.getName() === name &&
-          typeof variable.parentName === 'undefined'
-        ) {
-          return variable;
-        }
+    for (let i = this.variables.length - 1; 0 <= i; i -= 1) {
+      if (this.variables[i].name === name) {
+        return this.variables[i];
       }
     }
     return null;
   }
 
-  /**
-   * Everything shown here goes through the display layer rather than the
-   * runtime one. An enum, a record and a function pointer all execute under a
-   * synthetic type the source never contained, and addresses are laid out for
-   * the reader before the canvas draws them - so reading `type` and `address`
-   * off the variable would both leak `_fp0` into the tooltip and put a
-   * different address in it than the box beside it shows.
-   */
-  private variableText(variable: Variable): string {
-    const type = displayTypeOf(variable);
-    const value = this.variableValue(variable, type);
-    const target = this.pointerTarget(variable);
+  private variableText(variable: VariableModel): string {
+    const { target } = variable;
+    const points =
+      target === undefined ? '' : ` → ${target.name} = ${target.value}`;
     return (
-      `${variable.name} : ${type} = ${value}${target}\n` +
-      `${strings.atAddress} ${formatAddress(displayAddressOf(variable))}`
+      `${variable.name} : ${variable.type} = ${variable.value}${points}\n` +
+      `${strings.atAddress} ${formatAddress(variable.address)}`
     );
-  }
-
-  /**
-   * What a variable holds. A pointer is an address whichever kind it is, so it
-   * is always shown as one; a function pointer is named as well, because the
-   * address on its own says nothing about which function was chosen.
-   */
-  private variableValue(variable: Variable, type: string): string {
-    const held = variable.getValue();
-    const functionInfo = functionPointerInfoOf(variable);
-    if (functionInfo !== null && held != null && !Array.isArray(held)) {
-      // The engine stores an `int` as a boxed number, so a null callback would
-      // print as a bare `0` if this went through the generic path.
-      const address = formatAddress(Number(held.valueOf()));
-      return functionInfo.pointee === null
-        ? address
-        : `${functionInfo.pointee} (${address})`;
-    }
-    const pointerValue = displayPointerValueOf(variable);
-    if (pointerValue !== null) {
-      return formatAddress(pointerValue);
-    }
-    return this.formatValue(held, type);
-  }
-
-  /** For a pointer, the variable it points at - the arrow the canvas draws. */
-  private pointerTarget(variable: Variable): string {
-    const value = variable.getValue();
-    if (
-      typeof this.execState === 'undefined' ||
-      variable.type.indexOf('*') === -1 ||
-      typeof value !== 'number'
-    ) {
-      return '';
-    }
-    for (const stack of this.execState.getStacks()) {
-      const found = this.variableAt(stack.getVariables(), value);
-      if (found !== null) {
-        return ` → ${found.getName()} = ${this.formatValue(
-          found.getValue(),
-          found.type
-        )}`;
-      }
-    }
-    return '';
-  }
-
-  /**
-   * The variable living at an address. Array elements are Variables held in
-   * their array's value rather than in the frame, so a pointer into an array -
-   * the common case the canvas draws an arrow for - is only found by looking
-   * inside.
-   */
-  private variableAt(variables: Variable[], address: number): Variable | null {
-    for (const variable of variables) {
-      if (variable.address === address) {
-        return variable;
-      }
-      const value = variable.getValue();
-      if (Array.isArray(value)) {
-        const elements = value.filter(
-          (element: any) =>
-            element !== null &&
-            typeof element === 'object' &&
-            typeof element.getValue === 'function'
-        );
-        const found = this.variableAt(elements, address);
-        if (found !== null) {
-          return found;
-        }
-      }
-    }
-    return null;
-  }
-
-  private formatValue(value: any, type: string): string {
-    if (value === null || typeof value === 'undefined') {
-      return '?';
-    }
-    if (Array.isArray(value)) {
-      // Array elements are Variables, not raw values.
-      const shown = value
-        .slice(0, 8)
-        .map((element: any) =>
-          element !== null &&
-          typeof element === 'object' &&
-          typeof element.getValue === 'function'
-            ? this.variableValue(element, displayTypeOf(element))
-            : this.formatValue(element, '')
-        );
-      return `[${shown.join(', ')}${value.length > 8 ? ', …' : ''}]`;
-    }
-    if (typeof value === 'number' && type.indexOf('*') !== -1) {
-      return formatAddress(value);
-    }
-    if (typeof value === 'number' && type.indexOf('char') !== -1) {
-      return `'${String.fromCharCode(value)}' (${value})`;
-    }
-    return String(value);
   }
 
   /** One line of what happened, and one of why. */
