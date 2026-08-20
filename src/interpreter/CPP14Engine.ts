@@ -21,6 +21,7 @@ import {
 } from './DeclarationSpecifiers';
 import { DesignatedInitializers } from './DesignatedInitializers';
 import { FieldOffset, RecordTable } from './RecordTable';
+import { scan, ScanFailure, ScanValue } from './scanf';
 import { StructTable } from './StructTable';
 import { UnionTable } from './UnionTable';
 
@@ -64,6 +65,126 @@ interface DispatchingEngine {
 }
 
 /**
+ * What a library function is called with. `execFuncCall` applies it to the
+ * engine, whose stdin plumbing is `protected` and so absent from the type an
+ * outside caller sees.
+ */
+interface StdinEngine {
+  getStdout(): string;
+  getStdin(): string;
+  clearStdin(): void;
+  stdin(text: string): void;
+  stdout(text: string): void;
+  setIsWaitingForStdin(enable: boolean): boolean;
+  readonly currentScope: Scope;
+}
+
+/**
+ * Writes one scanned value where its argument points. `%c` is the one
+ * conversion that writes no terminator: it reads the characters the width asks
+ * for and nothing else, so `char c; scanf("%c", &c)` leaves the byte after `c`
+ * alone.
+ */
+const storeScanValue = (
+  scope: Scope,
+  address: number,
+  value: ScanValue
+): void => {
+  if (value.kind === 'int' || value.kind === 'float') {
+    scope.set(address, value.value);
+    return;
+  }
+  const bytes = CPP14Engine.strToBytes(value.text);
+  if (value.kind === 'char') {
+    bytes.pop();
+  }
+  bytes.forEach((byte, i) => scope.set(address + i, byte));
+};
+
+/**
+ * What a failed conversion says for itself.
+ *
+ * The text is here rather than in `strings.ts` because it is not interface
+ * chrome: the interpreter writes it into the program's own output, where the
+ * `printf`s around it are, which is the only place it makes sense of what just
+ * happened.
+ */
+const scanFailureNote = (failure: ScanFailure): string =>
+  `[scanf] ${failure.directive} did not match ${failure.found} - it stays in` +
+  ` the input, so the next read starts there.\n`;
+
+/**
+ * `scanf`, as C defines it: the conversions in `scanf.ts` over an input that
+ * arrives a line at a time.
+ *
+ * A library function is a generator whose first resume delivers the call's
+ * arguments, and yielding with the waiting flag set is how it parks the
+ * program until the console sends a line. The scan yields whenever it wants a
+ * character that has not been typed yet, so one call can park more than once -
+ * `scanf("%d %d", &a, &b)` answered one number at a time parks twice.
+ *
+ * There is no EOF to report. The standard input of a program running in this
+ * page has no end: a read that cannot be satisfied waits instead of failing,
+ * so the return value is only ever the number of conversions that were
+ * assigned.
+ */
+const plivetScanf = function* (this: StdinEngine): Generator<any, number, any> {
+  // `execFuncCall` resumes a library generator with the call's arguments.
+  const args = yield;
+  if (!Array.isArray(args) || args.length === 0) {
+    return 0;
+  }
+  const raw = args[0];
+  const format = typeof raw === 'string' ? raw : Engine.bytesToStr(raw);
+  // The engine keeps escape sequences as the two characters they are written
+  // with, exactly as it does for the format `printf` is given.
+  const scanner = scan(CPP14Engine.escapeText(format), this.getStdin());
+  this.clearStdin();
+  let step = scanner.next('');
+  while (!step.done) {
+    this.setIsWaitingForStdin(true);
+    yield;
+    const line = this.getStdin();
+    this.clearStdin();
+    this.setIsWaitingForStdin(false);
+    // A terminal echoes what was typed at it, and the console does not write
+    // the line into the transcript itself. The newline is the Enter that sent
+    // it, and it is what ends the line for the scan too.
+    this.stdout(line + '\n');
+    step = scanner.next(line + '\n');
+  }
+
+  const { values, rest, failure } = step.value;
+  // Whatever the conversions did not want is the next read's input, including
+  // the character a failed conversion refused to convert.
+  this.stdin(rest);
+  if (failure !== undefined && !failure.suppressed) {
+    const note = scanFailureNote(failure);
+    // `while (scanf("%d", &n) != 1);` fails identically on every turn, and one
+    // note per turn would bury the program's own output. Saying it again only
+    // once something else has been printed keeps it to the one that matters.
+    if (!this.getStdout().endsWith(note)) {
+      this.stdout(note);
+    }
+  }
+
+  const addresses = args.slice(1);
+  let assigned = 0;
+  values.forEach((value, i) => {
+    if (addresses.length <= i) {
+      return;
+    }
+    storeScanValue(this.currentScope, addresses[i], value);
+    if (value.counted) {
+      assigned += 1;
+    }
+  });
+  return assigned;
+};
+
+/**
+ * The two standard-library functions PLIVET replaces, and why.
+ *
  * `printf` resolves `%s` only for an address whose type in `typeOnMemory` names
  * char - that is, a `char*` variable. A string literal is passed as the byte
  * array the engine represents it with, and agh.sprintf then formats the array
@@ -75,6 +196,10 @@ interface DispatchingEngine {
  * The fix wraps the library function rather than restating it: the byte arrays
  * are decoded to strings before the original runs. Argument 0 is left alone -
  * it is the format string, which the original decodes itself.
+ *
+ * `scanf` is replaced outright rather than wrapped, by `plivetScanf` below:
+ * the stock one hands the read to the `scanf` npm package, which has no notion
+ * of a conversion that fails. See `scanf.ts`.
  */
 export class PlivetCPP14Engine extends CPP14Engine {
   private structs = new StructTable();
@@ -191,7 +316,7 @@ export class PlivetCPP14Engine extends CPP14Engine {
         );
         const descriptor = allocation.descriptors[index];
         if (typeof descriptor === 'undefined') {
-          throw new UniRuntimeError('aggregate array index out of bounds');
+          this.refuse('aggregate array index out of bounds');
         }
         return descriptor;
       }
@@ -228,9 +353,7 @@ export class PlivetCPP14Engine extends CPP14Engine {
       const address = yield* this.getAddress(uniOp.expr, scope);
       const info = this.declarationInfoByAddress.get(address);
       if (info !== undefined && info.region === 'register') {
-        throw new UniRuntimeError(
-          'cannot take the address of a register variable'
-        );
+        this.refuse('cannot take the address of a register variable');
       }
       return address;
     }
@@ -563,11 +686,12 @@ export class PlivetCPP14Engine extends CPP14Engine {
 
   protected execAssign(address: number, value: any, scope: Scope): any {
     const info = this.declarationInfoByAddress.get(address);
-    if (
-      info !== undefined &&
-      this.constBindsObject(info, scope.getRawType(address))
-    ) {
-      throw new UniRuntimeError('assignment of a read-only variable');
+    const type = scope.getRawType(address);
+    if (info !== undefined && this.constBindsObject(info, type)) {
+      this.refuse('assignment of a read-only variable');
+    }
+    if (type.indexOf('*') === -1 && this.tableFor(type) !== null) {
+      return this.copyRecord(type, address, value, scope);
     }
     return super.execAssign(address, value, scope);
   }
@@ -589,6 +713,7 @@ export class PlivetCPP14Engine extends CPP14Engine {
       return original.apply(this, args);
     };
     global.setTop('printf', wrapped, 'FUNCTION');
+    global.setTop('scanf', plivetScanf, 'FUNCTION');
   }
 
   /** Allocates each element with the same descriptor/member shape as a scalar. */
@@ -629,6 +754,115 @@ export class PlivetCPP14Engine extends CPP14Engine {
     this.recordArrays.set(handle, allocation);
     this.recordArrays.set(descriptors[0], allocation);
     return descriptors[0];
+  }
+
+  /**
+   * Assigns one record to another the way C does: member by member, into the
+   * storage the destination already owns.
+   *
+   * The inherited path copies each member's stored word. That is right for a
+   * scalar and wrong for a member that is itself a record, because the word
+   * held there is the address of that member's own block - copying it hands
+   * both records the same nested object, and a later write through one shows
+   * up in the other. Recursing gives a nested member the same treatment as the
+   * whole record. A pointer member is still copied as the word it is, which is
+   * what C means by a shallow copy.
+   */
+  private copyRecord(
+    type: string,
+    descriptor: number,
+    source: any,
+    scope: Scope
+  ): any {
+    const table = this.tableFor(type)!;
+    const layout = table.layoutOf(type);
+    const members = table.membersOf(type);
+    const target = scope.getValue(descriptor);
+    if (
+      layout === null ||
+      members === null ||
+      typeof target !== 'number' ||
+      typeof source !== 'number'
+    ) {
+      // Nothing to walk: leave the write to the inherited path rather than
+      // computing member addresses from a value that is not one.
+      return super.execAssign(descriptor, source, scope);
+    }
+    // A record with a const member is not assignable as a whole, so refuse
+    // before the first member moves - half a copy is worse than none.
+    const readOnly = this.readOnlyMemberOf(type, target, scope);
+    if (readOnly !== null) {
+      this.refuse(
+        `assignment of a record with the read-only member ${readOnly}`
+      );
+    }
+    for (const member of members) {
+      const field = layout.get(member.name);
+      if (typeof field === 'undefined') {
+        continue;
+      }
+      const destination = target + field[0];
+      const origin = source + field[0];
+      const nested =
+        member.type.indexOf('*') === -1 ? this.tableFor(member.type) : null;
+      if (nested !== null) {
+        this.copyRecord(
+          member.type,
+          destination,
+          scope.getValue(origin),
+          scope
+        );
+        continue;
+      }
+      if (scope.objectOnMemory.has(origin)) {
+        scope.objectOnMemory.set(destination, scope.getValue(origin));
+      }
+    }
+    return target;
+  }
+
+  /**
+   * The first const member the record holds, named as the program writes it,
+   * or null if every member is assignable. Members are checked here rather
+   * than in `execAssign` because a whole-record assignment never reaches it
+   * for a member: the copy writes their addresses directly.
+   */
+  private readOnlyMemberOf(
+    type: string,
+    memberBase: number,
+    scope: Scope
+  ): string | null {
+    const table = this.tableFor(type)!;
+    const layout = table.layoutOf(type);
+    const members = table.membersOf(type);
+    if (layout === null || members === null) {
+      return null;
+    }
+    for (const member of members) {
+      const field = layout.get(member.name);
+      if (typeof field === 'undefined') {
+        continue;
+      }
+      const address = memberBase + field[0];
+      const info = this.declarationInfoByAddress.get(address);
+      if (info !== undefined && this.constBindsObject(info, member.type)) {
+        return member.name;
+      }
+      const nested =
+        member.type.indexOf('*') === -1 ? this.tableFor(member.type) : null;
+      if (nested === null) {
+        continue;
+      }
+      const nestedBase = scope.getValue(address);
+      if (typeof nestedBase !== 'number') {
+        continue;
+      }
+      const found = this.readOnlyMemberOf(member.type, nestedBase, scope);
+      if (found !== null) {
+        return `${member.name}.${found}`;
+      }
+    }
+    return null;
   }
 
   /** Writes one record and recursively materialises record-valued members. */
@@ -702,6 +936,45 @@ export class PlivetCPP14Engine extends CPP14Engine {
     const variable = new Variable(type, name, null, descriptor, depth);
     (variable as any).value = fields;
     return variable;
+  }
+
+  /**
+   * Refuses what C refuses, where the user is looking.
+   *
+   * `Engine.execFunc` swallows every exception a statement throws, so a bare
+   * throw ends the program with nothing to show for it: the output stops, the
+   * canvas holds the last state, and nothing says which line the program died
+   * on or why. Writing the reason to the console before throwing is what turns
+   * that silence into a diagnostic. The throw still ends the run - a program
+   * that has done something C does not allow has no defined behaviour to
+   * continue with - and the console keeps everything printed up to that point.
+   */
+  private refuse(message: string): never {
+    const transcript = this.getStdout();
+    const separator =
+      transcript === '' || transcript.endsWith('\n') ? '' : '\n';
+    const line = this.currentLine();
+    const where = line === null ? '' : ` on line ${line}`;
+    this.stdout(`${separator}PLIVET stopped the program${where}: ${message}\n`);
+    throw new UniRuntimeError(message);
+  }
+
+  /**
+   * The source line of the statement being executed, as the user typed it.
+   *
+   * The state's *current* expression is the one that last produced a value,
+   * which by the time a statement is refused is the statement before it. The
+   * next expression is the one the engine stopped at to run, and that is the
+   * one to blame.
+   */
+  private currentLine(): number | null {
+    const expr =
+      this.currentState.getNextExpr() ?? this.currentState.getCurrentExpr();
+    const range = typeof expr === 'undefined' ? null : expr.codeRange;
+    if (range === null || typeof range === 'undefined') {
+      return null;
+    }
+    return range.begin.y;
   }
 
   private tableFor(name: string): RecordTable | null {

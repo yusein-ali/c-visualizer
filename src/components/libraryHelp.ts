@@ -21,7 +21,8 @@ const entries: { [name: string]: LibraryEntry } = {
   },
   scanf: {
     signature: 'int scanf(const char* format, ...)',
-    description: 'reads formatted input; the program waits for a line',
+    description:
+      'reads formatted input; returns how many values it converted, and stops at the first one it cannot',
   },
   gets: {
     signature: 'char* gets(char* buffer)',

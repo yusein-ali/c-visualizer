@@ -608,9 +608,12 @@ it, and can be taken in any order or dropped.
    wrong rather than after the run: division by zero, an index past the end of
    an array, a dereference of a pointer with no target, a read of uninitialised
    memory. The interpreter detects most of these already and reports them as
-   console text with no position attached, which is why they teach so little;
-   carry the position through the Worker alongside the message. Cleared on
-   restart, like every other debug decoration.
+   console text, which is why they teach so little. PLIVET's own refusals -
+   `PlivetCPP14Engine.refuse` - already name the line they stopped on in that
+   text, so what is left here is the surface rather than the position: raise
+   them through the lint API and carry the position through the Worker
+   alongside the message. Cleared on restart, like every other debug
+   decoration.
 4. **A tooltip for every construct, not only for declarations.**
    `constructText` in `src/components/hoverText.ts` formats five kinds richly -
    `variableDec`, `typeDec`, `enumerator`, `recordField`, `functionDec` - and

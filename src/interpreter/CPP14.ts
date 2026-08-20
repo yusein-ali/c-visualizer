@@ -22,8 +22,9 @@ import { UnionTable } from './UnionTable';
 
 /**
  * PLIVET's C interpreter: the stock mapper and engine behaviour, with the
- * preprocessor `unicoen.ts` does not have (`preprocess.ts`) and a `printf` that
- * can format a string literal (`CPP14Engine.ts`).
+ * preprocessor `unicoen.ts` does not have (`preprocess.ts`), a `printf` that
+ * can format a string literal, and a `scanf` that fails the way C's does
+ * (`CPP14Engine.ts`, `scanf.ts`).
  *
  * It extends `Interpreter` rather than `CPP14Interpreter` because the engine is
  * `protected readonly` and built in that subclass's constructor - passing our
