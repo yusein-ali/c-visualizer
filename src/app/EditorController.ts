@@ -195,16 +195,16 @@ export class EditorController {
       this.editor.debug.showStep(this.editor.view, null);
       return;
     }
-    this.editor.debug.showStep(
-      this.editor.view,
-      rangeOf(
+    this.editor.debug.showStep(this.editor.view, {
+      range: rangeOf(
         this.editor.view.state.doc,
         codeRange.begin.y,
         codeRange.begin.x,
         codeRange.end.y,
         codeRange.end.x
-      )
-    );
+      ),
+      values: model.inlineValues,
+    });
   }
 
   setExpansions(expansions: Expansion[]) {

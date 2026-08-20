@@ -216,6 +216,23 @@ export const debugTheme = EditorView.baseTheme({
     backgroundColor: 'var(--plivet-step-range-bg, rgba(255, 179, 0, 0.45))',
     borderRadius: '2px',
   },
+  // The values printed after the current statement. They are an annotation,
+  // not program text, so they are set apart from it rather than competing with
+  // the syntax colouring beside them.
+  '.plivet-inline-values': {
+    marginLeft: '2ch',
+    padding: '0 0.4em',
+    borderRadius: '3px',
+    fontStyle: 'italic',
+    color: 'var(--plivet-inline-value-color, #5a6b3b)',
+    backgroundColor: 'var(--plivet-inline-value-bg, rgba(120, 150, 70, 0.14))',
+    // A long line must not be made longer by the annotation on it.
+    whiteSpace: 'pre',
+  },
+  '&dark .plivet-inline-values': {
+    color: 'var(--plivet-inline-value-color, #b7c98a)',
+    backgroundColor: 'var(--plivet-inline-value-bg, rgba(183, 201, 138, 0.14))',
+  },
   '.plivet-error-line': {
     backgroundColor: 'var(--plivet-error-line-bg, #f2dede)',
   },

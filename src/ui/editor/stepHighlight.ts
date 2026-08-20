@@ -9,18 +9,37 @@ import { SourceRange } from './positions';
  * without losing sight of the current expression.
  */
 
-export const setStepHighlight = StateEffect.define<SourceRange | null>();
+/** A variable the current statement reads or assigns, and what it holds. */
+export interface InlineValue {
+  name: string;
+  display: string;
+}
+
+/**
+ * Everything one step says about the line it stopped on: where the statement
+ * is, and what its variables hold going into it. The two travel on one effect
+ * because they are one fact - the values belong to that statement and to no
+ * other - and a reader must never see the marker on one line and the values
+ * of another.
+ */
+export interface StepMark {
+  range: SourceRange;
+  values: InlineValue[];
+}
+
+export const setStepHighlight = StateEffect.define<StepMark | null>();
 
 const stepLine = Decoration.line({ class: 'plivet-step-line' });
 const stepRange = Decoration.mark({ class: 'plivet-step-range' });
 
 const decorationsFor = (
   state: EditorState,
-  range: SourceRange | null
+  mark: StepMark | null
 ): DecorationSet => {
-  if (range === null) {
+  if (mark === null) {
     return Decoration.none;
   }
+  const { range } = mark;
   const decorations = [stepLine.range(state.doc.lineAt(range.from).from)];
   if (range.to > range.from) {
     decorations.push(stepRange.range(range.from, range.to));
@@ -43,17 +62,17 @@ export const stepHighlightField = StateField.define<DecorationSet>({
 });
 
 /**
- * Shows the range and brings it into view. The scroll is part of the same
+ * Shows the step and brings it into view. The scroll is part of the same
  * transaction so the editor never paints the new highlight off-screen first.
  */
 export const showStep = (
   view: EditorView,
-  range: SourceRange | null,
+  mark: StepMark | null,
   scroll: boolean = true
 ): void => {
-  const effects: StateEffect<unknown>[] = [setStepHighlight.of(range)];
-  if (range !== null && scroll) {
-    effects.push(EditorView.scrollIntoView(range.from, { y: 'center' }));
+  const effects: StateEffect<unknown>[] = [setStepHighlight.of(mark)];
+  if (mark !== null && scroll) {
+    effects.push(EditorView.scrollIntoView(mark.range.from, { y: 'center' }));
   }
   view.dispatch({ effects });
 };

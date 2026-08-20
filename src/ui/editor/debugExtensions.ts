@@ -17,8 +17,12 @@ import {
   showDiagnostics as markDiagnostics,
 } from './diagnostics';
 import { expansionField, showExpansions as markExpansions } from './expansions';
-import { SourceRange } from './positions';
-import { showStep as markStep, stepHighlightField } from './stepHighlight';
+import { inlineValueField } from './inlineValues';
+import {
+  showStep as markStep,
+  StepMark,
+  stepHighlightField,
+} from './stepHighlight';
 import { debugTheme } from './theme';
 import { HoverText, plivetHoverTooltip } from './tooltip';
 
@@ -47,6 +51,7 @@ export class DebugExtensions {
       debugTheme,
       breakpointGutter,
       stepHighlightField,
+      inlineValueField,
       expansionField,
       errorLineField,
       this.readOnly.of(DebugExtensions.readOnlyExtension(false)),
@@ -65,8 +70,12 @@ export class DebugExtensions {
     applyBreakpoints(view, rows);
   }
 
-  showStep(view: EditorView, range: SourceRange | null, scroll = true): void {
-    markStep(view, range, scroll);
+  /**
+   * Where execution stands, and what that statement's variables hold. Both
+   * arrive together because they are one fact about one step.
+   */
+  showStep(view: EditorView, mark: StepMark | null, scroll = true): void {
+    markStep(view, mark, scroll);
   }
 
   showExpansions(view: EditorView, expansions: Expansion[]): void {

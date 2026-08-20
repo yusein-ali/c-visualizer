@@ -69,6 +69,9 @@ export class PlivetShell {
   readonly main: HTMLDivElement;
   private readonly side: HTMLDivElement;
   private readonly splitters: Splitter[];
+  private readonly observer: ResizeObserver | null;
+  /** The width the last drag asked for, before any clamping. */
+  private wanted: number | null = null;
 
   constructor(parent: HTMLElement, options: PlivetShellOptions = {}) {
     this.root = document.createElement('div');
@@ -106,7 +109,7 @@ export class PlivetShell {
       label: strings.resizeColumns,
       size: () => this.side.getBoundingClientRect().width,
       resize: (width) => this.setSideWidth(width),
-      reset: () => this.root.style.removeProperty(SIDE_WIDTH),
+      reset: () => this.clearSideWidth(),
     });
 
     this.main = document.createElement('div');
@@ -134,6 +137,18 @@ export class PlivetShell {
     );
     parent.appendChild(this.root);
 
+    // A width dragged at one window size is still a width at the next one, and
+    // a canvas the window has squeezed out is not what the reader asked for.
+    // What a drag stores is a preference; what the shell draws is that
+    // preference clamped to the room there is now.
+    this.observer =
+      typeof ResizeObserver === 'undefined'
+        ? null
+        : new ResizeObserver(() => this.applySideWidth());
+    if (this.observer !== null) {
+      this.observer.observe(this.root);
+    }
+
     this.setDark(options.dark === true);
   }
 
@@ -143,12 +158,8 @@ export class PlivetShell {
 
   /** How wide the editor column is drawn. The canvas takes what is left. */
   setSideWidth(width: number): void {
-    const total = this.root.getBoundingClientRect().width;
-    const most = Math.max(MIN_SIDE, total === 0 ? width : total - MIN_MAIN);
-    this.root.style.setProperty(
-      SIDE_WIDTH,
-      `${Math.round(Math.min(Math.max(width, MIN_SIDE), most))}px`
-    );
+    this.wanted = width;
+    this.applySideWidth();
   }
 
   /** How tall the code editor is drawn, above the console. */
@@ -172,16 +183,46 @@ export class PlivetShell {
 
   /** Back to the proportions the stylesheet opens with. */
   resetLayout(): void {
-    for (const property of [SIDE_WIDTH, EDITOR_HEIGHT, CANVAS_HEIGHT]) {
+    this.clearSideWidth();
+    for (const property of [EDITOR_HEIGHT, CANVAS_HEIGHT]) {
       this.root.style.removeProperty(property);
     }
   }
 
   destroy(): void {
+    if (this.observer !== null) {
+      this.observer.disconnect();
+    }
     for (const splitter of this.splitters) {
       splitter.destroy();
     }
     this.root.remove();
+  }
+
+  /**
+   * The width that was asked for, against the width there is. What is stored
+   * is the request rather than what was drawn from it, so a window that
+   * narrows and widens again gives the column back rather than keeping the
+   * squeezed width it was clamped to on the way past.
+   */
+  private applySideWidth(): void {
+    if (this.wanted === null) {
+      return;
+    }
+    const total = this.root.getBoundingClientRect().width;
+    const most = Math.max(
+      MIN_SIDE,
+      total === 0 ? this.wanted : total - MIN_MAIN
+    );
+    this.root.style.setProperty(
+      SIDE_WIDTH,
+      `${Math.round(Math.min(Math.max(this.wanted, MIN_SIDE), most))}px`
+    );
+  }
+
+  private clearSideWidth(): void {
+    this.wanted = null;
+    this.root.style.removeProperty(SIDE_WIDTH);
   }
 
   private footer(options: PlivetShellOptions): HTMLElement {

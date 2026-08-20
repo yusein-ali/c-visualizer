@@ -1,5 +1,5 @@
 import { EditorState } from '@codemirror/state';
-import { EditorView } from '@codemirror/view';
+import { EditorView, WidgetType } from '@codemirror/view';
 import {
   breakpointField,
   breakpointRows,
@@ -19,9 +19,11 @@ import {
   startOfRow,
 } from '../src/ui/editor/positions';
 import {
+  InlineValue,
   setStepHighlight,
   stepHighlightField,
 } from '../src/ui/editor/stepHighlight';
+import { inlineValueField } from '../src/ui/editor/inlineValues';
 import { DebugExtensions, attachDebugExtensions } from '../src/ui/editor';
 import { Expansion } from '../src/interpreter/Expansion';
 
@@ -29,6 +31,20 @@ const doc = ['int main() {', '  int n = 0;', '  return n;', '}'].join('\n');
 
 const stateWith = (...extensions: any[]) =>
   EditorState.create({ doc, extensions });
+
+/** The one widget a decoration set holds, for asking what it says. */
+const widgetOf = (state: EditorState): WidgetType | null => {
+  let found: WidgetType | null = null;
+  state
+    .field(inlineValueField)
+    .between(0, state.doc.length, (_from, _to, decoration) => {
+      const { widget } = decoration.spec;
+      if (widget instanceof WidgetType) {
+        found = widget;
+      }
+    });
+  return found;
+};
 
 describe('position conversion', () => {
   it('turns a one-based line and zero-based column into an offset', () => {
@@ -145,12 +161,73 @@ describe('step highlight', () => {
   it('marks the line and the expression, and clears on null', () => {
     const start = stateWith(stepHighlightField);
     const range = rangeOf(start.doc, 3, 2, 3, 10);
-    const shown = start.update({ effects: setStepHighlight.of(range) }).state;
+    const shown = start.update({
+      effects: setStepHighlight.of({ range, values: [] }),
+    }).state;
     // One line decoration and one mark over the expression.
     expect(shown.field(stepHighlightField).size).toBe(2);
 
     const cleared = shown.update({ effects: setStepHighlight.of(null) }).state;
     expect(cleared.field(stepHighlightField).size).toBe(0);
+  });
+});
+
+describe('inline values', () => {
+  const markWith = (state: EditorState, values: InlineValue[]) => ({
+    range: rangeOf(state.doc, 3, 2, 3, 10),
+    values,
+  });
+
+  it('puts one widget at the end of the current statement line', () => {
+    const start = stateWith(inlineValueField);
+    const shown = start.update({
+      effects: setStepHighlight.of(
+        markWith(start, [{ name: 'n', display: '0' }])
+      ),
+    }).state;
+    const decorations = shown.field(inlineValueField);
+    expect(decorations.size).toBe(1);
+    let at = -1;
+    decorations.between(0, shown.doc.length, (from) => {
+      at = from;
+    });
+    expect(at).toBe(shown.doc.line(3).to);
+  });
+
+  it('says every variable of the statement, name and value', () => {
+    const start = stateWith(inlineValueField);
+    const shown = start.update({
+      effects: setStepHighlight.of(
+        markWith(start, [
+          { name: 'n', display: '3' },
+          { name: 'sum', display: '10' },
+        ])
+      ),
+    }).state;
+    const widget = widgetOf(shown);
+    expect(widget).not.toBeNull();
+    const view = new EditorView({ state: shown });
+    expect(widget!.toDOM(view).textContent).toBe('n = 3, sum = 10');
+    view.destroy();
+  });
+
+  it('shows nothing for a statement whose variables are all out of scope', () => {
+    const start = stateWith(inlineValueField);
+    const shown = start.update({
+      effects: setStepHighlight.of(markWith(start, [])),
+    }).state;
+    expect(shown.field(inlineValueField).size).toBe(0);
+  });
+
+  it('leaves with the step marker when the session stops', () => {
+    const start = stateWith(inlineValueField);
+    const shown = start.update({
+      effects: setStepHighlight.of(
+        markWith(start, [{ name: 'n', display: '0' }])
+      ),
+    }).state;
+    const cleared = shown.update({ effects: setStepHighlight.of(null) }).state;
+    expect(cleared.field(inlineValueField).size).toBe(0);
   });
 });
 

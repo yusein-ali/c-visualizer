@@ -37,6 +37,8 @@ export class PlivetGraph {
   private readonly folds = new FoldState();
   private readonly view = new ViewOptions();
   private readonly panel: ViewPanelHandle;
+  /** The window the drawing scrolls inside, below the bar. */
+  private readonly viewport: HTMLDivElement;
   private readonly paperHost: HTMLDivElement;
   /** What the toolbar says the drawing is scaled to. */
   private readonly zoomLabel: HTMLSpanElement;
@@ -75,9 +77,16 @@ export class PlivetGraph {
     this.zoomLabel.setAttribute('role', 'status');
     this.container.classList.add('plivet-graph');
     this.container.appendChild(this.toolbar());
+    // The bar is the frame of the window rather than something floating in
+    // it: the paper scrolls inside the box below it, so the bar - and the
+    // panel hanging off its right-hand end - is always over the view, at
+    // whatever the reader has scrolled the drawing to.
+    this.viewport = document.createElement('div');
+    this.viewport.className = 'plivet-graph__view';
     this.paperHost = document.createElement('div');
     this.paperHost.className = 'plivet-graph__paper';
-    this.container.appendChild(this.paperHost);
+    this.viewport.appendChild(this.paperHost);
+    this.container.appendChild(this.viewport);
 
     this.graph = new dia.Graph({}, { cellNamespace });
     this.paper = new dia.Paper({
@@ -411,7 +420,7 @@ export class PlivetGraph {
     );
     const height = Math.max(480, (contentBottom + 80) * this.scale);
     const width = Math.max(
-      this.container.clientWidth,
+      this.viewport.clientWidth,
       contentRight * this.scale
     );
     this.paper.setDimensions(width, height);

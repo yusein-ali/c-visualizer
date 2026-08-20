@@ -223,6 +223,24 @@ export interface VariableModel {
   target?: { name: string; value: string };
 }
 
+/**
+ * A variable the statement about to run reads or assigns, and what it holds
+ * going into that statement. The editor prints these at the end of the line it
+ * has stopped on, which is the one place a reader is already looking.
+ */
+export interface InlineValueModel {
+  name: string;
+  /** The value, spelled as the tooltip spells it. */
+  display: string;
+}
+
+/**
+ * How many of them the line is allowed. A statement that mentions more objects
+ * than this has stopped being readable at the end of a line, and the canvas is
+ * the thing that shows a whole frame.
+ */
+export const INLINE_VALUE_LIMIT = 6;
+
 export interface StepModel {
   stacks: StackModel[];
   pointers: PointerModel[];
@@ -232,6 +250,8 @@ export interface StepModel {
   expression: ExpressionModel | null;
   /** Every variable in scope, innermost frame last. */
   variables: VariableModel[];
+  /** What the statement about to run reads or assigns, in source order. */
+  inlineValues: InlineValueModel[];
   /**
    * Where the next statement to execute is, which is what the editor
    * highlights and what a breakpoint is compared against.
@@ -246,6 +266,7 @@ export const emptyStepModel = (): StepModel => ({
   functions: [],
   expression: null,
   variables: [],
+  inlineValues: [],
   codeRange: null,
 });
 

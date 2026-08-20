@@ -4,6 +4,7 @@ import { Variable } from 'unicoen.ts/dist/interpreter/Engine/Variable';
 import { RuntimeDeclarationInfo } from '../interpreter/DeclarationSpecifiers';
 import type { RuntimeStringLiteral } from '../interpreter/RuntimeTypeInfo';
 import { expressionTraceOf } from '../interpreter/ExpressionTrace';
+import { statementNames } from '../interpreter/StatementNames';
 import {
   declarationInfoOf,
   displayAddressOf,
@@ -21,6 +22,8 @@ import {
   ExpressionModel,
   ExpressionNodeModel,
   FunctionModel,
+  INLINE_VALUE_LIMIT,
+  InlineValueModel,
   MEMORY_START_ADDRESSES,
   MemoryRegion,
   MemoryGroupModel,
@@ -591,6 +594,43 @@ function withOperandValues(
   return { ...expression, root: fill(expression.root) };
 }
 
+/**
+ * What the line the editor is stopped on is about to work with.
+ *
+ * The names come from the statement, in the order it mentions them, and the
+ * values from the frames as they stand - so this is the same reading the
+ * tooltip gives, printed without being asked for. A name that belongs to no
+ * object in scope is dropped rather than shown as unknown: a call to `printf`
+ * mentions `printf`, and the reader is not asking about it.
+ */
+function inlineValuesFor(
+  execState: ExecState,
+  variables: VariableModel[]
+): InlineValueModel[] {
+  // Innermost frame last, so a name declared twice resolves to the frame being
+  // executed - the same rule the tooltip reads the list backwards for.
+  const scope = new Map<string, string>();
+  for (const variable of variables) {
+    scope.set(variable.name, variable.value);
+  }
+  const values: InlineValueModel[] = [];
+  const seen = new Set<string>();
+  for (const name of statementNames(execState.getNextExpr())) {
+    if (seen.has(name)) {
+      continue;
+    }
+    seen.add(name);
+    const held = scope.get(name);
+    if (typeof held !== 'undefined') {
+      values.push({ name, display: held });
+    }
+    if (values.length === INLINE_VALUE_LIMIT) {
+      break;
+    }
+  }
+  return values;
+}
+
 function codeRangeOf(execState: ExecState): CodeRangeModel | null {
   const { codeRange } = execState.getNextExpr();
   if (!codeRange) {
@@ -636,6 +676,7 @@ export function extractModel(execState?: ExecState | null): StepModel {
     functions,
     expression: withOperandValues(expressionTraceOf(execState), variables),
     variables,
+    inlineValues: inlineValuesFor(execState, variables),
     codeRange: codeRangeOf(execState),
   };
 }

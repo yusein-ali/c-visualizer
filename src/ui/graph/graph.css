@@ -1,25 +1,42 @@
 /*
  * The canvas is a window onto the drawing, not the drawing itself: the paper
- * is as tall as the step needs and this scrolls it, which is also what makes
- * the toolbar's `position: sticky` stick to something.
+ * is as tall and as wide as the step needs, and the box below the bar scrolls
+ * it.
  *
- * How tall that window is, is the host's to say. `--plivet-graph-height` is
+ * The bar is the frame of that window rather than a thing floating in it. It
+ * was `position: sticky` inside the scrolling box, which held it to the top of
+ * the view but not to the left of it: a drawing wider than the box carried the
+ * bar - and the panel that hangs off its right-hand end - sideways out of
+ * sight, and the panel that did stay was clipped at the edge of the box it was
+ * in. Outside the scroll box it needs no rule to stay where it is, and the
+ * panel opens over the drawing rather than inside it.
+ *
+ * How tall the window is, is the host's to say. `--plivet-graph-height` is
  * what the handle under the canvas sets in the shell; unset - embedded in a
  * page that has never heard of a handle - this is the 95vh it always was.
  */
 .plivet-graph {
+  display: flex;
+  flex-direction: column;
   width: 100%;
   height: var(--plivet-graph-height, 95vh);
   min-height: 200px;
   border: 1px solid #000;
-  overflow: auto;
   background: #fff;
 }
 
+/* The scrolling window. `min-height: 0` is what lets it shrink to the box
+   rather than to the paper it holds. */
+.plivet-graph__view {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
 .plivet-graph__toolbar {
-  position: sticky;
-  top: 0;
+  position: relative;
   z-index: 10;
+  flex: none;
   display: flex;
   flex-wrap: wrap;
   align-items: center;

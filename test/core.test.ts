@@ -146,6 +146,7 @@ describe('extractModel', () => {
       functions: [],
       expression: null,
       variables: [],
+      inlineValues: [],
       codeRange: null,
     });
     expect(extractModel(undefined).stacks).toEqual([]);
@@ -774,5 +775,66 @@ describe('values as their type can hold them', () => {
     expect(narrowToType(4096, 'int *')).toBeNull();
     expect(narrowToType(4096, 'struct Node')).toBeNull();
     expect(narrowToType(Number.NaN, 'int')).toBeNull();
+  });
+});
+
+describe('inline values', () => {
+  const program = `int main(void) {
+  int sum = 0;
+  int a[3] = {5, 6, 7};
+  for (int i = 0; i < 3; i++) {
+    sum += a[i];
+  }
+  printf("%d\\n", sum);
+  return sum;
+}
+`;
+  const states = execute(program);
+
+  /** Every model stopped on the statement that begins on `line`. */
+  const modelsOnLine = (line: number): StepModel[] =>
+    states
+      .map((state) => extractModel(state))
+      .filter(
+        (model) => model.codeRange !== null && model.codeRange.begin.y === line
+      );
+
+  it('names what the statement about to run reads, with what it holds', () => {
+    const models = modelsOnLine(5);
+    expect(0 < models.length).toBe(true);
+    const first = models[0];
+    expect(first.inlineValues.map((value) => value.name)).toEqual([
+      'sum',
+      'a',
+      'i',
+    ]);
+    expect(first.inlineValues[0].display).toBe('0');
+    expect(first.inlineValues[2].display).toBe('0');
+  });
+
+  it('follows the values as the statement runs again', () => {
+    const models = modelsOnLine(5);
+    const sums = models.map(
+      (model) =>
+        model.inlineValues.filter((value) => value.name === 'sum')[0].display
+    );
+    // The three iterations add 5, 6 and 7 to a sum that starts at nothing.
+    expect(sums).toEqual(['0', '5', '11']);
+  });
+
+  it('says nothing about the function being called, only its arguments', () => {
+    const models = modelsOnLine(7);
+    expect(0 < models.length).toBe(true);
+    expect(models[0].inlineValues.map((value) => value.name)).toEqual(['sum']);
+  });
+
+  it('leaves out a name with no object behind it', () => {
+    for (const model of states.map((state) => extractModel(state))) {
+      for (const value of model.inlineValues) {
+        expect(model.variables.some((one) => one.name === value.name)).toBe(
+          true
+        );
+      }
+    }
   });
 });

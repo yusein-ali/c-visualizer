@@ -214,6 +214,31 @@ describe('the handles between the boxes', () => {
     expect(shell.root.style.getPropertyValue('--plivet-side-width')).toBe('');
   });
 
+  it('keeps the width that was asked for when the window squeezes it', () => {
+    const parent = parentOf();
+    const shell = new PlivetShell(parent);
+    measures(shell.root, { width: 1400 });
+    shell.setSideWidth(900);
+    expect(shell.root.style.getPropertyValue('--plivet-side-width')).toBe(
+      '900px'
+    );
+
+    // The window narrows: the canvas keeps its floor, and the column gives.
+    measures(shell.root, { width: 800 });
+    shell.setSideWidth(900);
+    expect(shell.root.style.getPropertyValue('--plivet-side-width')).toBe(
+      '520px'
+    );
+
+    // And widens again: what comes back is what was asked for, not what the
+    // narrow window clamped it to.
+    measures(shell.root, { width: 1400 });
+    shell.setSideWidth(900);
+    expect(shell.root.style.getPropertyValue('--plivet-side-width')).toBe(
+      '900px'
+    );
+  });
+
   it('is a separator the keyboard can reach and a reader can name', () => {
     const parent = parentOf();
     new PlivetShell(parent);

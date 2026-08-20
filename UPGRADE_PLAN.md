@@ -714,7 +714,13 @@ protocol in `baseline/README.md` before declaring the exit criterion met.
     beside them, announced as the step counter is and for the same reason:
     pressing a magnifier changes nothing else a reader who is not watching the
     drawing would notice. The disclosure keeps the right-hand end of the bar,
-    because the panel hangs from that edge. Only the icons are shared -
+    because the panel hangs from that edge - and the bar itself has left the
+    scrolling box: it was `position: sticky` inside it, which held it to the
+    top of the view but not to the left of it, so a drawing wider than the box
+    carried the bar and the open panel sideways out of sight, and the panel
+    that did stay was clipped at the edge of the box it was in. The paper now
+    scrolls in a window of its own below the bar, which is the frame of that
+    window rather than a thing floating in it. Only the icons are shared -
     `controls.css` is not imported here - so a canvas mounted alone still
     paints its own buttons.
 
@@ -964,13 +970,23 @@ Two rules bound the whole phase:
 Items 1 to 4 are the phase. The rest are independent of each other and of
 it, and can be taken in any order or dropped.
 
-1. **Inline values.** An end-of-line `WidgetType` under the current step
-   showing what the variables in that statement now hold, dispatched on the
-   same effect as the step highlight in `src/ui/editor/stepHighlight.ts`. This
-   is the largest single teaching gain available: it removes the mental step of
-   mapping the graph back onto the line being executed. Restrict it to the
-   variables the current statement reads or assigns; a whole frame rendered per
-   line is noise. `StepModel` grows a per-step list of `{ name, display }`.
+1. **Inline values.** **Done.** An end-of-line `WidgetType` under the current
+   step showing what the variables in that statement now hold, dispatched on
+   the same effect as the step highlight in `src/ui/editor/stepHighlight.ts`.
+   This is the largest single teaching gain available: it removes the mental
+   step of mapping the graph back onto the line being executed. Restrict it to
+   the variables the current statement reads or assigns; a whole frame rendered
+   per line is noise. `StepModel` grows a per-step list of `{ name, display }`.
+
+   The effect now carries a `StepMark` - the range and the values together -
+   which two fields read: `stepHighlightField` for the marker and
+   `inlineValueField` for the widget. They travel as one because they are one
+   fact about one step, and nothing can put the marker on one line and the
+   values of another. `statementNames` in `src/interpreter/StatementNames.ts`
+   walks the statement about to run for the names it mentions, in source order,
+   and `extractModel` keeps the ones an object in scope answers to - so a call
+   to `printf` reports its arguments and not itself. Six is the most a line
+   gets; past that the canvas is the thing that shows a frame.
 2. **A teaching linter.** `src/ui/editor/diagnostics.ts` maps `SyntaxErrorData`
    and nothing else, yet a `@codemirror/lint` diagnostic also carries
    `severity`, `actions` - one-click fixes - and `renderMessage` for structured
@@ -1217,7 +1233,7 @@ Recorded here so the constraints above are not quietly dropped. Not in scope now
 
 Then Phase 12, once the acceptance checklist passes:
 
-17. Inline value widgets under the current step.
+17. Inline value widgets under the current step. **Done.**
 18. Teaching linter with quick fixes and a lint gutter.
 19. Runtime diagnostics carried from the Worker with their positions.
 20. Construct tooltips: the static half - clauses, enclosure, conversions.
