@@ -1035,7 +1035,7 @@ it, and can be taken in any order or dropped.
    columns. `lintGutter()` is in the debug array, and the library entry a
    message points at is looked up by the application and formatted by the
    editor - `libraryHelp` stays the one place that knows what `scanf` is.
-3. **Runtime diagnostics.** The same lint API, raised at the step that goes
+3. **Runtime diagnostics.** **Done.** The same lint API, raised at the step that goes
    wrong rather than after the run: division by zero, an index past the end of
    an array, a dereference of a pointer with no target, a read of uninitialised
    memory. The interpreter detects most of these already and reports them as
@@ -1045,6 +1045,24 @@ it, and can be taken in any order or dropped.
    them through the lint API and carry the position through the Worker
    alongside the message. Cleared on restart, like every other debug
    decoration.
+
+   `refuse` now records what it refused before it throws, and `warn` beside it
+   records what C leaves undefined but does not stop for. Four checks went in
+   with the surface: division and remainder by zero, an index outside an array
+   whose length the declaration gives, a dereference or subscript of a pointer
+   that points at nothing, and a read of a local nothing has written. The last
+   is the only warning - reading uninitialized memory is not something C stops
+   for, and ending the run over it would teach that it does - and it is said
+   once per object however often the read happens. A local enters that set only
+   where the source is certain, a declaration with nothing after the name, and
+   leaves it on the first assignment or the first time its address is taken, so
+   a parameter, a global and anything `scanf` was pointed at are never in it.
+   The list rides every response, because the linter holds one set and a
+   session shows one response at a time; a stopped session sends an empty one,
+   which is what takes the marks off. `RuntimeDiagnostic` is the interpreter's
+   own coordinates - the end column names the last character - and the
+   application makes it exclusive on the way into the linter, the same
+   conversion the step highlight makes.
 4. **A tooltip for every construct, not only for declarations.**
    `constructText` in `src/components/hoverText.ts` formats five kinds richly -
    `variableDec`, `typeDec`, `enumerator`, `recordField`, `functionDec` - and
@@ -1269,7 +1287,7 @@ Then Phase 12, once the acceptance checklist passes:
 
 17. Inline value widgets under the current step. **Done.**
 18. Teaching linter with quick fixes and a lint gutter. **Done.**
-19. Runtime diagnostics carried from the Worker with their positions.
+19. Runtime diagnostics carried from the Worker with their positions. **Done.**
 20. Construct tooltips: the static half - clauses, enclosure, conversions.
 21. Construct tooltips: the runtime half - conditions, iterations, arguments,
     returned values.

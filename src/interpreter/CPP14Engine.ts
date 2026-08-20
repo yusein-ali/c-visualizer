@@ -10,6 +10,7 @@ import { UniClassDec } from 'unicoen.ts/dist/node/UniClassDec';
 import { UniExpr } from 'unicoen.ts/dist/node/UniExpr';
 import { UniFunctionDec } from 'unicoen.ts/dist/node/UniFunctionDec';
 import { UniIdent } from 'unicoen.ts/dist/node/UniIdent';
+import { UniIntLiteral } from 'unicoen.ts/dist/node/UniIntLiteral';
 import { UniMethodCall } from 'unicoen.ts/dist/node/UniMethodCall';
 import { UniNoneLiteral } from 'unicoen.ts/dist/node/UniNoneLiteral';
 import { UniProgram } from 'unicoen.ts/dist/node/UniProgram';
@@ -25,6 +26,7 @@ import {
 import { DesignatedInitializers } from './DesignatedInitializers';
 import { ExpressionRecorder } from './ExpressionTrace';
 import { FieldOffset, RecordTable } from './RecordTable';
+import { RuntimeDiagnostic } from './RuntimeDiagnostic';
 import { scan, ScanFailure, ScanValue } from './scanf';
 import { StructTable } from './StructTable';
 import { UnionTable } from './UnionTable';
@@ -40,6 +42,29 @@ import { UnionTable } from './UnionTable';
  * the static area at 10000, which is where a text segment belongs.
  */
 export const CODE_SEGMENT_BASE = 0x1000;
+
+/**
+ * A node's own span, in the interpreter's coordinates. Everything a runtime
+ * diagnostic can blame is a node, and a diagnostic with nowhere to point is
+ * not raised at all - the console line still says what happened.
+ */
+const rangeOfNode = (node: any): RuntimeDiagnostic | null => {
+  const range =
+    node === null || typeof node === 'undefined' ? null : node.codeRange;
+  if (!range || !range.begin || !range.end) {
+    return null;
+  }
+  return {
+    rule: '',
+    severity: 'error',
+    message: '',
+    fatal: true,
+    line: range.begin.y,
+    column: range.begin.x,
+    endLine: range.end.y,
+    endColumn: range.end.x,
+  };
+};
 
 /**
  * Where the engine's static area begins (`Scope` starts its cursors at
@@ -297,6 +322,18 @@ export class PlivetCPP14Engine extends CPP14Engine {
   private globalScope: Scope | null = null;
   private entryPoint: UniFunctionDec | null = null;
   private readonly expressions = new ExpressionRecorder();
+  /** What the run has been told off for, in the order it happened. */
+  private readonly runtimeDiagnostics: RuntimeDiagnostic[] = [];
+  /**
+   * Objects declared with no initializer that nothing has written yet. An
+   * object enters only where the source is certain - a local declaration with
+   * nothing after the name - and leaves on the first assignment or the first
+   * time its address is taken, so a parameter, a global and anything `scanf`
+   * was pointed at are never in it.
+   */
+  private readonly unwritten = new Set<number>();
+  /** Addresses already reported, so a read in a loop is said once. */
+  private readonly readUnwritten = new Set<number>();
 
   /** Installs the record metadata read from the program about to execute. */
   setRecordTables(structs: StructTable, unions: UnionTable): void {
@@ -393,16 +430,29 @@ export class PlivetCPP14Engine extends CPP14Engine {
     ) {
       const handle = scope.getAddress(expr.left.name);
       const allocation = this.recordArrays.get(handle);
-      if (typeof allocation !== 'undefined') {
+      if (typeof allocation === 'undefined') {
+        // The subscript of a plain array or a pointer. The base engine
+        // computes base plus index times width whatever the index is, so an
+        // index past the end quietly reads the object next to the array.
         const index = Number(
           (yield* this.execExpr(expr.right, scope)).valueOf()
         );
-        const descriptor = allocation.descriptors[index];
-        if (typeof descriptor === 'undefined') {
-          this.refuse('aggregate array index out of bounds');
-        }
-        return descriptor;
+        this.checkSubscript(expr.left.name, index, scope);
+        return yield* super.getAddress(
+          new UniBinOp('[]', expr.left, new UniIntLiteral(index)),
+          scope
+        );
       }
+      const index = Number((yield* this.execExpr(expr.right, scope)).valueOf());
+      const descriptor = allocation.descriptors[index];
+      if (typeof descriptor === 'undefined') {
+        this.refuse(
+          'array-out-of-bounds',
+          `index ${index} is outside the array, which holds ` +
+            `${allocation.descriptors.length}`
+        );
+      }
+      return descriptor;
     }
     return yield* super.getAddress(expr, scope);
   }
@@ -428,15 +478,27 @@ export class PlivetCPP14Engine extends CPP14Engine {
     if (uniOp.operator === '*') {
       // Evaluated once and not handed on, so `*p++` still increments once.
       const target = yield* this.execExpr(uniOp.expr, scope);
+      if (Number(target) === 0) {
+        this.refuse(
+          'null-dereference',
+          'dereference of a pointer that points at nothing'
+        );
+      }
       return this.functionAt(Number(target), scope) === null
         ? scope.getValue(target)
         : target;
     }
     if (uniOp.operator === '&') {
       const address = yield* this.getAddress(uniOp.expr, scope);
+      // Whoever was handed the address may write through it, which is what
+      // `scanf("%d", &n)` is for.
+      this.noteWrite(address);
       const info = this.declarationInfoByAddress.get(address);
       if (info !== undefined && info.region === 'register') {
-        this.refuse('cannot take the address of a register variable');
+        this.refuse(
+          'register-address',
+          'cannot take the address of a register variable'
+        );
       }
       return address;
     }
@@ -473,6 +535,9 @@ export class PlivetCPP14Engine extends CPP14Engine {
    * declaration.
    */
   protected *execExpr(expr: UniExpr, scope: Scope): any {
+    if (expr instanceof UniIdent) {
+      this.checkRead(expr, scope);
+    }
     const value = yield* super.execExpr(expr, scope);
     const result =
       value instanceof UniFunctionDec
@@ -904,14 +969,33 @@ export class PlivetCPP14Engine extends CPP14Engine {
         }
       }
     }
+    this.noteDeclaration(decVar, scope);
     return value;
   }
 
+  /**
+   * Dividing by zero. C leaves it undefined for integers, and the engine
+   * computes in JavaScript numbers, where it quietly yields `Infinity` - a
+   * value no C program can produce and the memory view cannot show. Both
+   * operands come through here already evaluated, so this is the last point
+   * where the program can be stopped on the statement that did it.
+   */
+  protected execBinOpImple(op: string, l: any, r: any): any {
+    if ((op === '/' || op === '%') && Number(r?.valueOf?.() ?? r) === 0) {
+      this.refuse(
+        'division-by-zero',
+        op === '/' ? 'division by zero' : 'remainder of a division by zero'
+      );
+    }
+    return super.execBinOpImple(op, l, r);
+  }
+
   protected execAssign(address: number, value: any, scope: Scope): any {
+    this.noteWrite(address);
     const info = this.declarationInfoByAddress.get(address);
     const type = scope.getRawType(address);
     if (info !== undefined && this.constBindsObject(info, type)) {
-      this.refuse('assignment of a read-only variable');
+      this.refuse('read-only-assignment', 'assignment of a read-only variable');
     }
     if (type.indexOf('*') === -1 && this.tableFor(type) !== null) {
       return this.copyRecord(type, address, value, scope);
@@ -1016,6 +1100,7 @@ export class PlivetCPP14Engine extends CPP14Engine {
     const readOnly = this.readOnlyMemberOf(type, target, scope);
     if (readOnly !== null) {
       this.refuse(
+        'read-only-assignment',
         `assignment of a record with the read-only member ${readOnly}`
       );
     }
@@ -1172,14 +1257,165 @@ export class PlivetCPP14Engine extends CPP14Engine {
    * that has done something C does not allow has no defined behaviour to
    * continue with - and the console keeps everything printed up to that point.
    */
-  private refuse(message: string): never {
+  private refuse(rule: string, message: string): never {
     const transcript = this.getStdout();
     const separator =
       transcript === '' || transcript.endsWith('\n') ? '' : '\n';
     const line = this.currentLine();
     const where = line === null ? '' : ` on line ${line}`;
     this.stdout(`${separator}PLIVET stopped the program${where}: ${message}\n`);
+    this.record(rule, 'error', message, true, this.currentRange());
     throw new UniRuntimeError(message);
+  }
+
+  /**
+   * What C leaves undefined about a subscript: an index outside the array, and
+   * a subscript of a pointer that points at nothing.
+   *
+   * Only an object whose declared type says how long it is can be checked. A
+   * pointer knows nothing about the block it addresses - `p[7]` on a
+   * `malloc(4)` is exactly as legal to the compiler as `p[0]` - so what is
+   * checked there is that it addresses something at all.
+   */
+  private checkSubscript(name: string, index: number, scope: Scope): void {
+    let type = '';
+    try {
+      type = scope.getRawType(name);
+    } catch {
+      return;
+    }
+    if (typeof type !== 'string') {
+      return;
+    }
+    if (type.indexOf('[') === -1) {
+      if (
+        type.indexOf('*') !== -1 &&
+        Number(scope.getValue(scope.getAddress(name))) === 0
+      ) {
+        this.refuse(
+          'null-dereference',
+          `${name} points at nothing, so ${name}[${index}] has no object`
+        );
+      }
+      return;
+    }
+    const dimensions = scope.getArrayDims(type);
+    const length = dimensions.length === 0 ? 0 : dimensions[0];
+    if (length <= 0) {
+      return;
+    }
+    if (index < 0 || length <= index) {
+      this.refuse(
+        'array-out-of-bounds',
+        `index ${index} is outside ${name}, which holds ${length}` +
+          `${dimensions.length === 1 ? '' : ' rows'}`
+      );
+    }
+  }
+
+  /**
+   * Whether the object at an address has been written since it was declared.
+   * Nothing enters `unwritten` unless the source is certain about it, so the
+   * answer is only ever given about a local declared with no initializer.
+   */
+  private noteWrite(address: number): void {
+    this.unwritten.delete(address);
+  }
+
+  /**
+   * The read of an object nothing has written. Reported once per object: a
+   * loop reading it a thousand times is one mistake, not a thousand.
+   */
+  private checkRead(expr: UniIdent, scope: Scope): void {
+    let address = -1;
+    try {
+      address = scope.getAddress(expr.name);
+    } catch {
+      return;
+    }
+    if (!this.unwritten.has(address) || this.readUnwritten.has(address)) {
+      return;
+    }
+    this.readUnwritten.add(address);
+    this.warn(
+      'uninitialized-read',
+      `${expr.name} has not been given a value yet, so this reads whatever ` +
+        `was left in its memory`,
+      rangeOfNode(expr)
+    );
+  }
+
+  /**
+   * The locals a declaration leaves empty. An array is left out - a partly
+   * filled one is ordinary C - and so is anything with static storage, which
+   * the standard fills with zero before the program starts.
+   */
+  private noteDeclaration(decVar: UniVariableDec, scope: Scope): void {
+    if (
+      scope === scope.global ||
+      (Array.isArray(decVar.modifiers) &&
+        (decVar.modifiers.indexOf('static') !== -1 ||
+          decVar.modifiers.indexOf('extern') !== -1))
+    ) {
+      return;
+    }
+    if (this.tableFor(decVar.type) !== null) {
+      return;
+    }
+    for (const def of decVar.variables) {
+      if (def.value !== null || def.typeSuffix !== null) {
+        continue;
+      }
+      const name = def.name.replace(/^[*&]+/, '');
+      try {
+        this.unwritten.add(scope.getAddress(name));
+      } catch {
+        // A declaration the scope did not take is not one to watch.
+      }
+    }
+  }
+
+  /**
+   * The same, for what C leaves undefined but does not stop for. Reading an
+   * object nobody has written is a fact about the program worth saying where
+   * the reader is looking; ending the run over it would teach that C does
+   * something it does not do.
+   */
+  private warn(
+    rule: string,
+    message: string,
+    range: RuntimeDiagnostic | null = null
+  ): void {
+    this.record(rule, 'warning', message, false, range);
+  }
+
+  private record(
+    rule: string,
+    severity: 'warning' | 'error',
+    message: string,
+    fatal: boolean,
+    range: RuntimeDiagnostic | null
+  ): void {
+    if (range === null) {
+      return;
+    }
+    this.runtimeDiagnostics.push({ ...range, rule, severity, message, fatal });
+  }
+
+  /** Everything this run has been told off for. Cleared with the session. */
+  public diagnostics(): RuntimeDiagnostic[] {
+    return this.runtimeDiagnostics.slice();
+  }
+
+  /**
+   * The statement the engine stopped at, as a range. The current expression is
+   * the one that last produced a value, which by the time something is refused
+   * is the statement before it; the next one is what it stopped to run.
+   */
+  private currentRange(): RuntimeDiagnostic | null {
+    const expr =
+      this.currentState.getNextExpr() ?? this.currentState.getCurrentExpr();
+    return rangeOfNode(expr);
   }
 
   /**

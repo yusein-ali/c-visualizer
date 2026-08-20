@@ -17,6 +17,7 @@ export type {
   SyntaxErrorModel,
 } from './server';
 export type { LintDiagnostic as LintDiagnosticModel } from '../interpreter/TeachingLint';
+export type { RuntimeDiagnostic as RuntimeDiagnosticModel } from '../interpreter/RuntimeDiagnostic';
 export { extractModel } from './extractModel';
 export { extractVariables, formatAddress, narrowToType } from './variables';
 export { layout, connectionColor } from './layout';

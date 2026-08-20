@@ -89,7 +89,7 @@ int main(){
 }`)
     ).toBe(
       'PLIVET stopped the program on line 5: ' +
-        'aggregate array index out of bounds\n'
+        'index 5 is outside the array, which holds 2\n'
     );
   });
 

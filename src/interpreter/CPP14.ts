@@ -20,6 +20,7 @@ import {
   annotateRuntimeFunctions,
   annotateRuntimeVariables,
 } from './RuntimeTypeInfo';
+import { RuntimeDiagnostic } from './RuntimeDiagnostic';
 import { StructTable } from './StructTable';
 import { LintDiagnostic, teachingDiagnostics } from './TeachingLint';
 import { UnionTable } from './UnionTable';
@@ -168,6 +169,16 @@ export class PlivetCPP14Interpreter extends Interpreter {
       return shown;
     };
     return constructs.map((construct) => displayedTypes(construct, display));
+  }
+
+  /**
+   * What the run has been told off for: the refusals and the warnings the
+   * engine raised while stepping. Read after each step rather than pushed,
+   * because the engine has nobody to push to - and cleared with the session,
+   * since a new interpreter is built for every `Start`.
+   */
+  getRuntimeDiagnostics(): RuntimeDiagnostic[] {
+    return this.plivetEngine.diagnostics();
   }
 
   /**

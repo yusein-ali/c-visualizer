@@ -4,6 +4,7 @@ import {
   InterpreterClient,
   LintDiagnosticModel,
   Response,
+  RuntimeDiagnosticModel,
   DEBUG_STATE,
   StepModel,
   SyntaxErrorModel,
@@ -51,6 +52,23 @@ const withLibraryHelp = (lint: LintDiagnosticModel): TeachingDiagnostic => {
   return help === null ? rest : { ...rest, help };
 };
 
+/**
+ * A runtime diagnostic as the linter takes one.
+ *
+ * The two disagree about one thing: the interpreter's end column names the
+ * last character of the expression and a diagnostic's names the one after it,
+ * which is the same conversion `rangeOf` makes for the step highlight.
+ */
+const asDiagnostic = (found: RuntimeDiagnosticModel): TeachingDiagnostic => ({
+  rule: found.rule,
+  severity: found.severity,
+  message: found.message,
+  line: found.line,
+  column: found.column,
+  endLine: found.endLine,
+  endColumn: found.endColumn + 1,
+});
+
 export class EditorController {
   private readonly bus: Bus;
   private readonly client: InterpreterClient;
@@ -59,6 +77,15 @@ export class EditorController {
   private readonly hover: HoverTextSource;
   private isDebugging = false;
   private fontSize = 14;
+  /**
+   * The three things the linter shows, kept apart because they arrive apart:
+   * the parser answers on every edit, the teaching rules with it, and the run
+   * answers on every step. The linter holds one set, so all three are handed
+   * over together whenever any of them changes.
+   */
+  private syntaxErrors: SyntaxErrorModel[] = [];
+  private teachingLints: TeachingDiagnostic[] = [];
+  private runtimeLints: TeachingDiagnostic[] = [];
 
   constructor(mount: HTMLElement, options: EditorControllerOptions) {
     const { bus, client, dark = false, doc = strings.sourceCode } = options;
@@ -169,9 +196,10 @@ export class EditorController {
 
   recieve(response: Response) {
     try {
-      const { debugState, model, output, step } = response;
+      const { debugState, model, output, step, runtime } = response;
       this.setDebugging(debugState !== 'Stop');
       this.hover.setVariables(model.variables);
+      this.setRuntimeDiagnostics(typeof runtime === 'undefined' ? [] : runtime);
       if (debugState === 'Executing') {
         return;
       }
@@ -239,10 +267,30 @@ export class EditorController {
     errors: SyntaxErrorModel[],
     lints: LintDiagnosticModel[] = []
   ) {
+    this.syntaxErrors = errors;
+    this.teachingLints = lints.map(withLibraryHelp);
+    this.showDiagnostics();
+  }
+
+  /**
+   * What the run has said so far, replacing what it said before. A stopped
+   * session says nothing, which is what takes the marks off; a response that
+   * adds nothing to an empty list leaves the linter alone rather than
+   * dispatching a transaction per step.
+   */
+  private setRuntimeDiagnostics(found: RuntimeDiagnosticModel[]) {
+    if (found.length === 0 && this.runtimeLints.length === 0) {
+      return;
+    }
+    this.runtimeLints = found.map(asDiagnostic);
+    this.showDiagnostics();
+  }
+
+  private showDiagnostics() {
     this.editor.debug.showDiagnostics(
       this.editor.view,
-      errors,
-      lints.map(withLibraryHelp)
+      this.syntaxErrors,
+      this.teachingLints.concat(this.runtimeLints)
     );
   }
 }

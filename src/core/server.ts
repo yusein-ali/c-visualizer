@@ -5,6 +5,7 @@ import { extractModel } from './extractModel';
 import { StepModel, emptyStepModel } from './model';
 import { Construct } from '../interpreter/Construct';
 import { Expansion } from '../interpreter/Expansion';
+import { RuntimeDiagnostic } from '../interpreter/RuntimeDiagnostic';
 import { LintDiagnostic } from '../interpreter/TeachingLint';
 
 export type CONTROL_EVENT =
@@ -66,6 +67,13 @@ export interface Response {
   constructs?: Construct[];
   /** What the teaching rules found in a program that parses. Checks only. */
   lints?: LintDiagnostic[];
+  /**
+   * What has gone wrong in the run so far. Sent with every step rather than
+   * once, because a session is only ever shown one response at a time and the
+   * editor's linter holds one set: the list is what the run has said, not what
+   * this step added.
+   */
+  runtime?: RuntimeDiagnostic[];
 }
 
 /**
@@ -93,6 +101,7 @@ interface ExpansionSource {
   getExpansions(code: string): Expansion[];
   getConstructs(code: string): Construct[];
   getLints(code: string): LintDiagnostic[];
+  getRuntimeDiagnostics(): RuntimeDiagnostic[];
 }
 
 function reportsExpansions(
@@ -102,7 +111,8 @@ function reportsExpansions(
   return (
     typeof source.getExpansions === 'function' &&
     typeof source.getConstructs === 'function' &&
-    typeof source.getLints === 'function'
+    typeof source.getLints === 'function' &&
+    typeof source.getRuntimeDiagnostics === 'function'
   );
 }
 
@@ -230,7 +240,19 @@ export class Server {
       debugState: result.debugState,
       step: result.step,
       errors: [],
+      runtime: this.runtimeDiagnostics(),
     };
+  }
+
+  /**
+   * What the run has been told off for. A stopped session has no interpreter
+   * and therefore nothing to say, which is what clears the marks off the
+   * editor when the reader stops.
+   */
+  private runtimeDiagnostics(): RuntimeDiagnostic[] {
+    return this.interpreter !== null && reportsExpansions(this.interpreter)
+      ? this.interpreter.getRuntimeDiagnostics()
+      : [];
   }
 
   /** The step held in the history, for the commands that only look back. */
