@@ -1,6 +1,6 @@
 import { ExecState } from 'unicoen.ts/dist/interpreter/Engine/ExecState';
 import { Variable } from 'unicoen.ts/dist/interpreter/Engine/Variable';
-import { CanvasDrawer } from '../src/components/canvas/CanvasDrawer';
+import { extractModel } from '../src/core';
 import { HoverTextSource } from '../src/components/hoverText';
 import { constructAt } from '../src/interpreter/Construct';
 import { PlivetCPP14Interpreter } from '../src/interpreter/CPP14';
@@ -39,12 +39,8 @@ const run = (code: string): string => execute(code).output;
 const canvasRows = (states: ExecState[]): string[][] => {
   const rows: string[][] = [];
   for (const state of states) {
-    for (const stack of new CanvasDrawer(state).getCanvasStacks()) {
-      rows.push(
-        ...stack
-          .getCanvasTable()
-          .map((row) => row.map((cell) => cell.getText()))
-      );
+    for (const stack of extractModel(state).stacks) {
+      rows.push(...stack.rows.map((row) => row.map((cell) => cell.text)));
     }
   }
   return rows;

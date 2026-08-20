@@ -1,6 +1,6 @@
 import React from 'react';
 import { Rect, Text } from 'react-konva';
-import { CanvasCell } from './CanvasDrawer';
+import { CELL_FONT_SIZE, CELL_HEIGHT } from '../../core';
 import hexToRgba from '../Color';
 
 interface Props {
@@ -11,7 +11,6 @@ interface Props {
   align?: string;
   fontStyle?: string;
   onClick?: () => void;
-  isVisible: boolean;
   colors?: string[];
 }
 
@@ -22,11 +21,8 @@ export default class TextWithRect extends React.Component<Props, State> {
     super(props);
   }
   render() {
-    if (!this.props.isVisible) {
-      return null;
-    }
     const { x, y, text, width, align, fontStyle, onClick, colors } = this.props;
-    const height = CanvasCell.HEIGHT;
+    const height = CELL_HEIGHT;
     const isAlignCenter = align && align === 'center';
     const colorAndPos: (string | number)[] = [];
     if (Array.isArray(colors) && 0 < colors.length) {
@@ -62,11 +58,11 @@ export default class TextWithRect extends React.Component<Props, State> {
           fontStyle={fontStyle ? fontStyle : 'normal'}
           align={align ? align : 'left'}
           verticalAlign="middle"
-          offsetX={isAlignCenter ? 0 : -CanvasCell.FONT_SIZE / 2}
+          offsetX={isAlignCenter ? 0 : -CELL_FONT_SIZE / 2}
           width={width}
           height={height}
           text={text}
-          fontSize={CanvasCell.FONT_SIZE}
+          fontSize={CELL_FONT_SIZE}
           onClick={onClick ? onClick : undefined}
         />
       </React.Fragment>

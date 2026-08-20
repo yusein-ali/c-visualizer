@@ -8,10 +8,6 @@ export type event =
   | 'changeOutput'
   | 'zoom'
   | 'draw'
-  | 'redraw'
-  | 'EOF'
-  | 'stdin'
-  | 'Breakpoint'
   | 'files';
 export const slot = (
   event: event,

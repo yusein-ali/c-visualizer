@@ -14,7 +14,7 @@ editor.
 - The interface is **English only**. There is no locale layer: every string the
   UI shows lives in [src/strings.ts](src/strings.ts).
 - **There is no backend.** Everything — parsing, interpretation, stepping — runs in the
-  browser. `src/server.ts` is a _simulated_ server: an in-process singleton with a
+  browser. `src/core/server.ts` is a _simulated_ server: an in-process singleton with a
   `Request`/`Response` API, kept in that shape so a real remote backend could be swapped
   in later. Do not add network calls expecting a server to exist.
 - Ships as a static site: `npm run build` → `dist/`, deployed to the `gh-pages` branch by
@@ -39,6 +39,7 @@ and do not reintroduce Java, Python, Ace or a second interface language.
 | UI            | React 16 **class components** (no hooks anywhere), `react-bootstrap` 0.33 / Bootstrap **3**                                       |
 | Code editor   | CodeMirror 6 — `src/ui/editor/`, framework-free; `Editor.tsx` is only the wiring                                                  |
 | Console       | Plain DOM — `src/ui/console/`, framework-free; `Console.tsx` is only the wiring                                                   |
+| Core          | `src/core/` — interpreter session, step model and layout; no DOM, no React, no renderer, enforced by ESLint                       |
 | Visualization | Konva via `react-konva` (`Stage` / `Layer` / shapes)                                                                              |
 | Interpreter   | [`unicoen.ts`](https://www.npmjs.com/package/unicoen.ts) 0.5.0 — deep imports like `unicoen.ts/dist/interpreter/Engine/ExecState` |
 | Build         | webpack 5 + babel-loader (transpile only) + `fork-ts-checker-webpack-plugin` (types)                                              |
@@ -109,25 +110,29 @@ only registry.
    Control events: `Start | Stop | Step | StepBack | StepAll | BackAll | Exec | SyntaxCheck`.
 2. `Editor.send()` builds a `Request { controlEvent, sourcecode, stdinText,
 lineNumOfBreakpoint }` and awaits `server.send(request)`.
-3. `server.ts` lazily `import()`s the CPP14 interpreter (webpack chunk `CPP14`
+3. `core/server.ts` lazily `import()`s the CPP14 interpreter (webpack chunk `CPP14`
    — still a dynamic import, to keep the parser out of the initial bundle and
    to leave one branch to add if a language ever comes back), drives
-   `unicoen.ts`, and records every
-   `ExecState` into `stateHistory` plus stdout into `outputsHistory`.
+   `unicoen.ts`, and records every `ExecState` and its stdout into
+   [src/core/history.ts](src/core/history.ts).
    **Step-back is history replay, not reverse execution** — `StepBack`/`BackAll` just
-   move an index into those arrays.
-   `StepAll` loops with `setTimeout(…, 1)` so the UI stays responsive, and emits
-   `'EOF'` / `'stdin'` / `'Breakpoint'` when it needs to stop.
+   move an index into that history, which retains the first state and the most
+   recent `HISTORY_LIMIT` steps.
+   `StepAll` loops with `setTimeout(…, 1)` so the UI stays responsive, and calls
+   `server.onRunEvent` with `'EOF'` / `'stdin'` / `'Breakpoint'` when it needs to
+   stop. `Editor` sets that callback; the core does not know the bus exists.
 4. `Editor.recieve()` (note the spelling) fans the `Response` out:
    `signal('changeState', debugState, step)` → Menu + CtrlButtons enablement,
    `signal('changeOutput', …)` → Console, `signal('draw', execState)` → Canvas,
    `signal('files', …)` → FileForm. It also highlights the current statement in
    the editor.
-5. `Canvas` stores the `ExecState` and constructs a `CanvasDrawer`, which turns stacks
-   into `CanvasStack` → `CanvasRow` → `CanvasCell` (with `CanvasVariable` /
-   `CanvasArrayVariable`) and resolves pointer values into `CanvasArrow`s via the
-   module-level `pointerConnectionManager`. `CanvasContent` renders cells on one Konva
-   layer and arrows on another.
+5. `Canvas` turns the `ExecState` into a `StepModel` with
+   [extractModel](src/core/extractModel.ts) — plain rows of cells, with every
+   pointer resolved to the key of the cell it names — and lays it out with
+   [layout](src/core/layout.ts), which squares off the columns, places the cells
+   and routes the arrows. `CanvasContent` renders that geometry: cells on one
+   Konva layer, arrows on another. Which aggregates are folded is the
+   component's `FoldState`, not the model's, so a fold survives a step.
 
 Debug states (`DEBUG_STATE`): `First | Debugging | stdin | EOF | Stop | Executing`.
 `CtrlButtons.componentWillReceiveProps` maps each state to which buttons are enabled —
@@ -186,9 +191,9 @@ verify interpreter/canvas behavior manually with `npm start` (blocked until Phas
   rename.
 - `HardSourceWebpackPlugin` caches into `node_modules/.cache/hard-source/`; delete it if
   the build behaves impossibly after dependency changes.
-- Both `Canvas.render()` and `CanvasContent` construct/consult `CanvasDrawer` on every
-  render — the drawer is cheap-but-not-free, and `'redraw'` exists to recompute arrow
-  positions without a new `ExecState`.
+- `Canvas.render()` lays the whole step out again on every render. The layout is
+  cheap-but-not-free and pure: it never mutates the model, so the same step can
+  be laid out repeatedly with different folds.
 - Dependency history is dominated by Renovate bot PRs; the pinned old majors (webpack 4,
   React 16, Bootstrap 3, TSLint) are intentional, not neglected — don't "upgrade while
   you're in there."

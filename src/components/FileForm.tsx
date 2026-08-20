@@ -7,7 +7,7 @@ import Panel from 'react-bootstrap/lib/Panel';
 
 import '../css/fileform.css';
 import strings from '../strings';
-import { server } from '../server';
+import { server } from '../core';
 import FileItem from './FileItem';
 import { slot } from './emitter';
 interface Props {}

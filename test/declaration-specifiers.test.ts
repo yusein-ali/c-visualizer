@@ -2,7 +2,7 @@ import { ExecState } from 'unicoen.ts/dist/interpreter/Engine/ExecState';
 import { Variable } from 'unicoen.ts/dist/interpreter/Engine/Variable';
 import * as fs from 'fs';
 import * as path from 'path';
-import { CanvasDrawer } from '../src/components/canvas/CanvasDrawer';
+import { extractModel } from '../src/core';
 import { PlivetCPP14Interpreter } from '../src/interpreter/CPP14';
 import { DeclarationSpecifiers } from '../src/interpreter/DeclarationSpecifiers';
 import { declarationInfoOf } from '../src/interpreter/RuntimeTypeInfo';
@@ -130,9 +130,9 @@ describe('storage classes and type qualifiers', () => {
   it('shows declaration specifiers in canvas type labels', () => {
     const labels: string[] = [];
     for (const state of result.states) {
-      for (const stack of new CanvasDrawer(state).getCanvasStacks()) {
-        for (const row of stack.getCanvasTable()) {
-          labels.push(row[0].getText());
+      for (const stack of extractModel(state).stacks) {
+        for (const row of stack.rows) {
+          labels.push(row[0].text);
         }
       }
     }
@@ -199,9 +199,9 @@ int main(){
   it('retains typedef and pointer-level qualifier placement', () => {
     const labels: string[] = [];
     for (const state of aggregateResult.states) {
-      for (const stack of new CanvasDrawer(state).getCanvasStacks()) {
-        for (const row of stack.getCanvasTable()) {
-          labels.push(...row.map((cell) => cell.getText()));
+      for (const stack of extractModel(state).stacks) {
+        for (const row of stack.rows) {
+          labels.push(...row.map((cell) => cell.text));
         }
       }
     }
@@ -280,9 +280,9 @@ describe('qualified aggregate teaching fixture', () => {
   it('visualizes aggregate and qualifier combinations', () => {
     const labels: string[] = [];
     for (const state of fixture.states) {
-      for (const stack of new CanvasDrawer(state).getCanvasStacks()) {
-        for (const row of stack.getCanvasTable()) {
-          labels.push(...row.map((cell) => cell.getText()));
+      for (const stack of extractModel(state).stacks) {
+        for (const row of stack.rows) {
+          labels.push(...row.map((cell) => cell.text));
         }
       }
     }

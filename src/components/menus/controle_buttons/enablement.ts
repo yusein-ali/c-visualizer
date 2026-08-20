@@ -1,4 +1,4 @@
-import { CONTROL_EVENT, DEBUG_STATE } from '../../../server';
+import { CONTROL_EVENT, DEBUG_STATE } from '../../../core';
 
 /**
  * Which control buttons work in which debug state, and what the two forward

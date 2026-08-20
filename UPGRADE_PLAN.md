@@ -83,11 +83,12 @@ cost little now and are expensive to retrofit.
    contain one instance, not the application itself. This mirrors
    `InteractiveEditor(text, parentElement, ...)` and
    `SignalChainCanvas(element, {...})` in the course's existing extensions.
-2. **No module-level singletons.** Three exist today and all three break the
-   moment two instances share a page: the event bus at
-   `src/components/emitter.ts:2`, the interpreter at `src/server.ts:372`, and
-   `pointerConnectionManager` at `src/components/canvas/CanvasDrawer.ts:136`.
-   Each becomes instance-scoped and is passed explicitly.
+2. **No module-level singletons.** Three existed, and all three break the moment
+   two instances share a page. `pointerConnectionManager` is gone: Phase 5 made
+   it local to one extraction and one layout. Two remain, both for Phase 10: the
+   event bus at `src/components/emitter.ts:2` and the interpreter session
+   exported at the foot of `src/core/server.ts`. Each becomes instance-scoped
+   and is passed explicitly.
 3. **Scoped styles only.** `src/index.tsx:4` imports Bootstrap globally; in a
    course page that would restyle everything around it. All CSS moves under a
    single `plivet-` class prefix and no global stylesheet is imported.
@@ -102,10 +103,10 @@ cost little now and are expensive to retrofit.
    changes.
 6. **The Worker protocol carries plain data only.** No class instances cross the
    boundary, in either direction.
-7. **The source is a named set of files, not a string.** `Request.sourcecode` at
-   `src/server.ts:27` is a single translation unit, `#include` is discarded by
-   the preprocessor (`src/interpreter/preprocess.ts:238`), and the `files` map at
-   `src/server.ts:68` is a virtual filesystem for `fopen`, not source. The
+7. **The source is a named set of files, not a string.** `Request.sourcecode` in
+   `src/core/server.ts` is a single translation unit, `#include` is discarded by
+   the preprocessor (`src/interpreter/preprocess.ts:238`), and the `files` map on
+   the same class is a virtual filesystem for `fopen`, not source. The
    interactive-code directive PLIVET is meant to embed in is multi-file by
    design: directives sharing a `:block_id:` render as editor tabs, exactly one
    of them is the main file, `:hidden:` parts are editable and submitted without
@@ -121,16 +122,16 @@ cost little now and are expensive to retrofit.
 
 Verified against the current tree; re-check if the code moves.
 
-- `src/server.ts` is already a `Request`/`Response` protocol behind a single
+- `src/core/server.ts` is already a `Request`/`Response` protocol behind a single
   `send()`, discriminated by `controlEvent`. It is a message protocol in all but
   name.
-- `src/components/canvas/CanvasDrawer.ts` imports no renderer. Its only outward
-  coupling is `signal('redraw')` at line 533, inside `toggleFold()`.
+- `src/core/` imports no renderer and no interface code at all, and ESLint fails
+  the build if it starts to.
 - `ExecState`, `Stack`, `Variable` and `UniNode` are classes with private fields
   and methods. They are not structured-cloneable and cannot be posted to a
   Worker.
-- `stateHistory` in `src/server.ts` grows by one deep-copied `ExecState` per step
-  and is never trimmed.
+- History grows by one deep-copied `ExecState` per step. Since Phase 5 it is
+  bounded: the first state plus the most recent `HISTORY_LIMIT`.
 - Java and Python support is shallow: one `ProgLang` union, one three-branch
   dynamic import, eight `progLang` call sites in `src/server.ts`, one emitter
   event, one selector, and two sample programs per locale. Removing it is
@@ -295,16 +296,35 @@ Webpack.
 
 ## Phase 5: extract the portable core
 
-**Status: not started.** There is no `src/core/`, `pointerConnectionManager` is
-still the module singleton at `CanvasDrawer.ts:194`, and `stateHistory` is still
-unbounded. This is the next phase.
+**Status: complete, with two deviations.** `src/core/` holds the interpreter
+session, the step model, the extraction pass, the layout and the bounded
+history; `CanvasDrawer` is gone, split in two. ESLint enforces the boundary
+rather than leaving it to memory: `src/core` may not import from
+`src/components` or `src/ui`.
+
+The deviations are both in the model. `StepModel` carries `stacks`, `pointers`
+and `codeRange` but not `step`, `debugState` or `output` - those are already
+fields of `Response`, and duplicating them before the Worker exists would mean
+two copies to keep in step; Phase 6 folds the model into the response that
+carries them. And a `fold` cell carries `foldTarget`, the group it shows and
+hides, next to the `foldGroup` it belongs to: a group has to be named by
+something, and naming it after the row it hangs from is what lets a fold be
+addressed without a cell to hold it.
+
+Fold behaviour changed as a consequence, for the better: a fold is a property
+of what the reader is looking at, so opening an array and stepping no longer
+closes it, and a group nested inside a folded one stays folded when its parent
+is opened.
 
 The two files worth keeping are `server.ts` (372 lines) and `CanvasDrawer.ts`
 (535 lines). This phase makes them independent of the UI so later phases can move
 them freely. The React application keeps working throughout.
 
 1.  Create `src/core/` and move both files into it. Nothing in `src/core/` may
-    import from `src/components/`.
+    import from `src/components/`. (completed - `server.ts` reports a run that
+    stopped on its own through `onRunEvent` instead of the bus, and the
+    `'redraw'`, `'EOF'`, `'stdin'` and `'Breakpoint'` events left the emitter
+    with it.)
 2.  Define the plain-data step model that will later cross the Worker boundary.
     Approximately:
 
@@ -313,29 +333,48 @@ them freely. The React application keeps working throughout.
         interface StepModel   { step, debugState, output, codeRange,
                                 stacks: StackModel[], pointers: {from, to}[] }
 
-    Everything in it must survive `structuredClone`.
+    Everything in it must survive `structuredClone`. (completed -
+    [src/core/model.ts](src/core/model.ts), asserted in `test/core.test.ts`.)
 
 3.  Split `CanvasDrawer` along that seam:
     - `extractModel(execState): StepModel` — walks stacks and variables, resolves
       pointer targets by key. Depends on `unicoen.ts`, not on geometry.
     - `layout(model, foldState): Geometry` — the existing `calcPos`,
       `alignToMaximumWidth`, `rescaleWidthForLongFuncName` and arrow routing.
+
+    (completed. The split was checked against the old drawer before it was
+    deleted: for every step of four programs, the geometry the two produce -
+    stack and cell positions, widths, texts, colours and arrow points - is
+    identical.)
+
 4.  Move fold state out of the cells and into a main-thread structure keyed by
     cell key. Delete the `signal('redraw')` call at line 533; `toggleFold` returns
-    and the caller re-lays-out. A model must not emit UI events.
+    and the caller re-lays-out. A model must not emit UI events. (completed -
+    [src/core/foldState.ts](src/core/foldState.ts), owned by `Canvas`. Groups
+    are named by the path of keys that reaches them, so a nested fold is a
+    prefix test.)
 5.  Make `pointerConnectionManager` an instance owned by the layout pass rather
-    than a module singleton.
+    than a module singleton. (completed - it split with everything else:
+    resolving an address to a cell key is `AddressTable`, private to one
+    `extractModel` call, and placing the arrows is local to one `layout` call.)
 6.  Cap `stateHistory`. Either bound the number of retained states or keep
     periodic snapshots and replay forward. Without a server this is the user's own
-    memory, and a long loop currently grows it without limit.
+    memory, and a long loop currently grows it without limit. (completed -
+    [src/core/history.ts](src/core/history.ts) retains the first state and the
+    most recent `HISTORY_LIMIT` steps. The first is kept unconditionally because
+    `BackAll` returns to the beginning of the program however long the run;
+    stepping back stops at the window, and stepping forward out of a dropped
+    stretch resumes at it.)
 
 Exit criterion: `src/core/` builds and is unit-testable with no DOM, no React and
-no renderer. The application still passes the Phase 0 checklist.
+no renderer. The application still passes the Phase 0 checklist. Met:
+`test/core.test.ts` exercises extraction, layout, folding and history on real
+interpreter states with nothing rendered.
 
 ## Phase 6: interpreter in a Web Worker
 
-**Status: not started**, and blocked on Phase 5: an `ExecState` cannot cross the
-boundary, so `StepModel` has to exist first.
+**Status: not started**, and now unblocked: `StepModel` exists, so an
+`ExecState` no longer has to cross the boundary. This is the next phase.
 
 1. Move `Server` into `src/core/interpreter.worker.ts`, instantiated with
    `new Worker(new URL('./interpreter.worker.ts', import.meta.url))`.

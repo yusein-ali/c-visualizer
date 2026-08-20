@@ -46,6 +46,26 @@ module.exports = tseslint.config(
     },
   },
   {
+    // Phase 5's boundary, enforced rather than remembered: `src/core` runs the
+    // program and describes it, and knows nothing about the interface. Break
+    // this and the Worker in Phase 6 stops being a move and becomes a rewrite.
+    files: ['src/core/**'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['**/components/**', '**/ui/**'],
+              message:
+                'src/core may not depend on the interface. Report through a callback and let the caller wire it up.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     files: ['test/**'],
     languageOptions: { globals: globals.jest },
     rules: {

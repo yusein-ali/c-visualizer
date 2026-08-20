@@ -2,7 +2,7 @@ import * as React from 'react';
 
 import { slot, signal } from './emitter';
 import { Theme } from './Props';
-import { DEBUG_STATE } from '../server';
+import { DEBUG_STATE } from '../core';
 import { PlivetConsole } from '../ui/console';
 import strings from '../strings';
 

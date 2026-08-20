@@ -4,7 +4,7 @@ import Col from 'react-bootstrap/lib/Col';
 import HowToUseButton from './HowToUseButton';
 import CtrlButtons from './controle_buttons/CtrlButtons';
 import { slot } from '../emitter';
-import { DEBUG_STATE } from '../../server';
+import { DEBUG_STATE } from '../../core';
 
 interface Props {}
 

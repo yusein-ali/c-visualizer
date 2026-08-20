@@ -1,37 +1,30 @@
 import * as React from 'react';
 import { Layer, Arrow } from 'react-konva';
 import StackRect from './StackRect';
-import { CanvasDrawer, CanvasStack, CanvasArrow } from './CanvasDrawer';
-import { slot } from '../emitter';
+import { ArrowGeometry, Geometry, StackGeometry } from '../../core';
 import hexToRgba from '../Color';
+
 interface Props {
-  canvasDrawer: CanvasDrawer;
+  geometry: Geometry;
+  onToggleFold: (group: string) => void;
 }
 
-interface State {
-  canvasStacks: CanvasStack[];
-  canvasArrows: CanvasArrow[];
-}
+interface State {}
 
 export default class CanvasContent extends React.Component<Props, State> {
-  constructor(props: Props) {
-    super(props);
-    this.state = { canvasStacks: [], canvasArrows: [] };
-    slot('redraw', () => {
-      this.updatePos();
-    });
-  }
-
-  makeStacks(canvasStacks: CanvasStack[]) {
-    const list = canvasStacks.map((canvasStack) => (
-      <StackRect key={canvasStack.key} canvasStack={canvasStack} />
+  makeStacks(stacks: StackGeometry[]) {
+    return stacks.map((stack) => (
+      <StackRect
+        key={stack.key}
+        stack={stack}
+        onToggleFold={this.props.onToggleFold}
+      />
     ));
-    return list;
   }
 
-  makeArrows(canvasArrows: CanvasArrow[]) {
-    const list = canvasArrows.map((canvasArrow) => {
-      const { from, mid, to, key, color } = canvasArrow;
+  makeArrows(arrows: ArrowGeometry[]) {
+    return arrows.map((arrow) => {
+      const { from, mid, to, key, color } = arrow;
       const rgbaColor = hexToRgba(color);
       return (
         <Arrow
@@ -39,8 +32,6 @@ export default class CanvasContent extends React.Component<Props, State> {
           points={[from.x, from.y, mid.x, mid.y, to.x, to.y]}
           tension={0.25} // 0だと折れ線
           stroke={rgbaColor}
-          // stroke={colors[index % colors.length]} // |(storoke)部分
-          // strokeWidth={4}
           fill={rgbaColor} // △(pointer)部分
           pointerLength={10}
           pointerWidth={10}
@@ -48,23 +39,14 @@ export default class CanvasContent extends React.Component<Props, State> {
         />
       );
     });
-    return list;
-  }
-
-  updatePos() {
-    this.props.canvasDrawer.updatePos();
-    this.forceUpdate();
   }
 
   render() {
-    const canvasStacks = this.props.canvasDrawer.getCanvasStacks();
-    const canvasArrows = this.props.canvasDrawer.getCanvasArrows();
-    const stack = this.makeStacks(canvasStacks);
-    const arrow = this.makeArrows(canvasArrows);
+    const { stacks, arrows } = this.props.geometry;
     return (
       <React.Fragment>
-        <Layer>{stack}</Layer>
-        <Layer>{arrow}</Layer>
+        <Layer>{this.makeStacks(stacks)}</Layer>
+        <Layer>{this.makeArrows(arrows)}</Layer>
       </React.Fragment>
     );
   }

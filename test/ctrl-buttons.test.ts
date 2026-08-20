@@ -4,7 +4,7 @@ import {
   runCommand,
   stepCommand,
 } from '../src/components/menus/controle_buttons/enablement';
-import { DEBUG_STATE } from '../src/server';
+import { DEBUG_STATE } from '../src/core';
 
 const states: DEBUG_STATE[] = [
   'Stop',

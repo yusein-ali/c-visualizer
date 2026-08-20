@@ -1,9 +1,9 @@
 import { SyntaxErrorData } from 'unicoen.ts/dist/interpreter/mapper/SyntaxErrorData';
 import { ExecState } from 'unicoen.ts/dist/interpreter/Engine/ExecState';
-import { signal } from './components/emitter';
 import { Interpreter } from 'unicoen.ts/dist/interpreter/Interpreter';
-import { Construct } from './interpreter/Construct';
-import { Expansion } from './interpreter/Expansion';
+import { StepHistory } from './history';
+import { Construct } from '../interpreter/Construct';
+import { Expansion } from '../interpreter/Expansion';
 
 export type CONTROL_EVENT =
   | 'Exec'
@@ -46,6 +46,13 @@ export class Response {
   ) {}
 }
 
+/**
+ * A run that ended somewhere other than where the caller asked it to: at the
+ * end of the program, at a read, or at a breakpoint. `StepAll` returns as soon
+ * as the run starts, so what stopped it has to be reported separately.
+ */
+export type RUN_EVENT = 'EOF' | 'stdin' | 'Breakpoint';
+
 /** Implemented by interpreters that can describe their source. */
 interface ExpansionSource {
   getExpansions(code: string): Expansion[];
@@ -68,8 +75,16 @@ class Server {
   private files: Map<string, ArrayBuffer> = new Map();
   private count: number = 0;
   private interpreter: Interpreter | null = null;
-  private stateHistory: ExecState[] = [];
-  private outputsHistory: string[] = [];
+  private history = new StepHistory();
+
+  /**
+   * Where a run that stopped on its own is reported. The application sets it;
+   * nothing here knows what the interface does with it, which is what keeps
+   * this file free of `src/components` and lets it move into a Worker in
+   * Phase 6.
+   */
+  public onRunEvent: ((event: RUN_EVENT, response: Response) => void) | null =
+    null;
 
   // Returns a new interpreter rather than assigning `this.interpreter`. Only
   // `reset` may replace the session's interpreter: `SyntaxCheck` runs off a
@@ -81,7 +96,7 @@ class Server {
   private async createInterpreter(): Promise<Interpreter> {
     // PLIVET's own subclass, for the preprocessor unicoen.ts does not have.
     // prettier-ignore
-    const module = await import(/* webpackChunkName: "CPP14" */ './interpreter/CPP14');
+    const module = await import(/* webpackChunkName: "CPP14" */ '../interpreter/CPP14');
     return new module.PlivetCPP14Interpreter();
   }
   private async reset() {
@@ -89,8 +104,7 @@ class Server {
     const interpreter = await this.createInterpreter();
     interpreter.setFileList(this.files);
     this.interpreter = interpreter;
-    this.stateHistory = [];
-    this.outputsHistory = [];
+    this.history.clear();
   }
 
   private addFile(file: File) {
@@ -161,10 +175,9 @@ class Server {
     if (this.interpreter === null) {
       throw new Error('interpreter is not found');
     }
-    const state = this.interpreter.startStepExecution(sourcecode);
-    const execState = this.recordExecState(state);
-    const stdout = this.interpreter.getStdout();
-    const output = this.recordOutputText(stdout);
+    const execState = this.interpreter.startStepExecution(sourcecode);
+    const output = this.interpreter.getStdout();
+    this.record(execState, output);
     this.isExecuting = true;
     const res: Response = {
       execState,
@@ -197,8 +210,8 @@ class Server {
 
   private BackAll(sourcecode: string) {
     this.count = 0;
-    const execState = this.stateHistory[this.count];
-    const output = this.outputsHistory[this.count];
+    const execState = this.history.stateAt(this.count);
+    const output = this.history.outputAt(this.count);
     const ret: Response = {
       execState,
       output,
@@ -212,11 +225,13 @@ class Server {
   }
 
   private StepBack(sourcecode: string) {
-    if (1 <= this.count) {
+    // Not below the window: the states before it were dropped, and there is
+    // nothing to step back to. `BackAll` still reaches the first state.
+    if (this.history.oldestRetained() < this.count) {
       this.count -= 1;
     }
-    const execState = this.stateHistory[this.count];
-    const output = this.outputsHistory[this.count];
+    const execState = this.history.stateAt(this.count);
+    const output = this.history.outputAt(this.count);
     const ret: Response = {
       execState,
       output,
@@ -231,9 +246,12 @@ class Server {
 
   private Step(sourcecode: string, stdinText?: string) {
     ++this.count;
-    if (this.count < this.stateHistory.length) {
-      const execState = this.stateHistory[this.count];
-      const output = this.outputsHistory[this.count];
+    if (this.count < this.history.length) {
+      // Stepping forward out of a stretch that has been dropped - the run was
+      // long enough to evict it - resumes at the oldest step still held.
+      this.count = this.history.nextRetained(this.count);
+      const execState = this.history.stateAt(this.count);
+      const output = this.history.outputAt(this.count);
       const ret: Response = {
         execState,
         output,
@@ -259,8 +277,8 @@ class Server {
           --this.count;
           const waiting: Response = {
             sourcecode,
-            output: this.outputsHistory[this.count] ?? '',
-            execState: this.stateHistory[this.count],
+            output: this.history.outputAt(this.count),
+            execState: this.history.stateAt(this.count),
             debugState: 'stdin',
             step: this.count,
             errors: [],
@@ -281,10 +299,10 @@ class Server {
         // Report the last known good state: a null ExecState reaches the canvas
         // through the `draw` signal and takes the whole UI down with it.
         this.isExecuting = false;
-        this.count = Math.max(this.stateHistory.length - 1, 0);
+        this.count = Math.max(this.history.length - 1, 0);
         const dead: Response = {
           sourcecode,
-          output: this.outputsHistory[this.count] ?? '',
+          output: this.history.outputAt(this.count),
           execState: this.getLastHistory(),
           debugState: 'EOF',
           step: this.count,
@@ -293,10 +311,9 @@ class Server {
         };
         return dead;
       }
-      const execState = this.recordExecState(state);
-      const stdout = this.interpreter.getStdout();
-      //  console.log(`stdout:${stdout}`);
-      const output = this.recordOutputText(stdout);
+      const execState = state;
+      const output = this.interpreter.getStdout();
+      this.record(execState, output);
       //  console.log(`output:${output}`);
       // let stateText = `Step:${this.count} | Value:${execState.getCurrentValue()}`;
       let debugState: DEBUG_STATE = 'Debugging';
@@ -317,8 +334,8 @@ class Server {
       };
       return ret;
     }
-    this.count = this.stateHistory.length - 1;
-    const output = this.outputsHistory[this.count];
+    this.count = Math.max(this.history.length - 1, 0);
+    const output = this.history.outputAt(this.count);
     const ret: Response = {
       output,
       sourcecode,
@@ -345,10 +362,10 @@ class Server {
       const ret: Response = this.Step(sourcecode, pendingStdin);
       pendingStdin = undefined;
       if (ret.debugState === 'EOF') {
-        signal('EOF', ret);
+        this.report('EOF', ret);
         return;
       } else if (ret.debugState === 'stdin') {
-        signal('stdin', ret);
+        this.report('stdin', ret);
         return;
       } else if (typeof lineNumOfBreakpoint !== 'undefined') {
         if (typeof ret.execState !== 'undefined') {
@@ -356,7 +373,7 @@ class Server {
           const { codeRange } = nextExpr;
           if (codeRange) {
             if (lineNumOfBreakpoint.includes(codeRange.begin.y - 1)) {
-              signal('Breakpoint', ret);
+              this.report('Breakpoint', ret);
               return;
             }
           }
@@ -365,8 +382,8 @@ class Server {
       this.timer = global.setTimeout(loop.bind(this), 1);
     };
     loop();
-    const execState = this.stateHistory[currentCount];
-    const output = this.outputsHistory[currentCount];
+    const execState = this.history.stateAt(currentCount);
+    const output = this.history.outputAt(currentCount);
     const debugState: DEBUG_STATE = 'Executing';
     return {
       execState,
@@ -406,18 +423,18 @@ class Server {
     return ret;
   }
 
-  private recordOutputText(output: string) {
-    this.outputsHistory.push(output);
-    return output;
-  }
-
-  private recordExecState(execState: ExecState) {
-    this.stateHistory.push(execState);
-    return execState;
+  private record(execState: ExecState, output: string) {
+    this.history.push(execState, output);
   }
 
   private getLastHistory() {
-    return this.stateHistory[this.stateHistory.length - 1];
+    return this.history.lastState();
+  }
+
+  private report(event: RUN_EVENT, response: Response) {
+    if (this.onRunEvent !== null) {
+      this.onRunEvent(event, response);
+    }
   }
 }
 

@@ -3,7 +3,7 @@ import ButtonToolbar from 'react-bootstrap/lib/ButtonToolbar';
 import ButtonGroup from 'react-bootstrap/lib/ButtonGroup';
 
 import CtrlButton from './CtrlButton';
-import { DEBUG_STATE } from '../../../server';
+import { DEBUG_STATE } from '../../../core';
 import { enablementFor, runCommand, stepCommand } from './enablement';
 import '../../../css/ctrlbuttons.css';
 

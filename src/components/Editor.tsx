@@ -2,13 +2,7 @@ import * as React from 'react';
 
 import '../css/editor.css';
 import { signal, slot } from './emitter';
-import {
-  Request,
-  CONTROL_EVENT,
-  server,
-  Response,
-  DEBUG_STATE,
-} from '../server';
+import { Request, CONTROL_EVENT, server, Response, DEBUG_STATE } from '../core';
 import strings from '../strings';
 import { ExecState } from 'unicoen.ts/dist/interpreter/Engine/ExecState';
 import { Theme } from './Props';
@@ -47,15 +41,13 @@ export default class Editor extends React.Component<Props, State> {
     slot('debug', (controlEvent: CONTROL_EVENT, stdinText?: string) => {
       this.send(controlEvent, stdinText);
     });
-    slot('EOF', (response: Response) => {
+    // A run stops on its own at the end of the program, at a read or at a
+    // breakpoint, long after `StepAll` returned. The interpreter reports that
+    // directly rather than through the bus: `src/core` may not know the
+    // application exists.
+    server.onRunEvent = (_event, response: Response) => {
       this.recieve(response);
-    });
-    slot('stdin', (response: Response) => {
-      this.recieve(response);
-    });
-    slot('Breakpoint', (response: Response) => {
-      this.recieve(response);
-    });
+    };
     slot('zoom', (command: string) => {
       if (command === 'In') {
         this.setFontSize(this.fontSize + 1);

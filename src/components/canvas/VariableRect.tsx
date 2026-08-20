@@ -1,26 +1,20 @@
 import React from 'react';
 import { Group } from 'react-konva';
-import { CanvasRow, CanvasCell } from './CanvasDrawer';
+import { CellGeometry } from '../../core';
 import TextWithRect from './TextWithRect';
 
 interface Props {
-  canvasRow: CanvasRow;
+  row: CellGeometry[];
+  onToggleFold: (group: string) => void;
 }
 
 interface State {}
 
 export default class VariableRect extends React.Component<Props, State> {
-  constructor(props: Props) {
-    super(props);
-  }
   render() {
-    const canvasRow = this.props.canvasRow;
-    const list = canvasRow.map((cell: CanvasCell) => {
-      const { width, isVisible, key } = cell;
-      const x = cell.x();
-      const y = cell.y();
-      const text = cell.getText();
-      const canToggleFold = cell.canToggleFold();
+    const list = this.props.row.map((cell: CellGeometry) => {
+      const { key, x, y, text, width, colors, foldTarget } = cell;
+      const canToggleFold = typeof foldTarget !== 'undefined';
       return (
         <TextWithRect
           key={key}
@@ -29,9 +23,12 @@ export default class VariableRect extends React.Component<Props, State> {
           text={text}
           width={width}
           align={canToggleFold ? 'center' : undefined}
-          onClick={canToggleFold ? () => cell.toggleFold() : undefined}
-          isVisible={isVisible}
-          colors={cell.getColors()}
+          onClick={
+            typeof foldTarget === 'undefined'
+              ? undefined
+              : () => this.props.onToggleFold(foldTarget)
+          }
+          colors={colors}
         />
       );
     });

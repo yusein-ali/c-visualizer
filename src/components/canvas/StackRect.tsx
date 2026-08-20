@@ -1,56 +1,46 @@
 import * as React from 'react';
 import VariableRect from './VariableRect';
 import { Group } from 'react-konva';
-import { CanvasStack } from './CanvasDrawer';
+import { StackGeometry } from '../../core';
 import TextWithRect from './TextWithRect';
 
 interface Props {
-  canvasStack: CanvasStack;
+  stack: StackGeometry;
+  onToggleFold: (group: string) => void;
 }
 
 interface State {}
 
 export default class StackRect extends React.Component<Props, State> {
-  constructor(props: Props) {
-    super(props);
-  }
-
   renderHeader() {
-    const { canvasStack } = this.props;
-    const x = canvasStack.x();
-    const y = canvasStack.y();
+    const { stack } = this.props;
     return (
       <TextWithRect
-        x={x}
-        y={y}
-        text={canvasStack.name()}
-        width={canvasStack.width()}
+        x={stack.x}
+        y={stack.y}
+        text={stack.name}
+        width={stack.width}
         fontStyle="bold"
         align="center"
-        isVisible={true}
       />
     );
   }
+
   renderBody() {
-    const canvasStack = this.props.canvasStack;
-    const list: JSX.Element[] = [];
-    const canvasTable = canvasStack.getCanvasTable();
-    for (const canvasRow of canvasTable) {
-      if (!canvasRow[0].isVisible) {
-        continue;
-      }
-      const key = canvasRow.reduce((sum, cell) => sum.concat(cell.key), '');
-      list.push(<VariableRect key={key} canvasRow={canvasRow} />);
-    }
-    return list;
+    return this.props.stack.rows.map((row) => (
+      <VariableRect
+        key={row.reduce((sum, cell) => sum.concat(cell.key), '')}
+        row={row}
+        onToggleFold={this.props.onToggleFold}
+      />
+    ));
   }
+
   render() {
-    const header = this.renderHeader();
-    const body = this.renderBody();
     return (
       <Group>
-        {header}
-        {body}
+        {this.renderHeader()}
+        {this.renderBody()}
       </Group>
     );
   }
