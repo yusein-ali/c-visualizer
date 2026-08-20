@@ -452,11 +452,20 @@ read-only debug session that replaced the modal; `DebugExtensions` and
 `StateEffect.appendConfig`, and `test/editor-extensions.test.ts` covers the
 line-number conversion against a headless view. Commit `49cda77` replaced Ace
 inside the only entry point while also completing Phase 1. That historical
-ordering cannot be changed without reintroducing Ace, so the current
-CodeMirror/Konva application is the stable baseline at `index.html` and a
-separate `migration.html`, rooted at `src/migration.tsx`, is the working entry
-for Phases 8 and 9. Both start from the same working application; replacement
-graph and shell modules are imported only by the migration entry until cutover.
+ordering cannot be changed without reintroducing Ace. The CodeMirror/Konva
+application served as the stable baseline while a separate `migration.html`
+entry hosted Phase 8. That entry was removed when the JointJS graph replaced
+Konva at `index.html`.
+
+Two things step 1 asked for were finished in the Phase 9 commit, because that is
+when a theme could first be chosen at all. `@codemirror/theme-one-dark` supplies
+the dark highlight style, and `ThemeControl` now builds its two themes from two
+palettes rather than one: light and dark had shared every literal, so `dark:
+true` changed which highlight style CodeMirror believed it was under and left
+the editor white behind it. The strings the deleted edit-during-debug modal used
+
+- `editInDebug`, `continueDebug`, `restart`, `rememberCommand` and `warning` -
+  went with it.
 
 Build the new editor in `src/ui/editor/`, wired to the same event bus, behind the
 adapter described in constraint 4. From here through Phase 9, build behind a
@@ -493,8 +502,35 @@ are exported as a standalone array that attaches to any `EditorView`.
 
 ## Phase 8: visualization on JointJS
 
-**Status: not started.** There is no `@joint/core` dependency and the
-visualization is still react-konva. Item 6 depends on `StepModel` from Phase 5.
+**Status: complete.**
+The primary `/index.html` entry owns one `dia.Graph`/`dia.Paper` through
+`src/ui/graph/`. The temporary migration entry and the complete react-konva
+canvas tree are gone. `@joint/core` is pinned to 4.3.1. Its MPL-2.0 licence is
+compatible with use as an unmodified dependency of this MIT application, and
+the generated `dist/licenses.html` includes the package and its full licence
+text.
+
+The graph renders the existing layout through a custom JointJS stack-table
+element and routed links, retains fold state, and uses paper scaling instead of
+the canvas slider/spinner. `StepModel` now also carries a plain evaluated
+expression tree and seven explicit process bands: registers, text, read-only,
+initialized data, BSS, heap and stack. Declaration metadata records initializer
+and object-const status so named variables land in the correct band; synthetic
+static and heap allocations are de-duplicated against named objects. Every band
+has its own displayed base, and register objects use `R0`, `R1`, ... slots.
+
+Run redraw is suspended by the existing `Editor.recieve()` guard: an
+`Executing` response updates read-only state and returns without emitting
+`draw`; the Worker emits one final model when it stops. Unit coverage verifies
+plain Worker payloads, expression order/results, segment placement, independent
+bases and persistent folds. The production build and licence generation pass.
+A like-for-like direct `Server` run to the 271-step benchmark breakpoint was
+257 ms at the pre-Phase-8 boundary and 259 ms here (five-run medians after one
+warm-up), so expression recording adds no material interpreter regression. That
+is not the required UI/paint measurement: the Phase 6 browser timing and
+screenshot comparison still need a browser run because no controllable browser
+was available in this workspace. Use the primary launch configuration and the
+protocol in `baseline/README.md` before declaring the exit criterion met.
 
 1. Add `@joint/core`. Note the licence: it is MPL-2.0 against PLIVET's MIT. This
    is fine for a dependency but should be a recorded decision, and the
@@ -528,44 +564,78 @@ zoom work, and run-to-breakpoint does not regress against Phase 6.
 
 ## Phase 9: remove React
 
-**Status: item 3 complete, the rest not started.** The console is
-`src/ui/console/` — a `pre` and a `textarea`, framework-free, with `Console.tsx`
-as wiring only — and it took the last Ace import out of the tree, so `react-ace`,
-`@types/ace` and `ace-builds` are gone from `package.json`. Layout, controls,
-files, the switches and the cutover are all still React.
+**Status: complete.** There is no React, react-bootstrap, Bootstrap, jQuery or
+Enzyme left: `npm install` removed 139 packages, and the only `react-*` entry
+left in the lockfile is `react-is`, which Jest's `pretty-format` depends on.
+`src/components/` is gone.
 
-Build the replacement shell under `src/ui/` as plain TypeScript classes, each
-taking a mount element and an options object, each subscribing to an
-instance-scoped bus.
+What replaced it splits along the line the Sphinx extension will need. Widgets
+live under `src/ui/` — `shell`, `controls`, `console`, `editor`, `graph`,
+`files`, `help` — and each takes a mount element and an options object, holds no
+application state, and reports through callbacks. The wiring lives under
+`src/app/`: the bus, the theme, the hover text source, `EditorController` (what
+`Editor.tsx` was once the `div` and the ref came off it) and `PlivetApp`, which
+constructs the widgets and connects them. ESLint enforces the direction:
+`src/ui/**` may not import from `src/app/**`, as `src/core/**` may import
+neither.
 
-1. Layout: `App`, `EditorSide`, `CanvasSide` and `Menu` are 171 lines of
+The entry point is `src/index.ts`, and the bus is still module-level; Phase 10
+makes it an instance's own. The event union is now typed per event rather than
+`any[]`, which is what made the fan-out in `PlivetApp` checkable.
+
+1. Layout: `App`, `EditorSide` and `Menu` are Bootstrap grid/components.
    Bootstrap grid. They become static markup plus CSS grid, under the `plivet-`
-   prefix.
+   prefix. **Done.** `src/ui/shell/` is the two-column grid, the five mount
+   points and the footer, at the same breakpoints Bootstrap was being asked
+   for. The four stylesheets under `src/css/` went with it.
 2. Controls: the six debug buttons, the step counter and the debug status. The
    `DEBUG_STATE` to enablement mapping in
    `CtrlButtons.componentWillReceiveProps` is worth preserving as-is; it is the
    only real logic in the component. Replace the five Bootstrap Glyphicons with
-   inline SVG.
+   inline SVG. **Done.** `src/ui/controls/` holds the bar; `enablement.ts` moved
+   with it unchanged, and `icons.ts` draws all nine icons as inline paths.
 3. Console: a `pre` for output and a `textarea` for stdin. It is currently a
    second Ace editor.
 4. Files: a file input, a list, and a Blob URL download, replacing
-   `react-download-link` and the Bootstrap panel.
+   `react-download-link` and the Bootstrap panel. **Done.** `src/ui/files/` is a
+   `details` element, which is what the Bootstrap panel's collapse was for.
 5. User-interface language and theme switches: native `select` elements,
    replacing `react-select`. The programming-language switch is already gone
-   from Phase 1.
-6. Zoom: dropped in favour of paper scaling from Phase 8.
+   from Phase 1. **Done**, and only the theme switch was left to build: Phase 1
+   deleted the interface language along with `react-select`. The switch is a
+   `select` in the control bar. It replaces `ThemeButton`, which no component
+   ever rendered — which is why the editor's missing dark palette, fixed under
+   Phase 7 above, had never been seen.
+6. Zoom: dropped in favour of paper scaling from Phase 8. **Done.**
 7. Internationalisation: `translate()` is currently called during render, so
    React re-renders on language change for free. Replace it with an explicit pass
    that re-applies strings to labelled nodes on `changeLang`. This is the one
-   capability being hand-written rather than deleted.
-8. Delete the second entry point and cut over. Remove `react`, `react-dom`,
-   `react-ace`, `react-konva`, `react-bootstrap`, `react-container-dimensions`,
-   `react-numeric-input`, `react-select`, `react-download-link`, `rc-slider`,
-   `enzyme`, `enzyme-adapter-react-16`, `react-test-renderer`, the `@types/react*`
-   packages, `@babel/preset-react`, and `jsx` from the TypeScript configuration.
+   capability being hand-written rather than deleted. **Dropped**, by Phase 1
+   rather than here: `translate(lang, key)` and the two locale tables became one
+   English `src/strings.ts`, and there is no `changeLang` to re-apply anything
+   on. A widget reads the string it needs directly.
+8. Finish the framework cutover. The second entry point, `react-konva`, Konva,
+   `react-container-dimensions`, `react-numeric-input` and `rc-slider` are
+   already gone. Remove `react`, `react-dom`, `react-bootstrap`, `react-select`,
+   `react-download-link`, `enzyme`, `enzyme-adapter-react-16`,
+   `react-test-renderer`, the `@types/react*` packages, `@babel/preset-react`,
+   and `jsx` from the TypeScript configuration after the remaining shell is
+   replaced. **Done**, and with them Bootstrap 3, jQuery, popper.js and the
+   `$`/`jQuery` `ProvidePlugin` globals they needed, plus two dependencies that
+   earlier phases had already stopped using (`happypack`, `@babel/polyfill`).
+   `@babel/runtime` had to be declared: `@babel/plugin-transform-runtime` emits
+   imports for it, and it had only ever been present as a transitive dependency
+   of the React packages.
 
 Exit criterion: the Phase 0 checklist passes with no React in the dependency
-tree.
+tree. Met. Checked in Chrome against a production build served over http:
+loading the editor, running the sample to EOF with the expected stdout, setting
+a breakpoint from the gutter and running to it, stepping back, the read-only
+document during a session and its release on stop, the instructions dialog, the
+theme switch reaching the editor, the console and the panels, and the upload
+panel's list. `test/controls.test.ts`, `test/files.test.ts` and
+`test/shell.test.ts` cover the new widgets; `test/App.test.tsx`, the Enzyme
+smoke render, is gone.
 
 ## Phase 10: instance scoping
 
@@ -585,18 +655,23 @@ Exit criterion: two independent instances run on one page.
 
 ## Phase 11: tests, CI and maintenance
 
-**Status: partly complete.** Eleven Jest suites cover the debug extensions, the
-tooltips, the console, the `DEBUG_STATE` enablement mapping, the preprocessor and
-the interpreter end to end, and CI runs `npm ci` and `npm test` on the pinned
-Node. Still open: the Jest upgrade and moving its `globals` configuration into
-`transform`, dropping Enzyme, running lint, typecheck and build in CI, the
-second non-blocking Node major, and the dependency grouping in `renovate.json`,
-which still carries the old ignore list and no `unicoen.ts` exclusion.
+**Status: partly complete.** Nineteen Jest suites cover the debug extensions, the
+tooltips, the console, the control bar, the shell, the upload panel, the
+`DEBUG_STATE` enablement mapping, the preprocessor and the interpreter end to
+end, and CI runs `npm ci` and `npm test` on the pinned Node. Jest 29 and ts-jest
+29 are installed as a compatible set, and ts-jest is configured through
+`transform`; this also lets `npm ci` work without the former `legacy-peer-deps`
+workaround. Enzyme and the React 16 adapter left with React in Phase 9, and the
+widget tests that replaced the smoke render drive real DOM nodes. Still open:
+running lint, typecheck and build in CI, the second non-blocking Node major, and
+dependency grouping in `renovate.json`, which still has no `unicoen.ts`
+exclusion.
 
 1. Upgrade Jest and its TypeScript support as a compatible set, moving the
-   deprecated ts-jest `globals` configuration into `transform`. Drop Enzyme and
-   the React 16 adapter; without React there is no component-testing library to
-   choose.
+   deprecated ts-jest `globals` configuration into `transform`. **Done.** Enzyme
+   and the React 16 adapter were dropped with the React shell in Phase 9;
+   without React there was no component-testing library to choose, and the
+   widgets are tested through the DOM they build.
 2. Unit-test `src/core/` directly: `extractModel` against recorded `ExecState`
    fixtures, `layout` geometry, the breakpoint line-number conversion, the
    `DEBUG_STATE` to enablement mapping, and history replay for step-back.
@@ -842,13 +917,14 @@ Recorded here so the constraints above are not quietly dropped. Not in scope now
 7. Bound `stateHistory`.
 8. Worker client and Worker; `StepAll` without the timer.
 9. CodeMirror editor. **Done.** It originally landed in place in `49cda77`; the
-   stable and migration entry points are now separated for the remaining work.
+   temporary migration entry used for the renderer replacement is now gone.
 10. Debug extensions: breakpoints, step highlight, diagnostics. **Done.**
-11. JointJS graph, behind the second entry point.
-12. Redraw diffing or suspension, measured against the benchmark.
+11. JointJS graph, cut over to the primary entry. **Done.**
+12. Redraw suspension. **Done; browser benchmark pending.**
 13. Shell: layout, controls, console, files, switches. **Console done.**
 14. Instance scoping and the `Plivet` entry point.
-15. Cut over; delete React and the old entry point.
+15. Delete the remaining React shell and dependencies. The old entry point is
+    already gone.
 16. Tests, CI and dependency-update automation.
 
 Then Phase 12, once the acceptance checklist passes:

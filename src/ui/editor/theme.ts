@@ -1,5 +1,10 @@
 import { Compartment, Extension } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
+import {
+  defaultHighlightStyle,
+  syntaxHighlighting,
+} from '@codemirror/language';
+import { oneDarkHighlightStyle } from '@codemirror/theme-one-dark';
 
 /**
  * Colours are named through CSS custom properties rather than written into the
@@ -11,7 +16,46 @@ import { EditorView } from '@codemirror/view';
  * course page, the interactive-code stylesheet has already defined the middle
  * pair, so PLIVET's editor matches the interactive-code blocks around it
  * without either side knowing about the other.
+ *
+ * Only the literal at the end of each chain differs between light and dark.
+ * The dark set is what Phase 9's theme switch needed: the two themes were
+ * built from one palette, so `dark: true` changed which highlight style
+ * CodeMirror thought it was under and nothing else - the editor stayed white
+ * behind it. Nobody had seen that, because the button that would have chosen a
+ * theme was never rendered.
  */
+
+interface Palette {
+  color: string;
+  bg: string;
+  border: string;
+  gutterBg: string;
+  gutterColor: string;
+  selectionBg: string;
+  activeLineBg: string;
+}
+
+const lightPalette: Palette = {
+  color: '#212529',
+  bg: '#ffffff',
+  border: '#e3e3e3',
+  gutterBg: '#f8f9fa',
+  gutterColor: '#6c757d',
+  selectionBg: 'rgba(13, 110, 253, 0.25)',
+  activeLineBg: 'rgba(0, 0, 0, 0.04)',
+};
+
+// The console's dark literals, so the two boxes match when nothing else has an
+// opinion about either.
+const darkPalette: Palette = {
+  color: '#f8f8f2',
+  bg: '#272822',
+  border: '#3e3d32',
+  gutterBg: '#2f3129',
+  gutterColor: '#90908a',
+  selectionBg: 'rgba(13, 110, 253, 0.45)',
+  activeLineBg: 'rgba(255, 255, 255, 0.06)',
+};
 
 const colour = (name: string, bootstrap: string, fallback: string) =>
   `var(--plivet-editor-${name}, var(--interactive-editor-${name}, var(--bs-${bootstrap}, ${fallback})))`;
@@ -19,11 +63,11 @@ const colour = (name: string, bootstrap: string, fallback: string) =>
 const plain = (name: string, fallback: string) =>
   `var(--plivet-editor-${name}, var(--interactive-editor-${name}, ${fallback}))`;
 
-const chrome = {
+const chromeFor = (palette: Palette) => ({
   '&': {
-    color: colour('color', 'body-color', '#212529'),
-    backgroundColor: colour('bg', 'body-bg', '#ffffff'),
-    border: `1px solid ${colour('border', 'border-color', '#e3e3e3')}`,
+    color: colour('color', 'body-color', palette.color),
+    backgroundColor: colour('bg', 'body-bg', palette.bg),
+    border: `1px solid ${colour('border', 'border-color', palette.border)}`,
   },
   '&.cm-focused': {
     outline: `1px solid ${plain('focus-border', '#86b7fe')}`,
@@ -33,29 +77,29 @@ const chrome = {
       'var(--plivet-editor-font, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace)',
   },
   '.cm-content': {
-    caretColor: colour('caret', 'body-color', '#212529'),
+    caretColor: colour('caret', 'body-color', palette.color),
   },
   '.cm-cursor, .cm-dropCursor': {
-    borderLeftColor: colour('caret', 'body-color', '#212529'),
+    borderLeftColor: colour('caret', 'body-color', palette.color),
   },
   '&.cm-focused .cm-cursor': {
-    borderLeftColor: colour('caret', 'body-color', '#212529'),
+    borderLeftColor: colour('caret', 'body-color', palette.color),
   },
   '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection':
     {
-      backgroundColor: plain('selection-bg', 'rgba(13, 110, 253, 0.25)'),
+      backgroundColor: plain('selection-bg', palette.selectionBg),
     },
   '.cm-activeLine': {
-    backgroundColor: plain('active-line-bg', 'rgba(0, 0, 0, 0.04)'),
+    backgroundColor: plain('active-line-bg', palette.activeLineBg),
   },
   '.cm-gutters': {
-    backgroundColor: colour('gutter-bg', 'tertiary-bg', '#f8f9fa'),
-    borderRightColor: colour('border', 'border-color', '#e3e3e3'),
-    color: colour('gutter-color', 'secondary-color', '#6c757d'),
+    backgroundColor: colour('gutter-bg', 'tertiary-bg', palette.gutterBg),
+    borderRightColor: colour('border', 'border-color', palette.border),
+    color: colour('gutter-color', 'secondary-color', palette.gutterColor),
   },
   '.cm-activeLineGutter': {
-    backgroundColor: plain('active-line-bg', 'rgba(0, 0, 0, 0.04)'),
-    color: colour('color', 'body-color', '#212529'),
+    backgroundColor: plain('active-line-bg', palette.activeLineBg),
+    color: colour('color', 'body-color', palette.color),
   },
   '.cm-matchingBracket': {
     backgroundColor: plain('matching-bg', 'rgba(50, 140, 130, 0.24)'),
@@ -71,10 +115,21 @@ const chrome = {
       'rgba(187, 85, 85, 0.45)'
     )}`,
   },
-};
+});
 
-const light = EditorView.theme(chrome, { dark: false });
-const dark = EditorView.theme(chrome, { dark: true });
+/**
+ * The frame and the tokens change together: CodeMirror's default highlight
+ * style is drawn for a white background, and the purple it gives keywords is
+ * unreadable on a dark one.
+ */
+const light: Extension = [
+  EditorView.theme(chromeFor(lightPalette), { dark: false }),
+  syntaxHighlighting(defaultHighlightStyle),
+];
+const dark: Extension = [
+  EditorView.theme(chromeFor(darkPalette), { dark: true }),
+  syntaxHighlighting(oneDarkHighlightStyle),
+];
 
 /**
  * The theme is reconfigured rather than rebuilt, because a course page can
@@ -144,6 +199,10 @@ export const debugTheme = EditorView.baseTheme({
     backgroundColor:
       'var(--plivet-editor-readonly-bg, var(--interactive-editor-readonly-bg, var(--bs-secondary-bg, #f0f0f0)))',
   },
+  '&dark[read-only] .cm-scroller': {
+    backgroundColor:
+      'var(--plivet-editor-readonly-bg, var(--interactive-editor-readonly-bg, var(--bs-secondary-bg, rgba(255, 255, 255, 0.06))))',
+  },
   '&[read-only] .cm-content': {
     caretColor: 'transparent',
   },
@@ -190,5 +249,10 @@ export const debugTheme = EditorView.baseTheme({
     border: '1px solid rgba(0, 0, 0, 0.2)',
     borderRadius: '3px',
     boxShadow: '0 1px 4px rgba(0, 0, 0, 0.25)',
+  },
+  '&dark .cm-tooltip.cm-tooltip-hover': {
+    backgroundColor: 'var(--plivet-tooltip-bg, #3e3d32)',
+    color: 'var(--plivet-tooltip-color, #f8f8f2)',
+    border: '1px solid rgba(255, 255, 255, 0.25)',
   },
 });

@@ -11,6 +11,8 @@ import { UniExpr } from 'unicoen.ts/dist/node/UniExpr';
 import { UniFunctionDec } from 'unicoen.ts/dist/node/UniFunctionDec';
 import { UniIdent } from 'unicoen.ts/dist/node/UniIdent';
 import { UniMethodCall } from 'unicoen.ts/dist/node/UniMethodCall';
+import { UniNoneLiteral } from 'unicoen.ts/dist/node/UniNoneLiteral';
+import { UniProgram } from 'unicoen.ts/dist/node/UniProgram';
 import { UniUnaryOp } from 'unicoen.ts/dist/node/UniUnaryOp';
 import { UniVariableDec } from 'unicoen.ts/dist/node/UniVariableDec';
 import {
@@ -20,6 +22,7 @@ import {
   StorageRegion,
 } from './DeclarationSpecifiers';
 import { DesignatedInitializers } from './DesignatedInitializers';
+import { ExpressionRecorder } from './ExpressionTrace';
 import { FieldOffset, RecordTable } from './RecordTable';
 import { scan, ScanFailure, ScanValue } from './scanf';
 import { StructTable } from './StructTable';
@@ -215,6 +218,8 @@ export class PlivetCPP14Engine extends CPP14Engine {
   private readonly functionAddresses = new Map<string, number>();
   private readonly functionsByAddress = new Map<number, UniFunctionDec>();
   private globalScope: Scope | null = null;
+  private entryPoint: UniFunctionDec | null = null;
+  private readonly expressions = new ExpressionRecorder();
 
   /** Installs the record metadata read from the program about to execute. */
   setRecordTables(structs: StructTable, unions: UnionTable): void {
@@ -229,6 +234,7 @@ export class PlivetCPP14Engine extends CPP14Engine {
     this.functionAddresses.clear();
     this.functionsByAddress.clear();
     this.globalScope = null;
+    this.entryPoint = null;
   }
 
   setDesignatedInitializers(initializers: DesignatedInitializers): void {
@@ -391,11 +397,30 @@ export class PlivetCPP14Engine extends CPP14Engine {
    */
   protected *execExpr(expr: UniExpr, scope: Scope): any {
     const value = yield* super.execExpr(expr, scope);
-    if (!(value instanceof UniFunctionDec)) {
-      return value;
+    const result =
+      value instanceof UniFunctionDec
+        ? (this.functionAddressOf(value, scope) ?? value)
+        : value;
+    this.expressions.capture(expr, result);
+    return result;
+  }
+
+  protected *stopByYield(ret: any, nextExpr: UniExpr): any {
+    this.expressions.beforeYield(this.currentState, nextExpr);
+    return yield* super.stopByYield(ret, nextExpr);
+  }
+
+  stepExecute(): ExecState {
+    const state = super.stepExecute();
+    if (!this.isStepExecutionRunning()) {
+      this.expressions.finish(state);
     }
-    const address = this.functionAddressOf(value, scope);
-    return address === null ? value : address;
+    return state;
+  }
+
+  protected *executeStepByStep(dec: UniProgram): any {
+    this.entryPoint = this.getEntryPoint(dec);
+    return yield* super.executeStepByStep(dec);
   }
 
   /**
@@ -506,6 +531,34 @@ export class PlivetCPP14Engine extends CPP14Engine {
   functionNameAt(address: number): string | null {
     const dec = this.functionAt(address);
     return dec === null ? null : dec.name;
+  }
+
+  /** Plain text-segment entries for the Worker model. */
+  functionLocations(): { name: string; address: number }[] {
+    this.indexFunctions();
+    const locations = Array.from(this.functionAddresses.entries()).map(
+      ([name, address]) => ({ name, address })
+    );
+    const entryPoint = this.entryPoint;
+    if (
+      entryPoint !== null &&
+      !locations.some((item) => item.name === entryPoint.name)
+    ) {
+      const lastAddress = locations.reduce(
+        (maximum, item) => Math.max(maximum, item.address),
+        CODE_SEGMENT_BASE - 4
+      );
+      locations.push({
+        name: entryPoint.name,
+        address: lastAddress + 4,
+      });
+    }
+    return locations.sort((left, right) => left.address - right.address);
+  }
+
+  protected loadLibarary(global: Scope): void {
+    this.globalScope = global;
+    super.loadLibarary(global);
   }
 
   /** The function at a code address, or null when nothing is filed there. */
@@ -626,9 +679,6 @@ export class PlivetCPP14Engine extends CPP14Engine {
     for (let index = 0; index < decVar.variables.length; index += 1) {
       const def = decVar.variables[index];
       const sourceDeclaration = sourceInfo[index];
-      if (sourceDeclaration === null && this.tableFor(decVar.type) === null) {
-        continue;
-      }
       const declaration =
         sourceDeclaration === null
           ? {
@@ -645,17 +695,21 @@ export class PlivetCPP14Engine extends CPP14Engine {
           ) as StorageClass[]
         )
       );
+      const address = scope.variableAddress.get(def.name);
+      if (typeof address === 'undefined') {
+        continue;
+      }
       const info: RuntimeDeclarationInfo = {
         storageClasses,
         qualifiers: declaration.qualifiers,
         baseQualifiers: declaration.baseQualifiers,
         pointerQualifiers: declaration.pointerQualifiers,
         region: this.storageRegion(storageClasses, scope),
+        initialized:
+          def.value !== null && !(def.value instanceof UniNoneLiteral),
+        readOnly: false,
       };
-      const address = scope.variableAddress.get(def.name);
-      if (typeof address === 'undefined') {
-        continue;
-      }
+      info.readOnly = this.constBindsObject(info, scope.getRawType(address));
       this.declarationInfoByAddress.set(address, info);
       const recordArray = this.recordArrays.get(address);
       if (typeof recordArray !== 'undefined') {
@@ -1066,6 +1120,8 @@ export class PlivetCPP14Engine extends CPP14Engine {
         baseQualifiers,
         pointerQualifiers: member.pointerQualifiers,
         region: parentInfo.region,
+        initialized: parentInfo.initialized,
+        readOnly: parentInfo.readOnly || baseQualifiers.indexOf('const') !== -1,
       };
       this.declarationInfoByAddress.set(address, info);
       this.registerRecordFields(member.type, address, info);

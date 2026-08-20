@@ -18,8 +18,7 @@ import {
  * folds the user has opened, it squares off each stack's columns, places the
  * cells, and routes an arrow for every pointer whose target is on screen. It
  * knows nothing about the interpreter and nothing about a renderer - the
- * result is coordinates, which react-konva draws today and JointJS will draw
- * in Phase 8.
+ * result is coordinates consumed by the JointJS visualization.
  */
 
 export interface Point {
@@ -247,12 +246,16 @@ export function layout(model: StepModel, folds: FoldState): Geometry {
     });
 
     const height = (visible.length + 1) * CELL_HEIGHT;
+    const width =
+      rows.length === 0
+        ? Math.max(cellWidth(stack.name), CELL_FONT_SIZE * 6)
+        : rowWidth(rows);
     stacks.push({
       key: stack.key,
       name: stack.name,
       x,
       y,
-      width: rowWidth(rows),
+      width,
       height,
       rows: visible,
     });

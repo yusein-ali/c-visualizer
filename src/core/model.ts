@@ -68,6 +68,63 @@ export interface PointerModel {
   to: string;
 }
 
+/** The parts of a C process the graph presents as distinct address spaces. */
+export type MemoryRegion =
+  | 'text'
+  | 'readOnly'
+  | 'data'
+  | 'bss'
+  | 'heap'
+  | 'stack'
+  | 'registers';
+
+/**
+ * A memory band shown by the JointJS renderer. Rows reuse the cells from the
+ * compatible stack model above, so pointer keys still identify one object.
+ */
+export interface MemorySegmentModel {
+  key: MemoryRegion;
+  name: string;
+  startAddress: number;
+  rows: CellModel[][];
+}
+
+/** Fallback bases used when a segment has no live object in the current step. */
+export const MEMORY_START_ADDRESSES: Record<MemoryRegion, number> = {
+  registers: 0,
+  text: 0x1000,
+  readOnly: 0x2710,
+  data: 0x3000,
+  bss: 0x3800,
+  heap: 0x4e20,
+  stack: 0x10000,
+};
+
+/** A function occupies the text segment even though it is not a C object. */
+export interface FunctionModel {
+  name: string;
+  address: number;
+}
+
+export type ExpressionNodeKind = 'operand' | 'operator' | 'assignment';
+
+/** One evaluated part of the statement that completed at this step. */
+export interface ExpressionNodeModel {
+  key: string;
+  kind: ExpressionNodeKind;
+  text: string;
+  /** `null` means this branch of a short-circuit/ternary was not evaluated. */
+  value: string | null;
+  /** Zero-based order in which the interpreter completed this node. */
+  order: number;
+  children: ExpressionNodeModel[];
+}
+
+export interface ExpressionModel {
+  range: CodeRangeModel;
+  root: ExpressionNodeModel;
+}
+
 /** An interpreter code range: one-based lines, zero-based columns. */
 export interface CodeRangeModel {
   begin: { x: number; y: number };
@@ -92,6 +149,10 @@ export interface VariableModel {
 export interface StepModel {
   stacks: StackModel[];
   pointers: PointerModel[];
+  memory: MemorySegmentModel[];
+  functions: FunctionModel[];
+  /** The completed binary/ternary expression, including its assignment. */
+  expression: ExpressionModel | null;
   /** Every variable in scope, innermost frame last. */
   variables: VariableModel[];
   /**
@@ -104,6 +165,9 @@ export interface StepModel {
 export const emptyStepModel = (): StepModel => ({
   stacks: [],
   pointers: [],
+  memory: [],
+  functions: [],
+  expression: null,
   variables: [],
   codeRange: null,
 });

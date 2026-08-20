@@ -8,12 +8,8 @@ const tsConfigFile = `tsconfig.${isProduction ? 'prod' : 'dev'}.json`;
 
 module.exports = {
   mode: isProduction ? 'production' : 'development',
-  // Keep the application users rely on separate from the Phase 8/9 migration.
-  // `index.html` remains the stable CodeMirror/Konva application; replacement
-  // graph and shell work is imported only from `migration.tsx` until cutover.
   entry: {
-    main: './src/index.tsx',
-    migration: './src/migration.tsx',
+    main: './src/index.ts',
   },
   output: {
     filename: 'js/[name].js',
@@ -97,15 +93,10 @@ module.exports = {
       filename: 'index.html',
       chunks: ['main'],
     }),
-    new HtmlWebpackPlugin({
-      template: 'src/index.html',
-      filename: 'migration.html',
-      chunks: ['migration'],
-    }),
     new webpack.ProvidePlugin({
-      $: 'jquery',
-      jQuery: 'jquery',
       // See resolve.fallback above: these are globals in Node, not modules.
+      // `$` and `jQuery` were here too, for Bootstrap 3's plugins; Phase 9
+      // removed Bootstrap along with react-bootstrap.
       Buffer: ['buffer', 'Buffer'],
       process: 'process/browser',
     }),

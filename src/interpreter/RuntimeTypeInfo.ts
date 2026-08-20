@@ -40,12 +40,39 @@ interface VariableWithTypeInfo extends Variable {
   plivetPointerValue?: number;
 }
 
+export interface RuntimeFunctionLocation {
+  name: string;
+  address: number;
+}
+
+interface ExecStateWithTypeInfo extends ExecState {
+  plivetFunctions?: RuntimeFunctionLocation[];
+}
+
 export type DeclarationInfoLookup = (
   address: number
 ) => RuntimeDeclarationInfo | null;
 
 /** The name of the function at a code address, or null when there is none. */
 export type FunctionLookup = (address: number) => string | null;
+
+export function annotateRuntimeFunctions(
+  state: ExecState,
+  functions: RuntimeFunctionLocation[]
+): ExecState {
+  (state as ExecStateWithTypeInfo).plivetFunctions = functions.map((item) => ({
+    name: item.name,
+    address: item.address,
+  }));
+  return state;
+}
+
+export function runtimeFunctionsOf(
+  state: ExecState
+): RuntimeFunctionLocation[] {
+  const functions = (state as ExecStateWithTypeInfo).plivetFunctions;
+  return typeof functions === 'undefined' ? [] : functions;
+}
 
 /**
  * Adds enum display information to every variable in an execution snapshot.
@@ -233,6 +260,15 @@ function annotateVariable(
             annotated.plivetDeclarationInfo === undefined
               ? 'stack'
               : annotated.plivetDeclarationInfo.region,
+          initialized:
+            annotated.plivetDeclarationInfo === undefined
+              ? true
+              : annotated.plivetDeclarationInfo.initialized,
+          readOnly:
+            annotated.plivetDeclarationInfo === undefined
+              ? baseQualifiers.indexOf('const') !== -1
+              : annotated.plivetDeclarationInfo.readOnly ||
+                baseQualifiers.indexOf('const') !== -1,
         };
       }
       annotateVariable(

@@ -1,6 +1,6 @@
 import { ExecState } from 'unicoen.ts/dist/interpreter/Engine/ExecState';
 import { extractModel, extractVariables, VariableModel } from '../src/core';
-import { HoverTextSource } from '../src/components/hoverText';
+import { HoverTextSource } from '../src/app/hoverText';
 import { constructAt } from '../src/interpreter/Construct';
 import { PlivetCPP14Interpreter } from '../src/interpreter/CPP14';
 import { FunctionPointerTable } from '../src/interpreter/FunctionPointerTable';

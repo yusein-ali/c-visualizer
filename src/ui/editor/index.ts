@@ -10,7 +10,7 @@
  *     somebody else built - the `InteractiveEditor` of the interactive-code
  *     Sphinx extension, for instance.
  *
- * Nothing under this directory may import from `src/components/`, and the
+ * Nothing under this directory may import from `src/app/`, and the
  * modules that make up the debugger may only import from the five CodeMirror
  * packages the interactive-code page already loads as globals:
  * `@codemirror/state`, `view`, `language`, `commands` and `autocomplete`, plus

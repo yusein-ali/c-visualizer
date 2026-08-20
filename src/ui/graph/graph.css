@@ -1,0 +1,45 @@
+.plivet-graph {
+  width: 100%;
+  min-height: 95vh;
+  border: 1px solid #000;
+  overflow: auto;
+  background: #fff;
+}
+
+.plivet-graph__toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  gap: 0.35rem;
+  padding: 0.4rem;
+  border-bottom: 1px solid #bbb;
+  background: rgb(255 255 255 / 92%);
+}
+
+.plivet-graph__zoom {
+  min-width: 2.75rem;
+  min-height: 2rem;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid #777;
+  border-radius: 0.25rem;
+  color: #111;
+  background: #f6f6f6;
+  font:
+    600 1.2rem/1 system-ui,
+    sans-serif;
+  cursor: pointer;
+}
+
+.plivet-graph__zoom:hover,
+.plivet-graph__zoom:focus-visible {
+  background: #e7edf4;
+}
+
+.plivet-graph__paper {
+  min-width: 100%;
+}
+
+.plivet-graph .plivet-fold-cell {
+  cursor: pointer;
+}

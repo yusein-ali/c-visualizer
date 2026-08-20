@@ -1,12 +1,16 @@
-// tslint:disable:max-line-length
 /**
  * Every piece of text the interface shows, in one table. PLIVET is
  * English-only: there is no locale to select and no translation layer to go
- * through, so a component reads the string it needs straight off this object.
+ * through, so a widget reads the string it needs straight off this object.
  */
 const strings = {
   howToUse: 'How to use',
   close: 'Close',
+  debugStatus: 'DebugStatus',
+  step: 'Step',
+  theme: 'theme',
+  themeLight: 'Light theme',
+  themeDark: 'Dark theme',
   debugStart: 'restart step execution',
   debugStop: 'stop execution',
   debugBackAll: 'go backward for all steps',
@@ -16,11 +20,22 @@ const strings = {
   // Before a session exists the double arrow starts one and runs it; the
   // button had no title at all in that state.
   debugExec: 'run to the first breakpoint',
-  changeThemedark: 'change to dark theme',
-  changeThemelight: 'change to light theme',
   zoomOut: 'change the font size to smaller.',
   zoomIn: 'change the font size to larger.',
   zoomReset: 'reset the font size',
+  graphZoomOut: 'Zoom out',
+  graphZoomIn: 'Zoom in',
+  graphZoomReset: 'Reset graph zoom',
+  memoryRegisters: 'Registers',
+  memoryText: 'Text',
+  memoryReadOnly: 'Read-only memory',
+  memoryData: 'Initialized data',
+  memoryBss: 'Zero-initialized data (BSS)',
+  memoryHeap: 'Heap',
+  memoryStack: 'Stack',
+  expressionEvaluation: 'Expression evaluation',
+  expressionOrder: 'order',
+  expressionNotEvaluated: 'not evaluated',
   howToText: [
     'PVC.js has five GUI components:',
     '(1) editor, (2) execution controller, buttons, (3) I/O window, (4) canvas for visualization, and (5) file upload form.',
@@ -29,7 +44,10 @@ const strings = {
     "Canvas shows the program's execution status using tables and figures.",
     'PVC.js adaptively changes its layout to correspond with the size of the browser window.',
   ],
+  fileUpload: 'File Upload',
   uploadFile: 'The uploaded file will be displayed here.',
+  downloadFile: 'download',
+  removeFile: 'remove',
   consoleInputLabel: 'standard input',
   // The console only accepts input while a read is blocked, so the hint is
   // also how the user learns that the program is waiting for one.
@@ -69,13 +87,6 @@ const strings = {
   branchSkipped: 'this branch is skipped',
   definedOnLine: 'defined on line',
   excludedLine: 'excluded from compilation',
-  warning: 'Warning!',
-  editInDebug: `The source code being executed has been edited.
-Program behavior is not affected by changing code. 
-However, the highlight of the code may be out of place.`,
-  continueDebug: 'Continue',
-  restart: 'Restart',
-  rememberCommand: 'Remember this choice',
   sourceCode: String.raw`#include<stdio.h>
 int recursiveToThree(int n){
   printf("%d th\n", n + 1);

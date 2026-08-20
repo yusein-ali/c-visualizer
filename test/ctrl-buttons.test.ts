@@ -3,7 +3,7 @@ import {
   isLive,
   runCommand,
   stepCommand,
-} from '../src/components/menus/controle_buttons/enablement';
+} from '../src/ui/controls';
 import { DEBUG_STATE } from '../src/core';
 
 const states: DEBUG_STATE[] = [

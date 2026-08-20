@@ -20,18 +20,8 @@ module.exports = tseslint.config(
   ...tseslint.configs.recommended,
   prettier,
   {
-    files: ['**/*.ts', '**/*.tsx'],
-    languageOptions: {
-      parserOptions: { ecmaFeatures: { jsx: true } },
-    },
+    files: ['**/*.ts'],
     rules: {
-      // `interface Props {}` and `interface State {}` are how a React class
-      // component declares that it has neither. Phase 9 deletes every one of
-      // them along with React; until then they are the idiom, not a mistake.
-      '@typescript-eslint/no-empty-object-type': [
-        'error',
-        { allowInterfaces: 'always' },
-      ],
       // TypeScript resolves every identifier already, and it knows about the
       // DOM, Node and Jest globals that ESLint would otherwise report.
       'no-undef': 'off',
@@ -56,9 +46,31 @@ module.exports = tseslint.config(
         {
           patterns: [
             {
-              group: ['**/components/**', '**/ui/**'],
+              group: ['**/app/**', '**/ui/**'],
               message:
                 'src/core may not depend on the interface. Report through a callback and let the caller wire it up.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    // Phase 9's boundary. `src/ui` holds widgets that take a mount element and
+    // an options object and report through callbacks; the bus, the interpreter
+    // client and the application state live in `src/app`. A widget that
+    // imported one of them could not be lifted into the Sphinx extension,
+    // which is the whole reason the split exists.
+    files: ['src/ui/**'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['**/app/**'],
+              message:
+                'src/ui may not depend on the application. Take an option or report through a callback.',
             },
           ],
         },

@@ -1,0 +1,100 @@
+/*
+ * The debug controls: two button groups, the step counter, the theme switch
+ * and the button that opens the instructions.
+ *
+ * This replaces `src/css/ctrlbuttons.css` and the Bootstrap `ButtonToolbar`,
+ * `ButtonGroup` and `Button` around it. The three icon colours are the ones
+ * that stylesheet defined, kept because they are what tells the destructive
+ * control from the two that only move.
+ */
+
+.plivet-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 1vh 1px;
+  font-size: 14px;
+}
+
+.plivet-controls__group {
+  display: flex;
+}
+
+.plivet-controls__button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.5rem;
+  min-height: 2rem;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid var(--plivet-line, #333333);
+  background: var(--plivet-button-bg, #f6f6f6);
+  color: var(--plivet-button-color, #333333);
+  cursor: pointer;
+}
+
+/* One group reads as one control: only its ends are rounded. */
+.plivet-controls__group .plivet-controls__button + .plivet-controls__button {
+  margin-left: -1px;
+}
+
+.plivet-controls__group .plivet-controls__button:first-child {
+  border-radius: 0.25rem 0 0 0.25rem;
+}
+
+.plivet-controls__group .plivet-controls__button:last-child {
+  border-radius: 0 0.25rem 0.25rem 0;
+}
+
+.plivet-controls__button:hover:not(:disabled),
+.plivet-controls__button:focus-visible {
+  background: var(--plivet-button-hover-bg, #e7edf4);
+}
+
+.plivet-controls__button:disabled {
+  color: #949494;
+  cursor: default;
+}
+
+/* Enabled, a control says what it does to the run. */
+.plivet-controls__button--start:not(:disabled) {
+  color: rgb(3 175 122);
+}
+
+.plivet-controls__button--stop:not(:disabled) {
+  color: rgb(255 75 0);
+}
+
+.plivet-controls__button--move:not(:disabled) {
+  color: rgb(0 90 255);
+}
+
+.plivet-controls__help {
+  min-height: 2rem;
+  padding: 0.25rem 0.75rem;
+  border: 1px solid var(--plivet-line, #333333);
+  border-radius: 0.25rem;
+  background: var(--plivet-button-bg, #f6f6f6);
+  color: var(--plivet-button-color, #333333);
+  font: inherit;
+  cursor: pointer;
+}
+
+.plivet-controls__theme {
+  min-height: 2rem;
+  border: 1px solid var(--plivet-line, #333333);
+  border-radius: 0.25rem;
+  background: var(--plivet-button-bg, #f6f6f6);
+  color: var(--plivet-button-color, #333333);
+  font: inherit;
+}
+
+/*
+ * The step counter. `aria-live` is what makes stepping audible: the number is
+ * the only thing on the page that says a step happened at all.
+ */
+.plivet-controls__status {
+  margin-left: auto;
+  color: inherit;
+}

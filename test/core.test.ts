@@ -4,6 +4,7 @@ import {
   CELL_HEIGHT,
   CONTROL_EVENT,
   CellModel,
+  ExpressionNodeModel,
   FoldState,
   Server,
   StepHistory,
@@ -136,6 +137,9 @@ describe('extractModel', () => {
     expect(extractModel(null)).toEqual({
       stacks: [],
       pointers: [],
+      memory: [],
+      functions: [],
+      expression: null,
       variables: [],
       codeRange: null,
     });
@@ -159,6 +163,95 @@ describe('extractModel', () => {
       (cell) => cell.foldGroup === fold.foldTarget
     );
     expect(0 < members.length).toBe(true);
+  });
+
+  it('separates variables into standard memory segments and registers', () => {
+    const code = `
+const int readOnlyValue = 1;
+int initializedValue = 2;
+int zeroInitializedValue;
+int helper() { return initializedValue; }
+int main(void) {
+  register int cached = 3;
+  int local = 4;
+  int *dynamic = malloc(sizeof(int));
+  *dynamic = 5;
+  return readOnlyValue + helper() + zeroInitializedValue + cached + local + *dynamic;
+}
+`;
+    const model = modelWith(execute(code), (candidate) => {
+      const names = candidate.memory.flatMap((segment) =>
+        segment.rows.flatMap((row) => row.map((item) => item.text))
+      );
+      return names.indexOf('dynamic') !== -1 && names.indexOf('cached') !== -1;
+    });
+    expect(model.memory.map((segment) => segment.key)).toEqual([
+      'registers',
+      'text',
+      'readOnly',
+      'data',
+      'bss',
+      'heap',
+      'stack',
+    ]);
+    const texts = (key: string) =>
+      model.memory
+        .find((segment) => segment.key === key)!
+        .rows.flatMap((row) => row.map((item) => item.text));
+    expect(texts('registers')).toContain('cached');
+    expect(texts('registers')).toContain('R0');
+    expect(texts('text')).toContain('helper');
+    expect(texts('text')).toContain('main');
+    expect(texts('readOnly')).toContain('readOnlyValue');
+    expect(texts('data')).toContain('initializedValue');
+    expect(texts('bss')).toContain('zeroInitializedValue');
+    expect(texts('heap').some((text) => text.startsWith('Heap:'))).toBe(true);
+    expect(texts('stack')).toEqual(
+      expect.arrayContaining(['local', 'dynamic'])
+    );
+    expect(
+      new Set(model.memory.map((segment) => segment.startAddress)).size
+    ).toBe(model.memory.length);
+  });
+
+  it('carries a complete evaluated expression tree as plain data', () => {
+    const code = `
+int main(void) {
+  int left = 2;
+  int right = 3;
+  int result = left + right * 4;
+  result = result > 10 ? result - 1 : result + 1;
+  return result;
+}
+`;
+    const models = execute(code)
+      .map(extractModel)
+      .filter((model) => model.expression !== null);
+    expect(models.length).toBeGreaterThanOrEqual(2);
+    const declaration = models.find(
+      (model) => model.expression!.root.kind === 'assignment'
+    );
+    expect(declaration).toBeDefined();
+    expect(declaration!.expression!.root.text).toBe('=');
+    expect(declaration!.expression!.root.children[0].text).toBe('result');
+    const ternary = models.find((model) => {
+      const visit = (node: ExpressionNodeModel): boolean =>
+        node.text === '?:' || node.children.some(visit);
+      return visit(model.expression!.root);
+    });
+    expect(ternary).toBeDefined();
+    const nodes = (model: StepModel) => {
+      const found: ExpressionNodeModel[] = [];
+      const visit = (node: ExpressionNodeModel) => {
+        found.push(node);
+        node.children.forEach(visit);
+      };
+      visit(model.expression!.root);
+      return found;
+    };
+    expect(nodes(ternary!).some((node) => node.order < 0)).toBe(true);
+    expect(nodes(ternary!).some((node) => node.value !== null)).toBe(true);
+    expect(plain(ternary!.expression)).toBe(true);
   });
 });
 

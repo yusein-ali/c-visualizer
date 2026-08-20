@@ -45,13 +45,9 @@ npm ci
 npm run build
 ```
 
-to update `bist/` by webpack.
+to update `dist/` by webpack.
 
-During the framework migration, `npm start` serves two independently bundled
-entry points:
-
-- `http://localhost:8080/` is the stable application.
-- `http://localhost:8080/migration.html` is the Phase 8/9 working application.
-
-Keep replacement graph and shell imports behind `src/migration.tsx` until the
-Phase 9 cutover.
+`npm start` serves the application at `http://localhost:8080/`. The interface is
+framework-free: CodeMirror 6 for the editor, JointJS for the memory graph, and
+plain DOM for everything around them. React left the tree in Phase 9 of
+[UPGRADE_PLAN.md](UPGRADE_PLAN.md).

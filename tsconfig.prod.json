@@ -2,7 +2,6 @@
   "compilerOptions": {
     "module": "esnext",
     "target": "es2020",
-    "jsx": "react",
     "lib": ["esnext", "dom"],
     "moduleResolution": "node",
     "removeComments": false,
@@ -14,10 +13,10 @@
     "allowSyntheticDefaultImports": true,
     // The footer shows the version, and package.json is where it lives.
     "resolveJsonModule": true,
-    // The dependency types are not all clean under TypeScript 5 - unicoen.ts
-    // and its antlr4ts runtime predate `useDefineForClassFields` semantics,
-    // and several @types packages are pinned to the React 16 era. None of it
-    // is fixable here, and checking it says nothing about PLIVET's own code.
+    // The dependency types are not all clean under TypeScript 5: unicoen.ts
+    // and its antlr4ts runtime predate `useDefineForClassFields` semantics.
+    // That is not fixable here, and checking it says nothing about PLIVET's
+    // own code.
     "skipLibCheck": true
   },
   "include": ["./src/**/*"],

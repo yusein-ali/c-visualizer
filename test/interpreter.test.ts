@@ -1,6 +1,6 @@
 import { readFileSync } from 'fs';
 import { PlivetCPP14Interpreter } from '../src/interpreter/CPP14';
-import { libraryHelp, libraryNames } from '../src/components/libraryHelp';
+import { libraryHelp, libraryNames } from '../src/app/libraryHelp';
 import { constructAt } from '../src/interpreter/Construct';
 
 /**

@@ -9,11 +9,5 @@
   "minor": {
     "groupName": "all dependencies"
   },
-  "automergeType": "branch-push",
-  "ignoreDeps": [
-    "bootstrap",
-    "@types/bootstrap",
-    "rc-slider",
-    "@types/rc-slider"
-  ]
+  "automergeType": "branch-push"
 }

@@ -16,7 +16,10 @@ import { Expansion } from './Expansion';
 import { enumeratorDeclarations, outline, typeDeclarations } from './outline';
 import { preprocessSource } from './preprocess';
 import { RuntimeRecordTypes } from './RecordTable';
-import { annotateRuntimeVariables } from './RuntimeTypeInfo';
+import {
+  annotateRuntimeFunctions,
+  annotateRuntimeVariables,
+} from './RuntimeTypeInfo';
 import { StructTable } from './StructTable';
 import { UnionTable } from './UnionTable';
 
@@ -54,24 +57,25 @@ export class PlivetCPP14Interpreter extends Interpreter {
   }
 
   startStepExecution(code: string): ExecState {
-    return annotateRuntimeVariables(
-      this.plivetEngine.expandRecordArrays(super.startStepExecution(code)),
+    return this.describeState(super.startStepExecution(code));
+  }
+
+  stepExecute(): ExecState {
+    return this.describeState(super.stepExecute());
+  }
+
+  private describeState(state: ExecState): ExecState {
+    const annotated = annotateRuntimeVariables(
+      this.plivetEngine.expandRecordArrays(state),
       this.enumTypes,
       this.recordTypes,
       (address) => this.plivetEngine.declarationInfoAt(address),
       this.functionPointerTypes,
       (address) => this.plivetEngine.functionNameAt(address)
     );
-  }
-
-  stepExecute(): ExecState {
-    return annotateRuntimeVariables(
-      this.plivetEngine.expandRecordArrays(super.stepExecute()),
-      this.enumTypes,
-      this.recordTypes,
-      (address) => this.plivetEngine.declarationInfoAt(address),
-      this.functionPointerTypes,
-      (address) => this.plivetEngine.functionNameAt(address)
+    return annotateRuntimeFunctions(
+      annotated,
+      this.plivetEngine.functionLocations()
     );
   }
 

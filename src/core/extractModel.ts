@@ -2,6 +2,7 @@ import { ExecState } from 'unicoen.ts/dist/interpreter/Engine/ExecState';
 import { Stack } from 'unicoen.ts/dist/interpreter/Engine/Stack';
 import { Variable } from 'unicoen.ts/dist/interpreter/Engine/Variable';
 import { RuntimeDeclarationInfo } from '../interpreter/DeclarationSpecifiers';
+import { expressionTraceOf } from '../interpreter/ExpressionTrace';
 import {
   declarationInfoOf,
   displayAddressOf,
@@ -9,10 +10,15 @@ import {
   displayTypeOf,
   enumInfoOf,
   functionPointerInfoOf,
+  runtimeFunctionsOf,
 } from '../interpreter/RuntimeTypeInfo';
 import {
   CellModel,
   CodeRangeModel,
+  FunctionModel,
+  MEMORY_START_ADDRESSES,
+  MemoryRegion,
+  MemorySegmentModel,
   PointerModel,
   StackModel,
   StepModel,
@@ -228,6 +234,8 @@ function scalarRows(
     // starts.
     const pointerValue = displayPointerValueOf(variable);
     addresses.points(pointerValue === null ? value : pointerValue, valueCell);
+  } else if (functionInfo !== null && value != null) {
+    addresses.points(Number(value.valueOf()), valueCell);
   }
   addresses.declare(address, addressCell.key);
 
@@ -309,15 +317,151 @@ function variableRows(
 function stackModel(
   stack: Stack,
   getTypedef: Typedef,
-  addresses: AddressTable
+  addresses: AddressTable,
+  memory: MemoryCollector
 ): StackModel {
   const rows: CellModel[][] = [];
   for (const variable of stack.getVariables()) {
-    rows.push(
-      ...variableRows(variable, stack.name, undefined, getTypedef, addresses)
+    const variableModel = variableRows(
+      variable,
+      stack.name,
+      undefined,
+      getTypedef,
+      addresses
     );
+    rows.push(...variableModel);
+    memory.add(variable, stack.name, variableModel);
   }
   return { key: stack.name, name: stack.name, rows };
+}
+
+interface MemoryEntry {
+  address: number;
+  engineAddress: number;
+  rows: CellModel[][];
+  synthetic: boolean;
+}
+
+const MEMORY_ORDER: MemoryRegion[] = [
+  'registers',
+  'text',
+  'readOnly',
+  'data',
+  'bss',
+  'heap',
+  'stack',
+];
+
+/** Separates live variables without changing the compatible stack model. */
+class MemoryCollector {
+  private readonly entries = new Map<MemoryRegion, MemoryEntry[]>();
+
+  add(variable: Variable, stackName: string, rows: CellModel[][]): void {
+    const region = memoryRegionOf(variable, stackName);
+    const entries = this.entries.get(region) || [];
+    entries.push({
+      address: displayAddressOf(variable),
+      engineAddress: variable.address,
+      rows,
+      synthetic: /^(Static|Heap):/.test(variable.name),
+    });
+    this.entries.set(region, entries);
+  }
+
+  addFunctions(functions: FunctionModel[], addresses: AddressTable): void {
+    const entries = this.entries.get('text') || [];
+    for (const fn of functions) {
+      const key = `text-${fn.name}`;
+      const addressCell = cell(
+        `&${fn.name}(${formatAddress(fn.address)}) `,
+        key,
+        'address'
+      );
+      const rows = [
+        [
+          cell('function', key, 'type'),
+          cell(fn.name, key, 'name'),
+          cell('code', key, 'value'),
+          addressCell,
+        ],
+      ];
+      addresses.declare(fn.address, addressCell.key);
+      entries.push({
+        address: fn.address,
+        engineAddress: fn.address,
+        rows,
+        synthetic: false,
+      });
+    }
+    this.entries.set('text', entries);
+  }
+
+  segments(): MemorySegmentModel[] {
+    const namedAddresses = new Set<number>();
+    for (const entries of this.entries.values()) {
+      for (const entry of entries) {
+        if (!entry.synthetic) {
+          namedAddresses.add(entry.engineAddress);
+        }
+      }
+    }
+    return MEMORY_ORDER.map((key) => {
+      const entries = (this.entries.get(key) || []).filter(
+        (entry) => !entry.synthetic || !namedAddresses.has(entry.engineAddress)
+      );
+      const first = entries.reduce<number | null>(
+        (lowest, entry) =>
+          lowest === null ? entry.address : Math.min(lowest, entry.address),
+        null
+      );
+      const rows = entries.flatMap((entry) => entry.rows);
+      const displayRows =
+        key === 'registers'
+          ? rows.map((row, index) =>
+              row.map((item) =>
+                item.kind === 'address'
+                  ? {
+                      ...item,
+                      text: `R${index}`,
+                      width: cellWidth(`R${index}`),
+                    }
+                  : item
+              )
+            )
+          : rows;
+      return {
+        key,
+        name: key,
+        startAddress:
+          key === 'registers' || first === null
+            ? MEMORY_START_ADDRESSES[key]
+            : first,
+        rows: displayRows,
+      };
+    });
+  }
+}
+
+function memoryRegionOf(variable: Variable, stackName: string): MemoryRegion {
+  if (variable.name.startsWith('Heap:')) {
+    return 'heap';
+  }
+  if (variable.name.startsWith('Static:')) {
+    return 'readOnly';
+  }
+  const declaration = declarationInfoOf(variable);
+  if (declaration !== null) {
+    if (declaration.region === 'register') {
+      return 'registers';
+    }
+    if (declaration.region === 'static' || declaration.region === 'global') {
+      if (declaration.readOnly) {
+        return 'readOnly';
+      }
+      return declaration.initialized ? 'data' : 'bss';
+    }
+  }
+  return stackName === 'GLOBAL' ? 'data' : 'stack';
 }
 
 function codeRangeOf(execState: ExecState): CodeRangeModel | null {
@@ -343,17 +487,25 @@ export function extractModel(execState?: ExecState | null): StepModel {
   }
   const getTypedef: Typedef = execState.getTypedef.bind(execState);
   const addresses = new AddressTable();
+  const memory = new MemoryCollector();
   const stacks: StackModel[] = [];
   for (const stack of execState.getStacks()) {
-    const model = stackModel(stack, getTypedef, addresses);
+    const model = stackModel(stack, getTypedef, addresses, memory);
     // A stack with no variables in it yet is not drawn at all.
     if (0 < model.rows.length) {
       stacks.push(model);
     }
   }
+  const functions: FunctionModel[] = runtimeFunctionsOf(execState).map(
+    ({ name, address }) => ({ name, address })
+  );
+  memory.addFunctions(functions, addresses);
   return {
     stacks,
     pointers: addresses.resolve(),
+    memory: memory.segments(),
+    functions,
+    expression: expressionTraceOf(execState),
     variables: extractVariables(execState),
     codeRange: codeRangeOf(execState),
   };

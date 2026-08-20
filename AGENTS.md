@@ -28,23 +28,25 @@ framework-free, browser-only widget — CodeMirror 6 instead of Ace, JointJS
 instead of react-konva, the interpreter in a Web Worker, and no React at all —
 so that it can later be embedded in an A+ Sphinx extension alongside the
 `interactive-code` extension in the `ai-enabled-wearable-technology` course repo.
-Scope has narrowed to C only. Do not upgrade React, react-bootstrap or Konva,
-and do not reintroduce Java, Python, Ace or a second interface language.
+Phases 1–9 are done: the interface is plain TypeScript and the DOM. Scope has
+narrowed to C only. Do not reintroduce React, react-bootstrap, Bootstrap,
+jQuery, Enzyme, Java, Python, Ace, Konva or a second interface language.
 
 ## Tech stack
 
 | Concern       | Choice                                                                                                                            |
 | ------------- | --------------------------------------------------------------------------------------------------------------------------------- |
 | Language      | TypeScript 5.9, `strict`, `noUnusedLocals`/`noUnusedParameters`/`noImplicitReturns`                                               |
-| UI            | React 16 **class components** (no hooks anywhere), `react-bootstrap` 0.33 / Bootstrap **3**                                       |
-| Code editor   | CodeMirror 6 — `src/ui/editor/`, framework-free; `Editor.tsx` is only the wiring                                                  |
-| Console       | Plain DOM — `src/ui/console/`, framework-free; `Console.tsx` is only the wiring                                                   |
-| Core          | `src/core/` — interpreter session, step model and layout; no DOM, no React, no renderer, enforced by ESLint                       |
-| Visualization | Konva via `react-konva` (`Stage` / `Layer` / shapes)                                                                              |
+| UI            | No framework. `src/ui/**` — plain TypeScript classes over the DOM, one directory per widget, each with its own stylesheet         |
+| Wiring        | `src/app/**` — the event bus, the theme, and the classes that connect the widgets to the interpreter                              |
+| Code editor   | CodeMirror 6 — `src/ui/editor/`                                                                                                   |
+| Console       | Plain DOM — `src/ui/console/`                                                                                                     |
+| Core          | `src/core/` — interpreter session, step model and layout; no DOM, no renderer, enforced by ESLint                                 |
+| Visualization | JointJS 4 — `src/ui/graph/`                                                                                                       |
 | Interpreter   | [`unicoen.ts`](https://www.npmjs.com/package/unicoen.ts) 0.5.0 — deep imports like `unicoen.ts/dist/interpreter/Engine/ExecState` |
 | Build         | webpack 5 + babel-loader (transpile only) + `fork-ts-checker-webpack-plugin` (types)                                              |
 | Lint/format   | ESLint 9 (flat config, `eslint.config.js`) + Prettier 3 (single quotes, semicolons, es5 trailing commas)                          |
-| Test          | Jest 26 + `ts-jest` + Enzyme (adapter for React 16)                                                                               |
+| Test          | Jest 29 + `ts-jest`, jsdom; widgets are tested through the DOM they build                                                         |
 
 ## Toolchain — read before running anything
 
@@ -53,9 +55,11 @@ and do not reintroduce Java, Python, Ace or a second interface language.
 - Package manager is **npm** (`package-lock.json` is committed; CI uses `npm ci`).
   `yarn.lock` was removed in Phase 2 of `UPGRADE_PLAN.md`. Do not reintroduce
   yarn or pnpm.
-- `.npmrc` sets `legacy-peer-deps=true` because `react-konva@16.9.0-1` declares
-  peer `react@16.9.x` against the project's `react@16.14.0`. Delete it in the
-  commit that removes react-konva (Phase 8/9).
+- There is intentionally no `.npmrc`: the `legacy-peer-deps` workaround was
+  removed with react-konva. Do not restore it to hide dependency conflicts.
+- `@babel/runtime` is a direct dependency because `@babel/plugin-transform-runtime`
+  emits imports for it. It used to arrive transitively through React; removing
+  React broke the build until it was declared.
 - The browser policy is the `browserslist` key in `package.json`: the last two
   versions of Chrome, Firefox, Edge and Safari, plus Firefox ESR. It is what
   `@babel/preset-env` compiles against, and it is chosen to match CodeMirror 6,
@@ -85,30 +89,43 @@ push to `master`.
 ## Architecture
 
 ```
-src/index.tsx
-  └─ AppContainer.tsx    holds the only top-level state: theme
-       └─ App.tsx        two-column bootstrap Grid
-            ├─ EditorSide.tsx → Menu (CtrlButtons) · Editor · Console · FileForm
-            └─ CanvasSide.tsx → ScaleMenu · Canvas → CanvasContent → StackRect/…
+src/index.ts
+  └─ app/PlivetApp.ts        holds the only top-level state: theme
+       ├─ ui/shell/          two-column CSS grid: five mount points and the footer
+       ├─ ui/controls/       six debug buttons, text size, theme switch, step counter
+       ├─ app/EditorController.ts → ui/editor/  (CodeMirror 6)
+       ├─ ui/console/        a `pre` and a `textarea`
+       ├─ ui/files/          a `details` panel, the upload input and the list
+       ├─ ui/help/           the instructions, in a `dialog`
+       └─ ui/graph/          PlivetGraph (JointJS paper and graph)
 ```
+
+Two boundaries, both enforced by ESLint rather than remembered:
+
+- `src/core/**` may import neither `src/app/**` nor `src/ui/**`.
+- `src/ui/**` may not import `src/app/**`. A widget takes a mount element and an
+  options object, holds no application state, and reports through callbacks —
+  which is what lets one be lifted into the Sphinx extension unchanged.
 
 ### The event bus is the backbone
 
-`src/components/emitter.ts` wraps a single Node `EventEmitter` with a typed event union
-(`'debug' | 'changeState' | 'draw' | 'redraw' | 'changeOutput' | 'files' | 'stdin' |
-'EOF' | 'Breakpoint' | 'zoom' | 'changeTheme'`) and two
-helpers: `signal(event, ...)` to emit and `slot(event, cb)` to subscribe.
+`src/app/emitter.ts` wraps a single Node `EventEmitter` with a typed event union
+(`'debug' | 'changeTheme' | 'changeState' | 'changeOutput' | 'zoom' | 'draw'`) and
+two helpers: `signal(event, ...)` to emit and `slot(event, cb)` to subscribe. The
+payload of each event is declared in `EventPayloads`, so a `signal` is checked
+against the `slot` that answers it.
 
-Components subscribe **in their constructors** and never unsubscribe (hence
+Subscriptions are made **in constructors** and never removed (hence
 `setMaxListeners(20)`). Follow that existing pattern rather than mixing in a new state
-solution; if you add an event, add it to the `event` union first — that union is the
-only registry.
+solution; if you add an event, add it to the `event` union and `EventPayloads`
+first — that union is the only registry. Phase 10 makes the bus per instance.
 
 ### One debug step, end to end
 
-1. `CtrlButtons` renders `CtrlButton`s that `signal('debug', <CONTROL_EVENT>)`.
+1. `ControlBar` reports a button press and `PlivetApp` turns it into
+   `signal('debug', <CONTROL_EVENT>)`.
    Control events: `Start | Stop | Step | StepBack | StepAll | BackAll | Exec | SyntaxCheck`.
-2. `Editor.send()` builds a `Request { controlEvent, sourcecode, stdinText,
+2. `EditorController.send()` builds a `Request { controlEvent, sourcecode, stdinText,
 lineNumOfBreakpoint }` and awaits `server.send(request)`.
 3. `core/server.ts` lazily `import()`s the CPP14 interpreter (webpack chunk `CPP14`
    — still a dynamic import, to keep the parser out of the initial bundle and
@@ -121,22 +138,23 @@ lineNumOfBreakpoint }` and awaits `server.send(request)`.
    `StepAll` loops with `setTimeout(…, 1)` so the UI stays responsive, and calls
    `server.onRunEvent` with `'EOF'` / `'stdin'` / `'Breakpoint'` when it needs to
    stop. `Editor` sets that callback; the core does not know the bus exists.
-4. `Editor.recieve()` (note the spelling) fans the `Response` out:
-   `signal('changeState', debugState, step)` → Menu + CtrlButtons enablement,
-   `signal('changeOutput', …)` → Console, `signal('draw', execState)` → Canvas,
-   `signal('files', …)` → FileForm. It also highlights the current statement in
-   the editor.
-5. `Canvas` turns the `ExecState` into a `StepModel` with
+4. `EditorController.recieve()` (note the spelling) fans the `Response` out:
+   `signal('changeState', debugState, step)` → the control bar's enablement and
+   the console's writability, `signal('changeOutput', …)` → the console,
+   `signal('draw', stepModel)` → the graph. It also highlights the current
+   statement in the editor.
+5. The Worker turns the `ExecState` into a `StepModel` with
    [extractModel](src/core/extractModel.ts) — plain rows of cells, with every
-   pointer resolved to the key of the cell it names — and lays it out with
-   [layout](src/core/layout.ts), which squares off the columns, places the cells
-   and routes the arrows. `CanvasContent` renders that geometry: cells on one
-   Konva layer, arrows on another. Which aggregates are folded is the
-   component's `FoldState`, not the model's, so a fold survives a step.
+   pointer resolved to the key of the cell it names. `PlivetGraph` lays it out
+   with [layout](src/core/layout.ts), then renders custom JointJS table elements
+   and routed links. Which aggregates are folded is the graph instance's
+   `FoldState`, not the model's, so a fold survives a step.
 
 Debug states (`DEBUG_STATE`): `First | Debugging | stdin | EOF | Stop | Executing`.
-`CtrlButtons.componentWillReceiveProps` maps each state to which buttons are enabled —
-change that switch when adding a state.
+`enablementFor` in [src/ui/controls/enablement.ts](src/ui/controls/enablement.ts)
+maps each state to which buttons are enabled, and to what the two forward
+buttons mean there — change that switch when adding a state. The mapping is
+total on purpose; the comment in that file says what went wrong when it was not.
 
 ### Other pieces
 
@@ -151,50 +169,57 @@ change that switch when adding a state.
   Console's `textarea` becomes writable, and the line submitted with Enter comes back as
   `Request.stdinText`. The interpreter echoes what it reads into its own stdout, so the
   console never writes the typed line into the transcript itself.
-- **File uploads** — `FileForm` reads files as `ArrayBuffer` into `server.files`, which is
-  handed to the interpreter via `setFileList` so C programs can `fopen` them.
+- **File uploads** — `FilePanel` hands the chosen `FileList` to `PlivetApp`, which
+  reads them as `ArrayBuffer` into the interpreter client; they cross to the
+  Worker and reach the interpreter via `setFileList`, so C programs can `fopen`
+  them.
 - **UI text** — one English table in [src/strings.ts](src/strings.ts), read
   directly (`strings.howToUse`). Keys assembled at runtime — `construct${kind}`,
   `${signal}${command}` — go through `stringFor(key)`. The starter program is
   the `sourceCode` entry in that same table.
-- **Theming** — `'light' | 'dark'` broadcast over `changeTheme`; the editor
-  reconfigures its CodeMirror theme, the console flips a `plivet-console--dark`
-  class, and CSS classes `theme-light`/`theme-gray` come from `src/css/theme.css`.
+- **Theming** — `'light' | 'dark'`, chosen from a `select` in the control bar and
+  broadcast over `changeTheme`. The shell flips `plivet--dark` on its root, where
+  `--plivet-surface`, `--plivet-ink`, `--plivet-line` and the three
+  `--plivet-button-*` tokens are defined for both themes; the console flips its
+  own class, and the editor reconfigures its CodeMirror theme. The visualization
+  keeps a light paper in both themes — the cell palette is part of the drawing.
 
 ## Conventions
 
-- 2-space indent, single quotes, semicolons, trailing commas — enforced by Prettier
-  through TSLint. Run `npm run ts-lint` (or just build: `tslint-loader` runs with `fix: true`
-  during webpack, so building can rewrite your source files).
-- React class components with an explicit `interface Props` / `interface State`; shared
-  prop shapes (`ThemeProps`) live in
-  [src/components/Props.ts](src/components/Props.ts) and are combined with `&`.
-- React components import their stylesheet from `src/css/`. Framework-free code
-  under `src/ui/` carries its own appearance instead — a CodeMirror theme for the
-  editor, a colocated `console.css` for the console — so that a module can be
-  lifted into another page without a stylesheet to register alongside it.
+- 2-space indent, single quotes, semicolons, trailing commas — enforced by
+  Prettier and ESLint. Run `npm run format` for formatting; builds do not rewrite
+  source files.
+- A widget is a class that takes `(parent: HTMLElement, options)`, appends its
+  own root element, exposes `setX()` methods for what changes, and has a
+  `destroy()`. Options carry callbacks (`onDebug`, `onUpload`, …), never the bus.
+- Every widget carries its own appearance: a colocated stylesheet whose rules
+  all sit under one `plivet-` class, or a CodeMirror theme. There is no shared
+  stylesheet to register alongside a module lifted into another page. Colours are
+  named through a fallback chain — `--plivet-*` → `--interactive-editor-*` →
+  `--bs-*` → a literal — so a host page's palette wins and standalone the
+  literals do.
 - The webpack configs are commented in Japanese; keep them intact when editing.
 
 ## Testing
 
-`test/App.test.tsx` is an Enzyme `shallow` smoke render of `AppContainer`.
-Jest is scoped to `roots: ['<rootDir>/test']` with `tsconfig.test.json`, CSS mapped to
-`identity-obj-proxy`, and TS diagnostic 2604 suppressed (a `react-numeric-input` typing
-quirk). New tests go under `test/` as `*.test.tsx`. There is no e2e/browser test harness;
-verify interpreter/canvas behavior manually with `npm start` (blocked until Phase 3).
+Jest is scoped to `roots: ['<rootDir>/test']` with `tsconfig.test.json`, and CSS
+is mapped to `identity-obj-proxy`. New tests go under `test/` as `*.test.ts`.
+Widgets are tested by mounting them into a `div` and driving real DOM events —
+see `test/console.test.ts`, `test/controls.test.ts`, `test/files.test.ts` and
+`test/shell.test.ts`. There is no e2e harness; verify interpreter and graph
+behaviour in a browser with `npm start`, or against a production build served
+over http.
 
 ## Gotchas
 
-- **Misspelled names are load-bearing.** `src/components/canvas/scales/ScaleMune.tsx`
-  (Menu), `src/components/menus/controle_buttons/`, and `Editor.recieve()` are the actual
-  identifiers. Don't rename them incidentally — do it only as a deliberate, complete
-  rename.
+- **A misspelled name is load-bearing.** `EditorController.recieve()` is the
+  actual identifier. Don't rename it incidentally — do it only as a deliberate,
+  complete rename. (`src/components/menus/controle_buttons/` was the other one;
+  it went with React in Phase 9.)
 - `HardSourceWebpackPlugin` caches into `node_modules/.cache/hard-source/`; delete it if
   the build behaves impossibly after dependency changes.
-- `Canvas.render()` lays the whole step out again on every render. The layout is
-  cheap-but-not-free and pure: it never mutates the model, so the same step can
-  be laid out repeatedly with different folds.
-- Dependency history is dominated by Renovate bot PRs; the pinned old majors (webpack 4,
-  React 16, Bootstrap 3, TSLint) are intentional, not neglected — don't "upgrade while
-  you're in there."
-- `README.md` mentions `bist/`; the output directory is `dist/`.
+- `PlivetGraph.render()` rebuilds the JointJS scene for one visible step. During
+  run-all, redraw is suspended until execution stops. Layout is pure and never
+  mutates the model, so a step can be laid out repeatedly with different folds.
+- Dependency history is dominated by Renovate bot PRs. `unicoen.ts` is frozen
+  upstream and must not be bumped.

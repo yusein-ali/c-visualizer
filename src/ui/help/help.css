@@ -1,0 +1,52 @@
+/*
+ * The instructions. It was a Bootstrap `Modal`: a div pretending to be a
+ * dialog, with the framework supplying the backdrop, the focus trap and the
+ * Escape key. A `dialog` element is given all three by the browser.
+ */
+
+.plivet-help {
+  max-width: 40rem;
+  padding: 0;
+  border: 1px solid var(--plivet-line, #333333);
+  border-radius: 0.3rem;
+  color: var(--plivet-ink, #333333);
+  background: var(--plivet-surface, #ffffff);
+  font-family: var(--plivet-font, system-ui, sans-serif);
+  font-size: 14px;
+}
+
+.plivet-help::backdrop {
+  background: rgb(0 0 0 / 45%);
+}
+
+.plivet-help__title {
+  margin: 0;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--plivet-line, #e5e5e5);
+  font-size: 1.25rem;
+}
+
+.plivet-help__body {
+  padding: 0.5rem 1rem;
+}
+
+.plivet-help__body p {
+  margin: 0.5rem 0;
+}
+
+.plivet-help__footer {
+  padding: 0.75rem 1rem;
+  border-top: 1px solid var(--plivet-line, #e5e5e5);
+  text-align: right;
+}
+
+.plivet-help__close {
+  min-height: 2rem;
+  padding: 0.25rem 0.75rem;
+  border: 1px solid var(--plivet-line, #333333);
+  border-radius: 0.25rem;
+  background: var(--plivet-button-bg, #f6f6f6);
+  color: var(--plivet-button-color, #333333);
+  font: inherit;
+  cursor: pointer;
+}

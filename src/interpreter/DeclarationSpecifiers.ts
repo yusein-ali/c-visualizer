@@ -19,9 +19,16 @@ export interface RuntimeDeclarationInfo {
   baseQualifiers?: TypeQualifier[];
   pointerQualifiers?: TypeQualifier[][];
   region: StorageRegion;
+  /** Whether this declaration had an initializer in the source. */
+  initialized: boolean;
+  /** Whether `const` binds the declared object rather than its pointee. */
+  readOnly: boolean;
 }
 
-export type DeclarationSpecifierInfo = Omit<RuntimeDeclarationInfo, 'region'>;
+export type DeclarationSpecifierInfo = Omit<
+  RuntimeDeclarationInfo,
+  'region' | 'initialized' | 'readOnly'
+>;
 
 interface Occurrence {
   name: StorageClass | TypeQualifier;

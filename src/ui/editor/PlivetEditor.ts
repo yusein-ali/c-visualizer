@@ -8,10 +8,8 @@ import {
 } from '@codemirror/view';
 import {
   bracketMatching,
-  defaultHighlightStyle,
   indentOnInput,
   indentUnit,
-  syntaxHighlighting,
 } from '@codemirror/language';
 import {
   defaultKeymap,
@@ -84,7 +82,8 @@ export class PlivetEditor {
 
     const extensions: Extension[] = [
       cpp(),
-      syntaxHighlighting(defaultHighlightStyle),
+      // Syntax highlighting comes with the theme: which style is readable
+      // depends on what colour is behind it. See `ThemeControl`.
       highlightActiveLine(),
       highlightActiveLineGutter(),
       history(),
