@@ -32,10 +32,13 @@ export interface Construct {
  * What a type declaration says, field by field. A C declaration always names a
  * complete type - only the qualifiers may be absent - so a tooltip that shows
  * the type alone hides half of what the compiler read.
+ *
+ * There is deliberately no storage-class field here. The grammar groups
+ * `typedef` with the storage-class specifiers for syntactic convenience, but a
+ * typedef declaration does not declare an object or give anything storage.
+ * `nameKind` records what it actually introduces: a typedef name or a tag.
  */
 export interface TypeDeclarationDetail {
-  /** `typedef`, which C counts among the storage-class specifiers. */
-  storageClasses: string[];
   qualifiers: string[];
   /** The type being named: `enum Mode`, `struct Sensor`, `int *`. */
   type: string;

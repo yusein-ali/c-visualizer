@@ -150,7 +150,6 @@ int main(){
       )!.declaredTypes
     ).toEqual([
       {
-        storageClasses: ['typedef'],
         qualifiers: ['const'],
         type: 'enum Mode',
         nameKind: 'typedefName',
@@ -284,7 +283,6 @@ int main(){
       constructAt(constructs(code), 1, 1)!.declaredTypes;
     expect(declared('typedef volatile struct Sensor LiveSensor;')).toEqual([
       {
-        storageClasses: ['typedef'],
         qualifiers: ['volatile'],
         type: 'struct Sensor',
         nameKind: 'typedefName',
@@ -293,7 +291,6 @@ int main(){
     ]);
     expect(declared('typedef int * const ConstPointer;')).toEqual([
       {
-        storageClasses: ['typedef'],
         qualifiers: ['const'],
         type: 'int *',
         nameKind: 'typedefName',
@@ -302,7 +299,6 @@ int main(){
     ]);
     expect(declared('typedef _Atomic(int) Counter;')).toEqual([
       {
-        storageClasses: ['typedef'],
         qualifiers: ['_Atomic'],
         type: 'int',
         nameKind: 'typedefName',
@@ -311,7 +307,6 @@ int main(){
     ]);
     expect(declared('typedef int Grid[3][3];')).toEqual([
       {
-        storageClasses: ['typedef'],
         qualifiers: [],
         type: 'int[3][3]',
         nameKind: 'typedefName',
@@ -321,14 +316,12 @@ int main(){
     // `const` binds to the pointer declarator, so it is no part of Q's type.
     expect(declared('typedef int * const P, Q;')).toEqual([
       {
-        storageClasses: ['typedef'],
         qualifiers: ['const'],
         type: 'int *',
         nameKind: 'typedefName',
         name: 'P',
       },
       {
-        storageClasses: ['typedef'],
         qualifiers: [],
         type: 'int',
         nameKind: 'typedefName',
@@ -342,7 +335,6 @@ int main(){
       constructAt(constructs(code), 1, 1)!.declaredTypes;
     expect(declared('typedef struct Point { int x; } PointAlias;')).toEqual([
       {
-        storageClasses: ['typedef'],
         qualifiers: [],
         type: 'struct Point',
         nameKind: 'typedefName',
@@ -351,7 +343,6 @@ int main(){
     ]);
     expect(declared('typedef const enum Color { RED, BLUE } Shade;')).toEqual([
       {
-        storageClasses: ['typedef'],
         qualifiers: ['const'],
         type: 'enum Color',
         nameKind: 'typedefName',
@@ -360,7 +351,6 @@ int main(){
     ]);
     expect(declared('typedef struct { int x; } Point;')).toEqual([
       {
-        storageClasses: ['typedef'],
         qualifiers: [],
         type: 'struct without a tag',
         nameKind: 'typedefName',
@@ -374,7 +364,6 @@ int main(){
       constructAt(constructs('struct Point { int x; };'), 1, 1)!.declaredTypes
     ).toEqual([
       {
-        storageClasses: [],
         qualifiers: [],
         type: 'struct Point',
         nameKind: 'tag',
@@ -383,14 +372,7 @@ int main(){
     ]);
     expect(
       constructAt(constructs('union Value { int whole; };'), 1, 1)!.detail
-    ).toBe(
-      [
-        'type: union Value',
-        'storage class: none',
-        'qualifiers: none',
-        'tag: Value',
-      ].join('\n')
-    );
+    ).toBe(['type: union Value', 'qualifiers: none', 'tag: Value'].join('\n'));
   });
 
   it('reports a record with no tag as one written without a tag', () => {

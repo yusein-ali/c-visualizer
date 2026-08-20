@@ -460,7 +460,7 @@ function functionDetail(
 function typeDetail(
   spelled: string,
   name: string,
-  storageClasses: string[]
+  nameKind: TypeDeclarationDetail['nameKind']
 ): TypeDeclarationDetail {
   const qualifiers: string[] = [];
   // `_Atomic(int)` qualifies the type it wraps; the parentheses belong to the
@@ -471,12 +471,10 @@ function typeDetail(
       qualifiers.push(word);
       return '';
     });
-  const isTypedef = storageClasses.indexOf('typedef') !== -1;
   return {
-    storageClasses,
     qualifiers: unique(qualifiers),
     type: normalizeSpace(type),
-    nameKind: isTypedef ? 'typedefName' : 'tag',
+    nameKind,
     name,
   };
 }
@@ -510,12 +508,12 @@ function typedefDetails(
       const star = prefix.indexOf('*');
       root = normalizeSpace(star === -1 ? prefix : prefix.slice(0, star));
       declared.push(
-        typeDetail(`${normalizeSpace(prefix)}${arrays}`, alias, ['typedef'])
+        typeDetail(`${normalizeSpace(prefix)}${arrays}`, alias, 'typedefName')
       );
       continue;
     }
     const spelled = normalizeSpace(`${root} ${prefix}`);
-    declared.push(typeDetail(`${spelled}${arrays}`, alias, ['typedef']));
+    declared.push(typeDetail(`${spelled}${arrays}`, alias, 'typedefName'));
   }
   return declared.length === 0 ? null : declared;
 }
@@ -523,7 +521,6 @@ function typedefDetails(
 const typeDeclarationText = (declaration: TypeDeclarationDetail): string =>
   [
     `type: ${declaration.type}`,
-    `storage class: ${declaration.storageClasses.join(', ') || 'none'}`,
     `qualifiers: ${declaration.qualifiers.join(', ') || 'none'}`,
     `${declaration.nameKind === 'tag' ? 'tag' : 'typedef name'}: ${
       declaration.name || 'none'
@@ -751,7 +748,7 @@ export function typeDeclarations(code: string): Construct[] {
       const end = typedef !== null && semicolon !== -1 ? semicolon + 1 : close;
       const record =
         tag === '' ? `${keyword} without a tag` : `${keyword} ${tag}`;
-      let declared: TypeDeclarationDetail[] = [typeDetail(record, tag, [])];
+      let declared: TypeDeclarationDetail[] = [typeDetail(record, tag, 'tag')];
       if (typedef !== null && semicolon !== -1) {
         // Qualifiers sit between `typedef` and the keyword: `typedef const
         // struct S { ... } A` makes A a const S, not a plain one.
@@ -761,7 +758,7 @@ export function typeDeclarations(code: string): Construct[] {
         declared = typedefDetails(
           qualified,
           masked.slice(close + 1, semicolon)
-        ) || [typeDetail(qualified, '', ['typedef'])];
+        ) || [typeDetail(qualified, '', 'typedefName')];
       }
       declarations.push({
         kind: 'typeDec',

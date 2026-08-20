@@ -459,7 +459,10 @@ Build the new editor in `src/ui/editor/`, wired to the same event bus, behind th
 adapter described in constraint 4. From here through Phase 9, build behind a
 second Webpack entry point so every commit leaves a working application.
 
-0. typedef tooltip indicate typedef as storage class specifier which is wrong. user formal C.  
+0. Correct typedef tooltips to use formal C terminology without claiming that
+   `typedef` gives anything a storage class. (completed: type declarations now
+   identify the introduced typedef name or tag and reserve storage-class
+   reporting for declarations of objects.)
 1. Add the CodeMirror 6 packages: `state`, `view`, `language`, `commands`,
    `autocomplete`, `lint`, `lang-cpp`, and a dark theme. Mirror the language
    and indent configuration in
@@ -513,8 +516,8 @@ visualization is still react-konva. Item 6 depends on `StepModel` from Phase 5.
    run. Either diff the graph against the previous `StepModel`, or suspend
    redraws while `debugState` is `Executing` and draw once on stop. Measure
    against the Phase 0 benchmark.
-8. Convert canvas to visualize the C-program memory along with standard segments and registers. 
-9. The variables must be properly visualized in the segments: registers, heap, stack, read-only memory (data and bss must be properly separated)  
+8. Convert canvas to visualize the C-program memory along with standard segments and registers.
+9. The variables must be properly visualized in the segments: registers, heap, stack, read-only memory (data and bss must be properly separated)
 10. Each segment must have their own start addresses
 
 Exit criterion: the visualization matches the Phase 0 screenshots, folding and
@@ -770,13 +773,13 @@ it, and can be taken in any order or dropped.
 12. **Session serialisation.** -- not strictly required -- `EditorState.toJSON` and `fromJSON`, plus the
     breakpoint set, so a session can be saved, handed in, or replayed by a
     teacher looking at how a student got where they are.
-13. Create a view for explaining currently active statement. 
+13. Create a view for explaining currently active statement.
 14. Create a view for visualizing the call stack.
-15. Create a view for visualizing the mutation of variables among the function calls. 
+15. Create a view for visualizing the mutation of variables among the function calls.
 16. Add a control panel to activate and de-active the views.
-17. Add save code, open code. 
-18. support multi-tab open -- 
-19. Validate the code as linker would do. -- multidefinition scan 
+17. Add save code, open code.
+18. support multi-tab open --
+19. Validate the code as linker would do. -- multidefinition scan
 
 Exit criterion: each item lands as its own pull request, behind no flag; the
 debug extension array still attaches to an `EditorView` somebody else built;

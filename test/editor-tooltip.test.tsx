@@ -88,44 +88,33 @@ describe('editor tooltip addresses', () => {
     ).toBe('return type: int\nidentifier: main\nparameters: none');
   });
 
-  it('formats type declarations as labelled lines', () => {
+  it('identifies a typedef name without assigning it a storage class', () => {
     expect(
       formatTypeDeclaration({
-        storageClasses: ['typedef'],
         qualifiers: ['const'],
         type: 'enum Mode',
         nameKind: 'typedefName',
         name: 'ReadOnlyMode',
       })
     ).toBe(
-      'type: enum Mode\n' +
-        'storage class: typedef\n' +
-        'qualifiers: const\n' +
-        'typedef name: ReadOnlyMode'
+      'type: enum Mode\n' + 'qualifiers: const\n' + 'typedef name: ReadOnlyMode'
     );
   });
 
   it('calls the name a record definition introduces a tag', () => {
     expect(
       formatTypeDeclaration({
-        storageClasses: [],
         qualifiers: [],
         type: 'struct Point',
         nameKind: 'tag',
         name: 'Point',
       })
-    ).toBe(
-      'type: struct Point\n' +
-        'storage class: none\n' +
-        'qualifiers: none\n' +
-        'tag: Point'
-    );
+    ).toBe('type: struct Point\n' + 'qualifiers: none\n' + 'tag: Point');
   });
 
-  it('says none for the specifiers a type declaration leaves out', () => {
+  it('says none when a type declaration has no qualifiers', () => {
     expect(
       formatTypeDeclaration({
-        storageClasses: [],
         qualifiers: [],
         type: 'struct without a tag',
         nameKind: 'typedefName',
@@ -133,7 +122,6 @@ describe('editor tooltip addresses', () => {
       })
     ).toBe(
       'type: struct without a tag\n' +
-        'storage class: none\n' +
         'qualifiers: none\n' +
         'typedef name: Point'
     );

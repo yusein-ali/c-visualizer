@@ -47,20 +47,16 @@ export const formatVariableDeclaration = (
   ].join('\n');
 
 /**
- * A C declaration always names a complete type - storage class and type, with
- * only the qualifiers optional - so the tooltip lists every part and says
- * `none` where the source left one out. The last line takes the standard's
- * own term for the name being introduced: a typedef declarator defines a
- * typedef name, a record or enumeration definition names a tag.
+ * A type declaration names a type; it does not declare an object with storage.
+ * The last line takes the standard's own term for the name being introduced: a
+ * typedef declarator defines a typedef name, while a record or enumeration
+ * definition declares a tag.
  */
 export const formatTypeDeclaration = (
   declaration: TypeDeclarationDetail
 ): string =>
   [
     `${strings.declarationType}: ${declaration.type}`,
-    `${strings.storageClass}: ${
-      declaration.storageClasses.join(', ') || strings.none
-    }`,
     `${strings.qualifiers}: ${
       declaration.qualifiers.join(', ') || strings.none
     }`,
