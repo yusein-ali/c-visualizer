@@ -85,10 +85,13 @@ cost little now and are expensive to retrofit.
    `SignalChainCanvas(element, {...})` in the course's existing extensions.
 2. **No module-level singletons.** Three existed, and all three break the moment
    two instances share a page. `pointerConnectionManager` is gone: Phase 5 made
-   it local to one extraction and one layout. Two remain, both for Phase 10: the
-   event bus at `src/components/emitter.ts:2` and the interpreter session
-   exported at the foot of `src/core/server.ts`. Each becomes instance-scoped
-   and is passed explicitly.
+   it local to one extraction and one layout. The event bus at
+   `src/components/emitter.ts:2` and the interpreter session exported at the
+   foot of `src/core/server.ts` went in Phase 10 - the bus is now a `Bus` an
+   instance constructs, and the session is an `InterpreterClient` it owns, both
+   passed explicitly. `src/core/server.ts` exports the `Server` class and no
+   instance of it: the Worker constructs its own, one per Worker and one Worker
+   per client.
 3. **Scoped styles only.** `src/index.tsx:4` imports Bootstrap globally; in a
    course page that would restyle everything around it. All CSS moves under a
    single `plivet-` class prefix and no global stylesheet is imported.
@@ -579,9 +582,10 @@ constructs the widgets and connects them. ESLint enforces the direction:
 `src/ui/**` may not import from `src/app/**`, as `src/core/**` may import
 neither.
 
-The entry point is `src/index.ts`, and the bus is still module-level; Phase 10
-makes it an instance's own. The event union is now typed per event rather than
-`any[]`, which is what made the fan-out in `PlivetApp` checkable.
+The entry point was `src/index.ts` and the bus was module-level, which Phase 10
+changed: `src/main.ts` is the page and the bus belongs to the instance. The
+event union is typed per event rather than `any[]`, which is what made the
+fan-out in `PlivetApp` - now `Plivet` - checkable.
 
 1. Layout: `App`, `EditorSide` and `Menu` are Bootstrap grid/components.
    Bootstrap grid. They become static markup plus CSS grid, under the `plivet-`
@@ -639,19 +643,55 @@ smoke render, is gone.
 
 ## Phase 10: instance scoping
 
-**Status: not started.** `emitter.ts` is still a module-level bus, and there is
-no `Plivet` entry point.
+**Status: complete.** There is no module-level state left above the interpreter:
+the bus and the interpreter client are constructed by the instance that uses
+them, and `new Plivet(element, options)` is the only thing a host page needs.
+
+The split the entry point makes is the one the Sphinx extension will use.
+`src/index.ts` is the public surface - the class and its options, and nothing
+with a side effect - while `src/main.ts` is the standalone page's own use of it
+and is what `index.html` loads. `src/app/PlivetApp.ts` became
+`src/app/Plivet.ts` in the move.
 
 1. `emitter.ts` becomes a class. Each PLIVET instance constructs its own bus and
    passes it to its components. The typed event union stays; it is the registry.
+   **Done.** `Bus` holds the subscriptions, `signal` and `slot` are its methods,
+   and `destroy()` drops every listener at once. Two things left with the module
+   scope: `setMaxListeners(20)`, which was only ever needed because every
+   instance's subscriptions landed on one emitter, and the `events` polyfill -
+   a browser-only widget has no reason to ship Node's `EventEmitter` to say
+   `on` and `emit`, so `events` and `@types/events` are out of `package.json`.
 2. The Worker client is per instance. Two instances on one page must not share
-   interpreter state, history or uploaded files.
+   interpreter state, history or uploaded files. **Done.** The `server` singleton
+   at the foot of `src/core/client.ts` is gone; `Plivet` constructs an
+   `InterpreterClient`, hands it to `EditorController`, and uploads through it.
+   Each client owns a Worker and each Worker its own `Server`, so the
+   interpreter, the history and the file map are per instance already.
+   `destroy()` terminates the Worker rather than asking it to stop - a run is a
+   loop on that thread - and drops the commands still in flight rather than
+   failing them, because a rejection would reach the `alert` in
+   `EditorController` after the reader has closed the thing that would show it.
 3. Export `new Plivet(element, options)` as the only public entry. `index.html`
-   constructs one.
+   constructs one. **Done**, with two options: `sourceCode`, the program the
+   editor opens with, and `theme`. `index.html` is unchanged - it is
+   `src/main.ts` that constructs the instance into `#root`.
 4. Add a development page containing two instances side by side and confirm they
-   do not interfere: stepping one must not move the other.
+   do not interfere: stepping one must not move the other. **Done.**
+   `src/dev.ts` and `src/dev.html`, added by `webpack.config.dev.js` only, so
+   `npm run build` still ships one page. The two open with different programs
+   and different themes, and both are on `window.plivet` so `destroy()` can be
+   exercised from the console. The comment at the top of `src/dev.ts` lists what
+   to try and what each thing checks.
 
-Exit criterion: two independent instances run on one page.
+Exit criterion: two independent instances run on one page. Met, and checked in
+Chrome against the dev page: stepping A three times left B at `Stop`; starting
+and stepping B left A on step 3; running A to EOF printed only A's output and
+moved nothing in B; stopping A left B debugging and steppable; a theme chosen in
+one stayed in one, in both directions; A blocked in `scanf` while B stepped, and
+the line typed into A's console was read by A and left B's transcript empty; and
+destroying A left B running. `test/bus.test.ts`, `test/client.test.ts` - which
+stands a fake Worker in for the real one - and `test/instances.test.ts` cover
+what does not need a browser.
 
 ## Phase 11: tests, CI and maintenance
 
@@ -734,7 +774,9 @@ it, and can be taken in any order or dropped.
    the message into `libraryHelp` where an entry exists. Add `lintGutter()` so
    a warning is visible without hovering for it. Write the rules as a table
    walked by one pass, not a pass per rule; the value of this item is that a
-   teacher can add the next rule cheaply.
+   teacher can add the next rule cheaply. Where PLIVET is embedded and a host
+   toolchain is reachable, real compiler warnings can arrive from it instead of
+   being reimplemented here; see Phase 13.
 3. **Runtime diagnostics.** The same lint API, raised at the step that goes
    wrong rather than after the run: division by zero, an index past the end of
    an array, a dereference of a pointer with no target, a read of uninitialised
@@ -885,6 +927,23 @@ Recorded here so the constraints above are not quietly dropped. Not in scope now
   `unicoen.ts` parses one translation unit and will not be upgraded, so the
   likely shape is PLIVET splicing the files into one unit before parsing and
   keeping a line map back to the originals — a preprocessor pass, not a linker.
+- Compiler diagnostics from the host rather than a second front-end in the
+  browser. A+ already runs the student's code on a machine with a real
+  toolchain, so `gcc -fsyntax-only -Wall -Wextra -fdiagnostics-format=json` is
+  one endpoint away, and that JSON carries the line, the column, the ranges,
+  the severity and the `-Wname` that produced it - everything a
+  `@codemirror/lint` diagnostic wants, with no rules of our own to maintain.
+  The alternative, clang compiled to WebAssembly, is tens of megabytes fetched
+  into what is otherwise a static page: the Phase 12 package budget rules it
+  out, and it would break the offline copy the README promises. Three things to
+  settle when this is built. The request is debounced source over the network,
+  so it is a privilege of the embedded mode alone - standalone PLIVET keeps
+  whatever static rules Phase 12 item 2 gives it, and neither mode may block a
+  run on an answer that may never arrive. gcc and `unicoen.ts` do not agree
+  about what is legal, so the compiler's diagnostics merge with the
+  interpreter's marked as the compiler's, never replacing them. And the source
+  sent is the one the user typed, not the output of `preprocess.ts`: gcc has
+  its own preprocessor, so the positions coming back need no correction.
 
 ## Acceptance checklist
 

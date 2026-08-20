@@ -7,7 +7,7 @@
  * Phase 6 and the layout survives the canvas being rewritten in Phase 8, and
  * neither move can drag the interface along with it.
  */
-export { InterpreterClient, server } from './client';
+export { InterpreterClient } from './client';
 export { Server } from './server';
 export type { Request, Response } from './server';
 export type {

@@ -47,7 +47,15 @@ npm run build
 
 to update `dist/` by webpack.
 
-`npm start` serves the application at `http://localhost:8080/`. The interface is
-framework-free: CodeMirror 6 for the editor, JointJS for the memory graph, and
-plain DOM for everything around them. React left the tree in Phase 9 of
-[UPGRADE_PLAN.md](UPGRADE_PLAN.md).
+`npm start` serves the application at `http://localhost:8080/`, and a second
+page at `http://localhost:8080/dev.html` holding two instances side by side.
+The interface is framework-free: CodeMirror 6 for the editor, JointJS for the
+memory graph, and plain DOM for everything around them. React left the tree in
+Phase 9 of [UPGRADE_PLAN.md](UPGRADE_PLAN.md), and Phase 10 made a PLIVET
+something a page constructs:
+
+```ts
+import { Plivet } from './src/index';
+
+new Plivet(document.getElementById('root'), { theme: 'dark' });
+```

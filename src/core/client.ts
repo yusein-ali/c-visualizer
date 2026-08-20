@@ -9,6 +9,11 @@ import { spawnWorker } from './spawnWorker';
  * What changed is where the work happens. The Worker is started on the first
  * command rather than on load, so opening the page costs nothing until
  * something is run, and a test that never debugs never needs one.
+ *
+ * One client per PLIVET, constructed by the instance that uses it - there is
+ * no shared one to reach for. Each client owns a Worker, and each Worker owns
+ * a `Server` with its own interpreter, history and uploaded files, so two
+ * instances on one page run two programs that know nothing of each other.
  */
 export class InterpreterClient {
   private worker: Worker | null = null;
@@ -49,6 +54,25 @@ export class InterpreterClient {
     this.files.delete(filename);
     this.post({ kind: 'files', files: this.files });
     return this.files;
+  }
+
+  /**
+   * Ends the session. The Worker is terminated rather than asked to stop: a
+   * run is a loop on that thread, and an instance being unmounted has no one
+   * left to report to. A later `send` starts a fresh Worker, and with it a
+   * fresh interpreter.
+   */
+  public destroy(): void {
+    if (this.worker !== null) {
+      this.worker.terminate();
+      this.worker = null;
+    }
+    this.onRunEvent = null;
+    // Commands still in flight are dropped rather than failed. Their answers
+    // were going to widgets that are being taken down with them, and the one
+    // thing a failed command does is put an alert in front of a reader who
+    // has just closed the thing that would have shown it.
+    this.pending.clear();
   }
 
   private post(message: ToWorker): void {
@@ -99,5 +123,3 @@ export class InterpreterClient {
     this.pending.clear();
   }
 }
-
-export const server = new InterpreterClient();

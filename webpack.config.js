@@ -9,7 +9,7 @@ const tsConfigFile = `tsconfig.${isProduction ? 'prod' : 'dev'}.json`;
 module.exports = {
   mode: isProduction ? 'production' : 'development',
   entry: {
-    main: './src/index.ts',
+    main: './src/main.ts',
   },
   output: {
     filename: 'js/[name].js',

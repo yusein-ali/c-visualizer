@@ -1,32 +1,48 @@
 // A default import: webpack warns that a JSON module's named exports are on
 // their way out, and only the default is guaranteed.
 import packageJson from '../../package.json';
-import { DEBUG_STATE, StepModel, emptyStepModel, server } from '../core';
-import strings from '../strings';
+import {
+  DEBUG_STATE,
+  InterpreterClient,
+  StepModel,
+  emptyStepModel,
+} from '../core';
 import { PlivetShell } from '../ui/shell';
 import { ControlBar, ZOOM_COMMAND } from '../ui/controls';
 import { PlivetConsole } from '../ui/console';
 import { PlivetGraph } from '../ui/graph';
 import { FilePanel } from '../ui/files';
 import { HowToDialog } from '../ui/help';
+import strings from '../strings';
 import { EditorController } from './EditorController';
-import { signal, slot } from './emitter';
+import { Bus } from './emitter';
 import { Theme, isDark } from './theme';
 
 /**
- * The application: a shell, six widgets and the bus between them.
+ * One PLIVET: a shell, six widgets, and the bus and interpreter between them.
  *
- * It was `AppContainer` and `App` - one holding the theme, the other holding a
- * Bootstrap grid - plus `EditorSide`, `Menu`, `Console`, `Graph` and
- * `FileForm`, whose entire content was a mount point and a subscription. The
- * widgets under `src/ui/` never knew about React, so what came out here is the
- * wiring rather than a rewrite.
+ * It was `PlivetApp`, and before that `AppContainer` and `App` - one holding
+ * the theme, the other holding a Bootstrap grid - plus `EditorSide`, `Menu`,
+ * `Console`, `Graph` and `FileForm`, whose entire content was a mount point
+ * and a subscription. The widgets under `src/ui/` never knew about React, so
+ * what came out here is the wiring rather than a rewrite.
  *
- * The bus is still module-level; Phase 10 makes it an instance's own, which is
- * what two PLIVETs on one page need. Everything else here is already per
- * instance and takes its mount element from the shell.
+ * Nothing it uses is the page's any more. The bus and the interpreter client
+ * are constructed here and passed down, which is what Phase 10 was for: two of
+ * these on one page own two Workers and two buses, so stepping one does not
+ * move the other. This is the only public entry - `new Plivet(element)` builds
+ * everything below it, and `destroy()` takes it all back down again.
  */
-export class PlivetApp {
+export interface PlivetOptions {
+  /** The program the editor opens with. Defaults to the sample in `strings`. */
+  sourceCode?: string;
+  /** Which theme to open in. The switch in the control bar changes it after. */
+  theme?: Theme;
+}
+
+export class Plivet {
+  private readonly bus = new Bus();
+  private readonly client = new InterpreterClient();
   private readonly shell: PlivetShell;
   private readonly controls: ControlBar;
   private readonly editor: EditorController;
@@ -34,9 +50,12 @@ export class PlivetApp {
   private readonly graph: PlivetGraph;
   private readonly files: FilePanel;
   private readonly help: HowToDialog;
-  private theme: Theme = 'light';
+  private theme: Theme;
 
-  constructor(parent: HTMLElement) {
+  constructor(parent: HTMLElement, options: PlivetOptions = {}) {
+    this.theme = options.theme ?? 'light';
+    const { bus, client } = this;
+
     this.shell = new PlivetShell(parent, {
       version: packageJson.version,
       fromYear: 2018,
@@ -44,14 +63,19 @@ export class PlivetApp {
     });
 
     this.controls = new ControlBar(this.shell.controls, {
-      onDebug: (command) => signal('debug', command),
-      onZoom: (command: ZOOM_COMMAND) => signal('zoom', command),
-      onTheme: (dark) => signal('changeTheme', dark ? 'dark' : 'light'),
+      onDebug: (command) => bus.signal('debug', command),
+      onZoom: (command: ZOOM_COMMAND) => bus.signal('zoom', command),
+      onTheme: (dark) => bus.signal('changeTheme', dark ? 'dark' : 'light'),
       onHelp: () => this.help.open(),
       dark: isDark(this.theme),
     });
 
-    this.editor = new EditorController(this.shell.editor, isDark(this.theme));
+    this.editor = new EditorController(this.shell.editor, {
+      bus,
+      client,
+      dark: isDark(this.theme),
+      doc: options.sourceCode,
+    });
 
     this.console = new PlivetConsole(this.shell.console, {
       dark: isDark(this.theme),
@@ -60,7 +84,7 @@ export class PlivetApp {
       // Resume rather than single-step: the run stops at the next read, at a
       // breakpoint or at EOF, so the console re-opens on its own for the next
       // value instead of waiting for a Step press that is easy to miss.
-      onInput: (text: string) => signal('debug', 'StepAll', text),
+      onInput: (text: string) => bus.signal('debug', 'StepAll', text),
     });
 
     this.graph = new PlivetGraph(this.shell.main, { model: emptyStepModel() });
@@ -68,24 +92,30 @@ export class PlivetApp {
     this.files = new FilePanel(this.shell.files, {
       onUpload: (files: FileList) => this.upload(files),
       onDelete: (filename: string) =>
-        this.files.setFiles(server.delete(filename)),
+        this.files.setFiles(client.delete(filename)),
     });
 
     this.help = new HowToDialog(this.shell.root);
 
-    slot('changeTheme', (theme: Theme) => this.setTheme(theme));
-    slot('changeState', (debugState: DEBUG_STATE, step: number) =>
+    bus.slot('changeTheme', (theme: Theme) => this.setTheme(theme));
+    bus.slot('changeState', (debugState: DEBUG_STATE, step: number) =>
       this.controls.setDebugState(debugState, step)
     );
-    slot('changeOutput', (output: string) => this.console.setOutput(output));
-    slot('changeState', (debugState: DEBUG_STATE) =>
+    bus.slot('changeOutput', (output: string) =>
+      this.console.setOutput(output)
+    );
+    bus.slot('changeState', (debugState: DEBUG_STATE) =>
       // Typable exactly while the program is blocked on a read.
       this.console.setAccepting(debugState === 'stdin')
     );
-    slot('draw', (model: StepModel) => this.graph.render(model));
+    bus.slot('draw', (model: StepModel) => this.graph.render(model));
   }
 
   destroy(): void {
+    // The interpreter first: its Worker is the one thing that goes on running
+    // after the widgets it reports to have gone.
+    this.client.destroy();
+    this.bus.destroy();
     this.help.destroy();
     this.files.destroy();
     this.graph.destroy();
@@ -105,7 +135,7 @@ export class PlivetApp {
 
   private async upload(files: FileList): Promise<void> {
     try {
-      this.files.setFiles(await server.upload(files));
+      this.files.setFiles(await this.client.upload(files));
       this.files.clearSelection();
     } catch (e) {
       // TypeScript types a caught value as `unknown`: whatever was thrown need

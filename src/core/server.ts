@@ -127,9 +127,9 @@ export class Server {
   private readonly history: StepHistory;
 
   /**
-   * Where a run that stopped on its own is reported. The application sets it;
-   * nothing here knows what the interface does with it, which is what keeps
-   * this file free of `src/components` and lets it run in a Worker.
+   * Where a run that stopped on its own is reported. The Worker sets it and
+   * forwards what arrives; nothing here knows what the interface does with it,
+   * which is what lets this file run on a thread that has no interface.
    */
   public onRunEvent: ((event: RUN_EVENT, response: Response) => void) | null =
     null;
@@ -438,5 +438,3 @@ export class Server {
     }
   }
 }
-
-export const server = new Server();

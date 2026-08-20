@@ -14,9 +14,9 @@ editor.
 - The interface is **English only**. There is no locale layer: every string the
   UI shows lives in [src/strings.ts](src/strings.ts).
 - **There is no backend.** Everything — parsing, interpretation, stepping — runs in the
-  browser. `src/core/server.ts` is a _simulated_ server: an in-process singleton with a
-  `Request`/`Response` API, kept in that shape so a real remote backend could be swapped
-  in later. Do not add network calls expecting a server to exist.
+  browser. `src/core/server.ts` is a _simulated_ server: one `Server` per Worker,
+  behind a `Request`/`Response` API kept in that shape so a real remote backend
+  could be swapped in later. Do not add network calls expecting a server to exist.
 - Ships as a static site: `npm run build` → `dist/`, deployed to the `gh-pages` branch by
   GitHub Actions. Demo: https://ryoskate.github.io/PLIVET
 
@@ -28,9 +28,10 @@ framework-free, browser-only widget — CodeMirror 6 instead of Ace, JointJS
 instead of react-konva, the interpreter in a Web Worker, and no React at all —
 so that it can later be embedded in an A+ Sphinx extension alongside the
 `interactive-code` extension in the `ai-enabled-wearable-technology` course repo.
-Phases 1–9 are done: the interface is plain TypeScript and the DOM. Scope has
-narrowed to C only. Do not reintroduce React, react-bootstrap, Bootstrap,
-jQuery, Enzyme, Java, Python, Ace, Konva or a second interface language.
+Phases 1–10 are done: the interface is plain TypeScript and the DOM, and a page
+holds as many instances as it likes. Scope has narrowed to C only. Do not
+reintroduce React, react-bootstrap, Bootstrap, jQuery, Enzyme, Java, Python,
+Ace, Konva or a second interface language.
 
 ## Tech stack
 
@@ -74,7 +75,7 @@ jQuery, Enzyme, Java, Python, Ace, Konva or a second interface language.
 
 ```bash
 npm ci              # install from the committed lockfile
-npm start           # dev server on :8080
+npm start           # dev server on :8080 (/ is one instance, /dev.html is two)
 npm run build       # production build into dist/ (+ dist/licenses.html)
 npm test            # jest
 npm run typecheck   # tsc --noEmit, no webpack
@@ -89,8 +90,9 @@ push to `master`.
 ## Architecture
 
 ```
-src/index.ts
-  └─ app/PlivetApp.ts        holds the only top-level state: theme
+src/index.ts                 the public entry: `new Plivet(element, options)`
+  └─ src/main.ts             the standalone page, mounting one into #root
+  └─ app/Plivet.ts           owns the bus, the interpreter client and the theme
        ├─ ui/shell/          two-column CSS grid: five mount points and the footer
        ├─ ui/controls/       six debug buttons, text size, theme switch, step counter
        ├─ app/EditorController.ts → ui/editor/  (CodeMirror 6)
@@ -109,24 +111,30 @@ Two boundaries, both enforced by ESLint rather than remembered:
 
 ### The event bus is the backbone
 
-`src/app/emitter.ts` wraps a single Node `EventEmitter` with a typed event union
-(`'debug' | 'changeTheme' | 'changeState' | 'changeOutput' | 'zoom' | 'draw'`) and
-two helpers: `signal(event, ...)` to emit and `slot(event, cb)` to subscribe. The
-payload of each event is declared in `EventPayloads`, so a `signal` is checked
+`src/app/emitter.ts` holds `Bus`, a typed event bus with a union of the events it
+carries (`'debug' | 'changeTheme' | 'changeState' | 'changeOutput' | 'zoom' | 'draw'`)
+and two methods: `signal(event, ...)` to emit and `slot(event, cb)` to subscribe.
+The payload of each event is declared in `EventPayloads`, so a `signal` is checked
 against the `slot` that answers it.
 
-Subscriptions are made **in constructors** and never removed (hence
-`setMaxListeners(20)`). Follow that existing pattern rather than mixing in a new state
-solution; if you add an event, add it to the `event` union and `EventPayloads`
-first — that union is the only registry. Phase 10 makes the bus per instance.
+**One bus per instance**, constructed by `Plivet` and passed down — never
+imported. Phase 10 made it a class for exactly that reason, and the Node
+`EventEmitter` behind it (and the `events` polyfill) went at the same time.
+
+Subscriptions are made **in constructors** and never removed one at a time;
+`Bus.destroy()` drops all of them. Follow that existing pattern rather than mixing
+in a new state solution; if you add an event, add it to the `event` union and
+`EventPayloads` first — that union is the only registry.
 
 ### One debug step, end to end
 
-1. `ControlBar` reports a button press and `PlivetApp` turns it into
-   `signal('debug', <CONTROL_EVENT>)`.
+1. `ControlBar` reports a button press and `Plivet` turns it into
+   `bus.signal('debug', <CONTROL_EVENT>)`.
    Control events: `Start | Stop | Step | StepBack | StepAll | BackAll | Exec | SyntaxCheck`.
 2. `EditorController.send()` builds a `Request { controlEvent, sourcecode, stdinText,
-lineNumOfBreakpoint }` and awaits `server.send(request)`.
+lineNumOfBreakpoint }` and awaits `client.send(request)` — the
+   `InterpreterClient` its `Plivet` handed it, which posts the request to that
+   instance's Worker.
 3. `core/server.ts` lazily `import()`s the CPP14 interpreter (webpack chunk `CPP14`
    — still a dynamic import, to keep the parser out of the initial bundle and
    to leave one branch to add if a language ever comes back), drives
@@ -136,12 +144,13 @@ lineNumOfBreakpoint }` and awaits `server.send(request)`.
    move an index into that history, which retains the first state and the most
    recent `HISTORY_LIMIT` steps.
    `StepAll` loops with `setTimeout(…, 1)` so the UI stays responsive, and calls
-   `server.onRunEvent` with `'EOF'` / `'stdin'` / `'Breakpoint'` when it needs to
-   stop. `Editor` sets that callback; the core does not know the bus exists.
-4. `EditorController.recieve()` (note the spelling) fans the `Response` out:
-   `signal('changeState', debugState, step)` → the control bar's enablement and
-   the console's writability, `signal('changeOutput', …)` → the console,
-   `signal('draw', stepModel)` → the graph. It also highlights the current
+   `onRunEvent` with `'EOF'` / `'stdin'` / `'Breakpoint'` when it needs to stop.
+   `EditorController` sets that callback on the client; the core does not know
+   the bus exists.
+4. `EditorController.recieve()` (note the spelling) fans the `Response` out over
+   its instance's bus: `signal('changeState', debugState, step)` → the control
+   bar's enablement and the console's writability, `signal('changeOutput', …)` →
+   the console, `signal('draw', stepModel)` → the graph. It also highlights the current
    statement in the editor.
 5. The Worker turns the `ExecState` into a `StepModel` with
    [extractModel](src/core/extractModel.ts) — plain rows of cells, with every
@@ -169,10 +178,11 @@ total on purpose; the comment in that file says what went wrong when it was not.
   Console's `textarea` becomes writable, and the line submitted with Enter comes back as
   `Request.stdinText`. The interpreter echoes what it reads into its own stdout, so the
   console never writes the typed line into the transcript itself.
-- **File uploads** — `FilePanel` hands the chosen `FileList` to `PlivetApp`, which
-  reads them as `ArrayBuffer` into the interpreter client; they cross to the
+- **File uploads** — `FilePanel` hands the chosen `FileList` to `Plivet`, which
+  reads them as `ArrayBuffer` into its interpreter client; they cross to the
   Worker and reach the interpreter via `setFileList`, so C programs can `fopen`
-  them.
+  them. The map belongs to the client, so one instance's uploads are invisible
+  to another's programs.
 - **UI text** — one English table in [src/strings.ts](src/strings.ts), read
   directly (`strings.howToUse`). Keys assembled at runtime — `construct${kind}`,
   `${signal}${command}` — go through `stringFor(key)`. The starter program is
@@ -192,6 +202,11 @@ total on purpose; the comment in that file says what went wrong when it was not.
 - A widget is a class that takes `(parent: HTMLElement, options)`, appends its
   own root element, exposes `setX()` methods for what changes, and has a
   `destroy()`. Options carry callbacks (`onDebug`, `onUpload`, …), never the bus.
+  `Plivet` itself follows the same shape, one level up.
+- **Nothing is module-level state.** The bus and the interpreter client are
+  constructed by a `Plivet` and passed to what needs them. A new `export const`
+  holding a session, a cache or a registry breaks the second instance on a page,
+  which is what Phase 10 was spent removing.
 - Every widget carries its own appearance: a colocated stylesheet whose rules
   all sit under one `plivet-` class, or a CodeMirror theme. There is no shared
   stylesheet to register alongside a module lifted into another page. Colours are
@@ -206,9 +221,13 @@ Jest is scoped to `roots: ['<rootDir>/test']` with `tsconfig.test.json`, and CSS
 is mapped to `identity-obj-proxy`. New tests go under `test/` as `*.test.ts`.
 Widgets are tested by mounting them into a `div` and driving real DOM events —
 see `test/console.test.ts`, `test/controls.test.ts`, `test/files.test.ts` and
-`test/shell.test.ts`. There is no e2e harness; verify interpreter and graph
-behaviour in a browser with `npm start`, or against a production build served
-over http.
+`test/shell.test.ts`. `test/instances.test.ts` does the same with two whole
+`Plivet`s, and `test/client.test.ts` stands a fake Worker in for the real one,
+which is the only way to drive `InterpreterClient` under Jest.
+
+There is no e2e harness; verify interpreter and graph behaviour in a browser
+with `npm start`, or against a production build served over http. `/dev.html`
+holds two instances for checking that they stay out of each other's way.
 
 ## Gotchas
 
@@ -216,6 +235,14 @@ over http.
   actual identifier. Don't rename it incidentally — do it only as a deliberate,
   complete rename. (`src/components/menus/controle_buttons/` was the other one;
   it went with React in Phase 9.)
+- **JointJS does not run under jsdom.** It turns its vectorizer off when
+  `window.SVGAngle` is missing, and `V.prototype` ends up empty, so constructing
+  a `dia.Paper` throws. A test that mounts something containing `PlivetGraph`
+  stubs the module (`test/instances.test.ts` shows the shape); the canvas itself
+  is checked in a browser.
+- There is no Worker under Jest either: `jest.config.js` maps `spawnWorker` to a
+  stub that throws, so a test that means to run a program uses `Server` directly
+  and one that means to drive the client mocks `spawnWorker`.
 - `HardSourceWebpackPlugin` caches into `node_modules/.cache/hard-source/`; delete it if
   the build behaves impossibly after dependency changes.
 - `PlivetGraph.render()` rebuilds the JointJS scene for one visible step. During

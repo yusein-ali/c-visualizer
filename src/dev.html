@@ -1,0 +1,53 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>PLIVET - two instances</title>
+    <style>
+      /*
+       * Only this page's frame. The instances bring their own styles, and this
+       * deliberately defines none of the `--plivet-*` variables: what is being
+       * checked is two PLIVETs, not a host palette.
+       */
+      body {
+        margin: 0;
+        font-family: system-ui, sans-serif;
+      }
+
+      .pair {
+        display: flex;
+        align-items: flex-start;
+      }
+
+      /*
+       * Side by side, and each wide enough to be worked in: the page scrolls
+       * sideways rather than squeezing both instances into one viewport.
+       */
+      .pane {
+        flex: 1 1 50%;
+        min-width: 720px;
+      }
+
+      .pane h1 {
+        margin: 0;
+        padding: 6px 10px;
+        background: #222;
+        color: #fff;
+        font-size: 14px;
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="pair">
+      <div class="pane">
+        <h1>A - light, counting up</h1>
+        <div id="a"></div>
+      </div>
+      <div class="pane">
+        <h1>B - dark, counting down</h1>
+        <div id="b"></div>
+      </div>
+    </div>
+  </body>
+</html>

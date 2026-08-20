@@ -1,7 +1,7 @@
 import {
   Request,
   CONTROL_EVENT,
-  server,
+  InterpreterClient,
   Response,
   DEBUG_STATE,
   StepModel,
@@ -11,7 +11,7 @@ import strings from '../strings';
 import { Expansion } from '../interpreter/Expansion';
 import { PlivetEditor, rangeOf } from '../ui/editor';
 import { HoverTextSource } from './hoverText';
-import { signal, slot } from './emitter';
+import { Bus } from './emitter';
 import type { ZOOM_COMMAND } from '../ui/controls';
 
 /**
@@ -23,16 +23,33 @@ import type { ZOOM_COMMAND } from '../ui/controls';
  * knows nothing about React and nothing about the interpreter. This was
  * `Editor.tsx`, and it is the wiring between the two; what Phase 9 deleted was
  * the component around it, which by then was a `div` and a ref.
+ *
+ * The bus and the interpreter client are handed in rather than imported: they
+ * belong to the `Plivet` that built this controller, and are the two things
+ * that used to be the page's.
  */
+export interface EditorControllerOptions {
+  bus: Bus;
+  client: InterpreterClient;
+  dark?: boolean;
+  /** The program the editor opens with. */
+  doc?: string;
+}
+
 export class EditorController {
+  private readonly bus: Bus;
+  private readonly client: InterpreterClient;
   private sourcecode: string;
   private readonly editor: PlivetEditor;
   private readonly hover: HoverTextSource;
   private isDebugging = false;
   private fontSize = 14;
 
-  constructor(mount: HTMLElement, dark: boolean) {
-    this.sourcecode = strings.sourceCode;
+  constructor(mount: HTMLElement, options: EditorControllerOptions) {
+    const { bus, client, dark = false, doc = strings.sourceCode } = options;
+    this.bus = bus;
+    this.client = client;
+    this.sourcecode = doc;
     this.hover = new HoverTextSource();
 
     this.editor = new PlivetEditor(mount, {
@@ -43,17 +60,20 @@ export class EditorController {
       onChange: (code: string) => this.edited(code),
     });
 
-    slot('debug', (controlEvent: CONTROL_EVENT, stdinText?: string) => {
-      this.send(controlEvent, stdinText);
-    });
+    this.bus.slot(
+      'debug',
+      (controlEvent: CONTROL_EVENT, stdinText?: string) => {
+        this.send(controlEvent, stdinText);
+      }
+    );
     // A run stops on its own at the end of the program, at a read or at a
     // breakpoint, long after `StepAll` returned. The interpreter reports that
     // directly rather than through the bus: `src/core` may not know the
     // application exists.
-    server.onRunEvent = (_event, response: Response) => {
+    this.client.onRunEvent = (_event, response: Response) => {
       this.recieve(response);
     };
-    slot('zoom', (command: ZOOM_COMMAND) => {
+    this.bus.slot('zoom', (command: ZOOM_COMMAND) => {
       if (command === 'In') {
         this.setFontSize(this.fontSize + 1);
       } else if (command === 'Out') {
@@ -82,7 +102,7 @@ export class EditorController {
     this.sourcecode = code;
     setTimeout(() => {
       if (code === this.sourcecode) {
-        signal('debug', 'SyntaxCheck');
+        this.bus.signal('debug', 'SyntaxCheck');
       }
     }, 1000);
   }
@@ -95,7 +115,7 @@ export class EditorController {
       lineNumOfBreakpoint: this.breakpoints(),
     };
     if (controlEvent === 'SyntaxCheck') {
-      server
+      this.client
         .send(request)
         .then((response: Response) => {
           const { errors, expansions, constructs } = response;
@@ -113,7 +133,7 @@ export class EditorController {
         });
       return;
     }
-    server
+    this.client
       .send(request)
       .then((response: Response) => {
         this.recieve(response);
@@ -137,9 +157,9 @@ export class EditorController {
       if (debugState === 'Executing') {
         return;
       }
-      signal('changeState', debugState, step);
-      signal('changeOutput', output);
-      signal('draw', model);
+      this.bus.signal('changeState', debugState, step);
+      this.bus.signal('changeOutput', output);
+      this.bus.signal('draw', model);
       this.setHighlightOnCode(debugState, model);
     } catch (e) {
       console.log(e);
