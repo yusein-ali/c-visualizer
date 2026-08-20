@@ -2,8 +2,10 @@ import { ExecState } from 'unicoen.ts/dist/interpreter/Engine/ExecState';
 import { PlivetCPP14Interpreter } from '../src/interpreter/CPP14';
 import {
   CELL_HEIGHT,
+  CONTROL_EVENT,
   CellModel,
   FoldState,
+  Server,
   StepHistory,
   StepModel,
   extractModel,
@@ -292,5 +294,86 @@ describe('step history', () => {
     history.clear();
     expect(history.length).toBe(0);
     expect(history.has(0)).toBe(false);
+  });
+});
+
+describe('a debug session', () => {
+  const code = `
+int add(int a, int b) { int sum = a + b; return sum; }
+int main(void) {
+  int total = 0;
+  for (int i = 0; i < 30; i = i + 1) {
+    total = add(total, i);
+  }
+  return total;
+}
+`;
+  const quiet = <T>(run: () => T): T => {
+    const log = console.log;
+    console.log = () => undefined;
+    try {
+      return run();
+    } finally {
+      console.log = log;
+    }
+  };
+  const send = (server: Server, controlEvent: CONTROL_EVENT) =>
+    quiet(() => server.send({ controlEvent, sourcecode: code }));
+
+  it('steps back through every step to the first one', async () => {
+    const server = new Server();
+    await send(server, 'Start');
+    for (let step = 0; step < 6; step += 1) {
+      await send(server, 'Step');
+    }
+    const walked: number[] = [];
+    for (let step = 0; step < 8; step += 1) {
+      const back = await send(server, 'StepBack');
+      expect(back.execState).toBeDefined();
+      walked.push(back.step);
+    }
+    // Down to the beginning, and then it stays there.
+    expect(walked).toEqual([5, 4, 3, 2, 1, 0, 0, 0]);
+  });
+
+  it('returns to the first state after a run longer than the history', async () => {
+    const server = new Server(5);
+    await send(server, 'Start');
+    for (let step = 0; step < 40; step += 1) {
+      await send(server, 'Step');
+    }
+    const home = await send(server, 'BackAll');
+    expect(home.step).toBe(0);
+    expect(home.execState).toBeDefined();
+  });
+
+  it('never answers with a state it has dropped', async () => {
+    const server = new Server(5);
+    await send(server, 'Start');
+    for (let step = 0; step < 30; step += 1) {
+      await send(server, 'Step');
+    }
+    await send(server, 'BackAll');
+    // Forward across the gap the eviction left, and on to the head.
+    for (let step = 0; step < 40; step += 1) {
+      const forward = await send(server, 'Step');
+      expect(forward.execState).toBeDefined();
+    }
+    // Backward from wherever that ended up.
+    for (let step = 0; step < 10; step += 1) {
+      const back = await send(server, 'StepBack');
+      expect(back.execState).toBeDefined();
+    }
+  });
+
+  it('forgets the previous session when a new one starts', async () => {
+    const server = new Server(5);
+    await send(server, 'Start');
+    for (let step = 0; step < 20; step += 1) {
+      await send(server, 'Step');
+    }
+    const restarted = await send(server, 'Start');
+    expect(restarted.step).toBe(0);
+    expect((await send(server, 'StepBack')).step).toBe(0);
   });
 });

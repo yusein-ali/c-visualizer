@@ -364,7 +364,12 @@ them freely. The React application keeps working throughout.
     most recent `HISTORY_LIMIT` steps. The first is kept unconditionally because
     `BackAll` returns to the beginning of the program however long the run;
     stepping back stops at the window, and stepping forward out of a dropped
-    stretch resumes at it.)
+    stretch resumes at it. The first cut of this guard compared against the
+    oldest retained step, which in a session short enough to retain everything
+    is step 1 - so stepping back stopped one short of the beginning. It now
+    asks whether the previous step is still held, which is the question that
+    was meant; `test/core.test.ts` walks a session back to step 0 to keep it
+    honest.)
 
 Exit criterion: `src/core/` builds and is unit-testable with no DOM, no React and
 no renderer. The application still passes the Phase 0 checklist. Met:

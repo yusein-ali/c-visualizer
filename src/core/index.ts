@@ -7,7 +7,7 @@
  * Phase 6 and the layout survives the canvas being rewritten in Phase 8, and
  * neither move can drag the interface along with it.
  */
-export { server, Request, Response } from './server';
+export { server, Server, Request, Response } from './server';
 export type { CONTROL_EVENT, DEBUG_STATE, RUN_EVENT } from './server';
 export { extractModel } from './extractModel';
 export { layout, connectionColor } from './layout';

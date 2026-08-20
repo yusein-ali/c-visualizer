@@ -1,7 +1,7 @@
 import { SyntaxErrorData } from 'unicoen.ts/dist/interpreter/mapper/SyntaxErrorData';
 import { ExecState } from 'unicoen.ts/dist/interpreter/Engine/ExecState';
 import { Interpreter } from 'unicoen.ts/dist/interpreter/Interpreter';
-import { StepHistory } from './history';
+import { HISTORY_LIMIT, StepHistory } from './history';
 import { Construct } from '../interpreter/Construct';
 import { Expansion } from '../interpreter/Expansion';
 
@@ -69,13 +69,13 @@ function reportsExpansions(
   );
 }
 
-class Server {
+export class Server {
   private timer: NodeJS.Timeout | null = null;
   private isExecuting: boolean = false;
   private files: Map<string, ArrayBuffer> = new Map();
   private count: number = 0;
   private interpreter: Interpreter | null = null;
-  private history = new StepHistory();
+  private readonly history: StepHistory;
 
   /**
    * Where a run that stopped on its own is reported. The application sets it;
@@ -85,6 +85,11 @@ class Server {
    */
   public onRunEvent: ((event: RUN_EVENT, response: Response) => void) | null =
     null;
+
+  /** The history limit is a constructor argument so a test can fill it. */
+  constructor(historyLimit: number = HISTORY_LIMIT) {
+    this.history = new StepHistory(historyLimit);
+  }
 
   // Returns a new interpreter rather than assigning `this.interpreter`. Only
   // `reset` may replace the session's interpreter: `SyntaxCheck` runs off a
@@ -225,9 +230,9 @@ class Server {
   }
 
   private StepBack(sourcecode: string) {
-    // Not below the window: the states before it were dropped, and there is
-    // nothing to step back to. `BackAll` still reaches the first state.
-    if (this.history.oldestRetained() < this.count) {
+    // Only into a step still held: past the window the states were dropped and
+    // there is nothing to step back to. `BackAll` still reaches the first.
+    if (1 <= this.count && this.history.has(this.count - 1)) {
       this.count -= 1;
     }
     const execState = this.history.stateAt(this.count);
