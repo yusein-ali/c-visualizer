@@ -6,7 +6,11 @@ const FONT = "Consolas, 'Courier New', monospace";
 /** A JointJS element whose SVG markup is one complete stack/memory table. */
 export const StackTable = dia.Element.define('plivet.StackTable');
 
-const gradient = (colors: string[]): dia.SVGGradientJSON => ({
+/**
+ * The horizontal wash that says an arrow starts or ends in this cell. Shared
+ * with the memory nodes: a pointer looks the same wherever it is drawn.
+ */
+export const gradient = (colors: string[]): dia.SVGGradientJSON => ({
   type: 'linearGradient',
   attrs: { x1: '0%', y1: '0%', x2: '100%', y2: '0%' },
   stops:

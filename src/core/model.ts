@@ -49,6 +49,15 @@ export interface CellModel {
   width: number;
   /** For a pointer's value cell: the key of the cell it points at. */
   pointerTarget?: string;
+  /**
+   * For an `address` cell: the address itself, as a number. The cell's text
+   * spells it the way the stack table wants it (`&x(0x1F4) `); the memory view
+   * wants an address column, and re-parsing the text to get one back would be
+   * silly.
+   */
+  address?: number;
+  /** For a `type` cell: how many bytes the object occupies. */
+  size?: number;
   /** The innermost fold group this cell belongs to, if any. */
   foldGroup?: string;
   /** For a `fold` cell: the group it shows and hides. */
@@ -79,6 +88,18 @@ export type MemoryRegion =
   | 'registers';
 
 /**
+ * A run of consecutive rows that belong together inside a segment: the stack
+ * is the frames of the functions currently running, and a memory view that
+ * does not say where one frame ends and the next begins is not showing the
+ * stack, only the variables that happen to be on it.
+ */
+export interface MemoryGroupModel {
+  name: string;
+  /** How many of the segment's rows, from where the previous group ended. */
+  rows: number;
+}
+
+/**
  * A memory band shown by the JointJS renderer. Rows reuse the cells from the
  * compatible stack model above, so pointer keys still identify one object.
  */
@@ -87,7 +108,16 @@ export interface MemorySegmentModel {
   name: string;
   startAddress: number;
   rows: CellModel[][];
+  /** Ordered spans over `rows`. Empty when the segment has no substructure. */
+  groups: MemoryGroupModel[];
 }
+
+/**
+ * What every segment, and every object the visualization places itself, starts
+ * on. The engine packs its own storage as C does - a `char` takes one byte and
+ * the next one sits beside it - but a band of memory begins on a word.
+ */
+export const MEMORY_ALIGNMENT = 4;
 
 /** Fallback bases used when a segment has no live object in the current step. */
 export const MEMORY_START_ADDRESSES: Record<MemoryRegion, number> = {
@@ -99,6 +129,52 @@ export const MEMORY_START_ADDRESSES: Record<MemoryRegion, number> = {
   heap: 0x4e20,
   stack: 0x10000,
 };
+
+/**
+ * The bands holding what the program was loaded with rather than what it is
+ * doing: the code it runs, and the constants and string literals beside it.
+ * Neither changes as the program runs.
+ */
+const STATIC_REGIONS: ReadonlySet<MemoryRegion> = new Set<MemoryRegion>([
+  'readOnly',
+  'text',
+]);
+
+/**
+ * Whether a segment nobody has clicked is drawn as its title bar alone. One
+ * holding nothing has no table worth the room. The static bands have one, and
+ * it is the same table at every step: a reader stepping through a program is
+ * watching the stack move, not re-reading the literals, so these open on a
+ * click rather than on the first step.
+ */
+export const startsCollapsed = (
+  region: MemoryRegion,
+  empty: boolean
+): boolean => empty || STATIC_REGIONS.has(region);
+
+/**
+ * The bands a memory map names whatever they hold: the two the program was
+ * loaded with, and the two a reader steps through it to watch. A stack that
+ * appears at the first call and a heap that appears at the first `malloc`
+ * teach that the band was not there to begin with; an empty one, named and put
+ * away, says where the frames and the allocations will land before the program
+ * has put anything in them.
+ */
+const ALWAYS_SHOWN: ReadonlySet<MemoryRegion> = new Set<MemoryRegion>([
+  ...STATIC_REGIONS,
+  'stack',
+  'heap',
+]);
+
+/**
+ * Whether a region nobody has switched is on the canvas at all. A band holding
+ * nothing is left off until the reader asks for it, unless it is one of the
+ * four the map always names - and those arrive as a title bar alone, because
+ * `startsCollapsed` puts an empty segment away rather than spend a table on a
+ * row saying it is empty.
+ */
+export const startsShown = (region: MemoryRegion, holds: boolean): boolean =>
+  holds || ALWAYS_SHOWN.has(region);
 
 /** A function occupies the text segment even though it is not a C object. */
 export interface FunctionModel {
@@ -113,10 +189,11 @@ export interface ExpressionNodeModel {
   key: string;
   kind: ExpressionNodeKind;
   text: string;
-  /** `null` means this branch of a short-circuit/ternary was not evaluated. */
+  /**
+   * What the node is worth going into the step: an operand's current value, or
+   * an operator's result once it has one. `null` until then.
+   */
   value: string | null;
-  /** Zero-based order in which the interpreter completed this node. */
-  order: number;
   children: ExpressionNodeModel[];
 }
 

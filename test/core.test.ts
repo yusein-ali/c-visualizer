@@ -9,10 +9,15 @@ import {
   Server,
   StepHistory,
   StepModel,
+  ViewOptions,
   extractModel,
   foldGroupOf,
   isWithinFold,
+  MEMORY_ALIGNMENT,
   layout,
+  narrowToType,
+  startsCollapsed,
+  startsShown,
 } from '../src/core';
 
 /**
@@ -214,7 +219,7 @@ int main(void) {
     ).toBe(model.memory.length);
   });
 
-  it('carries a complete evaluated expression tree as plain data', () => {
+  it('expands the statement that is about to run, as plain data', () => {
     const code = `
 int main(void) {
   int left = 2;
@@ -249,9 +254,44 @@ int main(void) {
       visit(model.expression!.root);
       return found;
     };
-    expect(nodes(ternary!).some((node) => node.order < 0)).toBe(true);
+    // An operator that has not run yet is worth nothing yet; the operands
+    // under it are worth what they hold going in.
+    expect(nodes(ternary!).some((node) => node.value === null)).toBe(true);
     expect(nodes(ternary!).some((node) => node.value !== null)).toBe(true);
     expect(plain(ternary!.expression)).toBe(true);
+  });
+
+  it('expands the statement the editor is highlighting, not the last one', () => {
+    const code = `
+int twice(int n) {
+  return n * 2;
+}
+int main(void) {
+  int a = 1;
+  int b = twice(a + 1);
+  return b;
+}
+`;
+    const shown = execute(code)
+      .map(extractModel)
+      .filter((model) => model.expression !== null && model.codeRange !== null);
+
+    expect(shown.length).toBeGreaterThan(0);
+    // Every tree belongs to the line under the highlight - including the step
+    // that descends into a call, which used to leave the caller's
+    // half-evaluated statement on screen against a line inside the callee.
+    for (const model of shown) {
+      expect(model.expression!.range.begin.y).toBe(model.codeRange!.begin.y);
+    }
+    const call = shown.find((model) =>
+      model.expression!.root.children.some((child) => child.text === 'twice()')
+    );
+    expect(call).toBeDefined();
+    const argument = call!.expression!.root.children[1].children[0];
+    expect(argument.text).toBe('+');
+    // `a` is in scope and holds 1; the addition has not happened yet.
+    expect(argument.children[0]).toMatchObject({ text: 'a', value: '1' });
+    expect(argument.value).toBeNull();
   });
 });
 
@@ -355,6 +395,74 @@ describe('fold state', () => {
     const folds = new FoldState();
     folds.toggle(folded);
     expect(folds.hides(other)).toBe(false);
+  });
+});
+
+describe('view options', () => {
+  it('leaves a region to the canvas until the reader answers for it', () => {
+    const view = new ViewOptions();
+    // Nobody has switched this one, so it is drawn if it holds something.
+    expect(view.isRegionShown('text', true)).toBe(true);
+    expect(view.isRegionShown('text', false)).toBe(false);
+
+    // Once they have, their answer is the answer either way.
+    view.showRegion('text', true);
+    expect(view.isRegionShown('text', false)).toBe(true);
+    view.showRegion('text', false);
+    expect(view.isRegionShown('text', true)).toBe(false);
+
+    view.clear();
+    expect(view.isRegionShown('text', false)).toBe(false);
+  });
+
+  it('shows everything until something is switched off', () => {
+    const view = new ViewOptions();
+    expect(view.isRegionShown('text')).toBe(true);
+    expect(view.isExpressionShown()).toBe(true);
+
+    view.toggleRegion('text');
+    expect(view.isRegionShown('text')).toBe(false);
+    // One region says nothing about the others.
+    expect(view.isRegionShown('stack')).toBe(true);
+
+    view.showRegion('text', true);
+    expect(view.isRegionShown('text')).toBe(true);
+  });
+
+  it('puts the expression away and brings it back', () => {
+    const view = new ViewOptions();
+    view.showExpression(false);
+    expect(view.isExpressionShown()).toBe(false);
+
+    view.clear();
+    expect(view.isExpressionShown()).toBe(true);
+  });
+
+  it('starts a region holding nothing off the map, and opens what it draws', () => {
+    expect(startsShown('bss', true)).toBe(true);
+    expect(startsShown('bss', false)).toBe(false);
+    expect(startsCollapsed('bss', false)).toBe(false);
+    expect(startsCollapsed('bss', true)).toBe(true);
+  });
+
+  it('names the stack and the heap whatever they hold, and puts them away', () => {
+    // The two bands the reader is stepping through the program to watch are
+    // on the map before it has put anything in them, as the title bar saying
+    // where the first frame and the first allocation will land.
+    for (const region of ['stack', 'heap'] as const) {
+      expect(startsShown(region, false)).toBe(true);
+      expect(startsCollapsed(region, true)).toBe(true);
+      expect(startsCollapsed(region, false)).toBe(false);
+    }
+  });
+
+  it('starts the code and the constants on the map and put away', () => {
+    // Neither changes as the program runs, so both are drawn whatever they
+    // hold, and neither is opened for holding it.
+    for (const region of ['readOnly', 'text'] as const) {
+      expect(startsShown(region, false)).toBe(true);
+      expect(startsCollapsed(region, false)).toBe(true);
+    }
   });
 });
 
@@ -485,5 +593,186 @@ int main(void) {
     const restarted = await send(server, 'Start');
     expect(restarted.step).toBe(0);
     expect((await send(server, 'StepBack')).step).toBe(0);
+  });
+});
+
+describe('string literals', () => {
+  const code = `
+#include <stdio.h>
+const char *msg = "hello";
+int main(void) {
+  printf("%s!\\n", msg);
+  return 0;
+}
+`;
+  const model = modelWith(execute(code), (one) => 0 < one.memory.length);
+  const readOnly = model.memory.find((segment) => segment.key === 'readOnly')!;
+  const texts = readOnly.rows.map((row) =>
+    row.map((cell) => cell.text).join(' ')
+  );
+
+  it('puts every literal in read-only memory, addressed or not', () => {
+    // `const char *p = "hello"` is written into memory by the engine; the
+    // format string of a `printf` is passed as bytes and never given an
+    // address, and in C both are objects in read-only memory.
+    expect(texts.some((row) => row.includes('"hello"'))).toBe(true);
+    expect(texts.some((row) => row.includes('"%s!\\n"'))).toBe(true);
+  });
+
+  it('counts the terminator in what a literal occupies', () => {
+    const hello = readOnly.rows.find((row) =>
+      row.some((cell) => cell.text === '"hello"')
+    )!;
+    const type = hello.find((cell) => cell.kind === 'type')!;
+
+    expect(type.text).toBe('const char[6]');
+    expect(type.size).toBe(6);
+  });
+
+  it('points the pointer that names one at it', () => {
+    const address = readOnly.rows
+      .find((row) => row.some((cell) => cell.text === '"hello"'))!
+      .find((cell) => cell.kind === 'address')!;
+
+    expect(model.pointers.some((pointer) => pointer.to === address.key)).toBe(
+      true
+    );
+  });
+});
+
+describe('alignment', () => {
+  const code = `
+char flag = 'y';
+char label[3] = "ab";
+int total = 7;
+int main(void) {
+  char c = 'z';
+  int n = 3;
+  char name[5] = "abcd";
+  return n;
+}
+`;
+  const model = modelWith(execute(code), (one) => 0 < one.memory.length);
+
+  it('starts every segment on a word', () => {
+    for (const segment of model.memory) {
+      expect(segment.startAddress % MEMORY_ALIGNMENT).toBe(0);
+    }
+  });
+
+  it('starts every named object on a word, and packs members as C does', () => {
+    const named = model.stacks.flatMap((stack) =>
+      stack.rows
+        .filter((row) => row[0].kind !== 'indent')
+        .map((row) => row.find((cell) => cell.kind === 'address')!)
+    );
+    expect(named.length).toBeGreaterThan(0);
+    for (const cell of named) {
+      expect(cell.address! % MEMORY_ALIGNMENT).toBe(0);
+    }
+    // The bytes of a `char[5]` are five consecutive addresses inside it.
+    const members = model.stacks
+      .flatMap((stack) => stack.rows)
+      .filter((row) => row[0].kind === 'indent')
+      .map((row) => row.find((cell) => cell.kind === 'address')!.address!);
+    expect(members.length).toBeGreaterThan(1);
+    expect(members.some((address) => address % MEMORY_ALIGNMENT !== 0)).toBe(
+      true
+    );
+  });
+
+  it('starts every string literal on a word', () => {
+    const readOnly = model.memory.find(
+      (segment) => segment.key === 'readOnly'
+    )!;
+    const addresses = readOnly.rows.map(
+      (row) => row.find((cell) => cell.kind === 'address')!.address!
+    );
+
+    expect(addresses.length).toBeGreaterThan(0);
+    for (const address of addresses) {
+      expect(address % MEMORY_ALIGNMENT).toBe(0);
+    }
+  });
+});
+
+describe('the heap after a free', () => {
+  // The block that goes is the one in the middle, which is the case that
+  // catches this: a hole at the end of the heap closes over nothing.
+  const code = `#include<stdio.h>
+int main(void) {
+  int* first = malloc(sizeof(int) * 2);
+  int* second = malloc(sizeof(int) * 2);
+  int* third = malloc(sizeof(int) * 2);
+  free(second);
+  third[0] = 7;
+  return 0;
+}
+`;
+  /** The row of the object with this name, wherever on the map it is. */
+  const rowNamed = (model: StepModel, name: string): CellModel[] =>
+    model.memory
+      .flatMap((segment) => segment.rows)
+      .find((row) =>
+        row.some((cell) => cell.kind === 'name' && cell.text === name)
+      )!;
+  const valueCell = (model: StepModel, name: string): CellModel =>
+    rowNamed(model, name).find((cell) => cell.kind === 'value')!;
+
+  // The step after the `free`: the middle block is gone, and the two either
+  // side of it still hold the two integers each was asked for.
+  const model = modelWith(
+    execute(code),
+    (one) =>
+      one.memory.find((segment) => segment.key === 'heap')?.rows.length === 4
+  );
+
+  it('does not move a block onto the address a freed one left', () => {
+    const heap = model.memory.find((segment) => segment.key === 'heap')!;
+    const addresses = heap.rows.map(
+      (row) => row.find((cell) => cell.kind === 'address')!.address!
+    );
+    const held = (name: string) => Number(valueCell(model, name).text);
+
+    // `third`'s block keeps the addresses malloc gave it, so the hole where
+    // `second`'s block was stays a hole, and no two pointers into the heap
+    // read as the same address.
+    expect(addresses).toHaveLength(4);
+    expect(held('first')).toBe(addresses[0]);
+    expect(held('third')).toBe(addresses[2]);
+    expect(new Set([held('first'), held('second'), held('third')]).size).toBe(
+      3
+    );
+    // What `second` still holds is in the heap band and is nobody's address.
+    expect(addresses).not.toContain(held('second'));
+  });
+
+  it('draws no arrow from a pointer to memory that was given back', () => {
+    const dangling = valueCell(model, 'second');
+    const live = valueCell(model, 'third');
+
+    expect(model.pointers.some((one) => one.from === live.key)).toBe(true);
+    expect(model.pointers.some((one) => one.from === dangling.key)).toBe(false);
+  });
+});
+
+describe('values as their type can hold them', () => {
+  it('wraps a number to the width and sign of the type it lives in', () => {
+    // The engine computes in JavaScript numbers, so an int that was never
+    // assigned comes back as the raw bytes: no `int` holds 3909824860.
+    expect(narrowToType(3909824860, 'int')).toBe(-385142436);
+    expect(narrowToType(3909824860, 'unsigned int')).toBe(3909824860);
+    expect(narrowToType(200, 'char')).toBe(-56);
+    expect(narrowToType(200, 'unsigned char')).toBe(200);
+    expect(narrowToType(70000, 'short')).toBe(4464);
+    expect(narrowToType(7, 'int')).toBe(7);
+  });
+
+  it('leaves alone what has no fixed width to wrap to', () => {
+    expect(narrowToType(1.5, 'double')).toBeNull();
+    expect(narrowToType(0.5, 'float')).toBeNull();
+    expect(narrowToType(4096, 'int *')).toBeNull();
+    expect(narrowToType(4096, 'struct Node')).toBeNull();
+    expect(narrowToType(Number.NaN, 'int')).toBeNull();
   });
 });

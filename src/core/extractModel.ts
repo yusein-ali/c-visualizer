@@ -2,31 +2,38 @@ import { ExecState } from 'unicoen.ts/dist/interpreter/Engine/ExecState';
 import { Stack } from 'unicoen.ts/dist/interpreter/Engine/Stack';
 import { Variable } from 'unicoen.ts/dist/interpreter/Engine/Variable';
 import { RuntimeDeclarationInfo } from '../interpreter/DeclarationSpecifiers';
+import type { RuntimeStringLiteral } from '../interpreter/RuntimeTypeInfo';
 import { expressionTraceOf } from '../interpreter/ExpressionTrace';
 import {
   declarationInfoOf,
   displayAddressOf,
   displayPointerValueOf,
+  displaySizeOf,
   displayTypeOf,
   enumInfoOf,
   functionPointerInfoOf,
   runtimeFunctionsOf,
+  runtimeStringsOf,
 } from '../interpreter/RuntimeTypeInfo';
 import {
   CellModel,
   CodeRangeModel,
+  ExpressionModel,
+  ExpressionNodeModel,
   FunctionModel,
   MEMORY_START_ADDRESSES,
   MemoryRegion,
+  MemoryGroupModel,
   MemorySegmentModel,
   PointerModel,
   StackModel,
   StepModel,
+  VariableModel,
   cellWidth,
   emptyStepModel,
   foldGroupOf,
 } from './model';
-import { extractVariables, formatAddress } from './variables';
+import { extractVariables, formatAddress, narrowToType } from './variables';
 
 /**
  * Reading an execution state as text.
@@ -167,6 +174,17 @@ function valueTextOf(variable: Variable, getTypedef: Typedef): string {
     value === null || typeof value === 'undefined'
       ? 'uninitialized'
       : value.toString();
+  // The engine computes in JavaScript numbers; the row is about an object of a
+  // declared width, and has to say what that width can hold.
+  if (value !== null && typeof value !== 'undefined') {
+    const raw = value.valueOf();
+    if (typeof raw === 'number') {
+      const held = narrowToType(raw, getTypedef(type));
+      if (held !== null) {
+        valueStr = String(held);
+      }
+    }
+  }
   const enumInfo = enumInfoOf(variable);
   const functionInfo = functionPointerInfoOf(variable);
 
@@ -190,7 +208,7 @@ function valueTextOf(variable: Variable, getTypedef: Typedef): string {
     valueStr = formatAddress(pointerValue === null ? value : pointerValue);
   }
   if (rawType === 'char' && value != null) {
-    valueStr += ` '${String.fromCharCode(valueStr)}'`;
+    valueStr += ` '${String.fromCharCode(Number(value.valueOf()) & 0xff)}'`;
   }
   return valueStr;
 }
@@ -215,6 +233,10 @@ function scalarRows(
     'type',
     foldGroup
   );
+  const size = displaySizeOf(variable);
+  if (size !== null) {
+    typeCell.size = size;
+  }
   const nameCell = cell(name, key, 'name', foldGroup);
   const valueCell = cell(
     valueTextOf(variable, getTypedef),
@@ -228,6 +250,7 @@ function scalarRows(
     'address',
     foldGroup
   );
+  addressCell.address = address;
 
   if (functionInfo === null && getTypedef(type).indexOf('*') !== -1) {
     // The value is an address, and the cell showing it is where the arrow
@@ -265,11 +288,16 @@ function aggregateRows(
     'type',
     foldGroup
   );
+  const aggregateSize = displaySizeOf(variable);
+  if (aggregateSize !== null) {
+    typeCell.size = aggregateSize;
+  }
   const nameCell = cell(name, key, 'name', foldGroup);
   // An aggregate holds its own address: the arrow from it points at itself,
   // which is what shows that the name and the storage are the same thing.
   const valueCell = cell(formatAddress(address), key, 'value', foldGroup);
   const addressCell = cell(`&${name}(SYSTEM)`, key, 'address', foldGroup);
+  addressCell.address = address;
   // The triangle itself is the layout's to draw: which way it points is fold
   // state, and fold state is not part of the model. The cell is as wide as the
   // one character that will go in it.
@@ -340,6 +368,8 @@ interface MemoryEntry {
   engineAddress: number;
   rows: CellModel[][];
   synthetic: boolean;
+  /** The stack frame the object was declared in, for the stack's groups. */
+  owner: string;
 }
 
 const MEMORY_ORDER: MemoryRegion[] = [
@@ -351,6 +381,24 @@ const MEMORY_ORDER: MemoryRegion[] = [
   'heap',
   'stack',
 ];
+
+/**
+ * The frames the stack segment's rows fall into, as spans: consecutive
+ * entries declared in the same frame are one group, so `main` and the
+ * function it called are told apart in a segment that is otherwise one list.
+ */
+function framesOf(entries: MemoryEntry[]): MemoryGroupModel[] {
+  const groups: MemoryGroupModel[] = [];
+  for (const entry of entries) {
+    const last = groups[groups.length - 1];
+    if (typeof last !== 'undefined' && last.name === entry.owner) {
+      last.rows += entry.rows.length;
+    } else {
+      groups.push({ name: entry.owner, rows: entry.rows.length });
+    }
+  }
+  return groups;
+}
 
 /** Separates live variables without changing the compatible stack model. */
 class MemoryCollector {
@@ -364,8 +412,50 @@ class MemoryCollector {
       engineAddress: variable.address,
       rows,
       synthetic: /^(Static|Heap):/.test(variable.name),
+      owner: stackName,
     });
     this.entries.set(region, entries);
+  }
+
+  /**
+   * The string literals, as the read-only objects they are. They have no name
+   * in C, so the text they hold stands in for one; what a reader wants to see
+   * is that `"hi"` occupies three bytes somewhere a `const char *` can point
+   * at, and which pointer is pointing there.
+   */
+  addStrings(literals: RuntimeStringLiteral[], addresses: AddressTable): void {
+    const entries = this.entries.get('readOnly') || [];
+    for (const literal of literals) {
+      const key = `readOnly-string-${literal.address}`;
+      const typeCell = cell(`const char[${literal.size}]`, key, 'type');
+      typeCell.size = literal.size;
+      const addressCell = cell(
+        `&"${literal.text}"(${formatAddress(literal.displayAddress)}) `,
+        key,
+        'address'
+      );
+      addressCell.address = literal.displayAddress;
+      const rows = [
+        [
+          typeCell,
+          cell(`"${literal.text}"`, key, 'name'),
+          cell(`${literal.text}\\0`, key, 'value'),
+          addressCell,
+        ],
+      ];
+      addresses.declare(literal.displayAddress, addressCell.key);
+      entries.push({
+        address: literal.displayAddress,
+        // A literal the engine never wrote out has no engine address to be
+        // de-duplicated against a named object; its own is as good as one.
+        engineAddress:
+          literal.address === null ? literal.displayAddress : literal.address,
+        rows,
+        synthetic: false,
+        owner: 'string',
+      });
+    }
+    this.entries.set('readOnly', entries);
   }
 
   addFunctions(functions: FunctionModel[], addresses: AddressTable): void {
@@ -377,6 +467,7 @@ class MemoryCollector {
         key,
         'address'
       );
+      addressCell.address = fn.address;
       const rows = [
         [
           cell('function', key, 'type'),
@@ -391,6 +482,7 @@ class MemoryCollector {
         engineAddress: fn.address,
         rows,
         synthetic: false,
+        owner: fn.name,
       });
     }
     this.entries.set('text', entries);
@@ -418,15 +510,18 @@ class MemoryCollector {
       const displayRows =
         key === 'registers'
           ? rows.map((row, index) =>
-              row.map((item) =>
-                item.kind === 'address'
-                  ? {
-                      ...item,
-                      text: `R${index}`,
-                      width: cellWidth(`R${index}`),
-                    }
-                  : item
-              )
+              row.map((item) => {
+                if (item.kind !== 'address') {
+                  return item;
+                }
+                // A register is a slot, not an address: the column says `R0`,
+                // and carrying a number alongside it would only invite the
+                // memory view to print one.
+                const slot = { ...item, text: `R${index}` };
+                slot.width = cellWidth(slot.text);
+                delete slot.address;
+                return slot;
+              })
             )
           : rows;
       return {
@@ -437,6 +532,7 @@ class MemoryCollector {
             ? MEMORY_START_ADDRESSES[key]
             : first,
         rows: displayRows,
+        groups: key === 'stack' ? framesOf(entries) : [],
       };
     });
   }
@@ -462,6 +558,37 @@ function memoryRegionOf(variable: Variable, stackName: string): MemoryRegion {
     }
   }
   return stackName === 'GLOBAL' ? 'data' : 'stack';
+}
+
+/**
+ * What the operands of the statement about to run hold going in.
+ *
+ * The tree the interpreter left is structure: an operator has a value once it
+ * has been evaluated, and before that nothing in the statement does. But the
+ * names in it are variables that exist, and a reader looking at
+ * `twice(a + 1)` wants to see what `a` is without hunting for it in the
+ * memory beside it. Only names are filled: a literal already says what it is,
+ * and an operator that has not run has no value to give.
+ */
+function withOperandValues(
+  expression: ExpressionModel | null,
+  variables: VariableModel[]
+): ExpressionModel | null {
+  if (expression === null) {
+    return null;
+  }
+  const scope = new Map(
+    variables.map((variable) => [variable.name, variable.value])
+  );
+  const fill = (node: ExpressionNodeModel): ExpressionNodeModel => {
+    const held = node.value === null ? scope.get(node.text) : undefined;
+    return {
+      ...node,
+      value: typeof held === 'undefined' ? node.value : held,
+      children: node.children.map(fill),
+    };
+  };
+  return { ...expression, root: fill(expression.root) };
 }
 
 function codeRangeOf(execState: ExecState): CodeRangeModel | null {
@@ -500,13 +627,15 @@ export function extractModel(execState?: ExecState | null): StepModel {
     ({ name, address }) => ({ name, address })
   );
   memory.addFunctions(functions, addresses);
+  memory.addStrings(runtimeStringsOf(execState), addresses);
+  const variables = extractVariables(execState);
   return {
     stacks,
     pointers: addresses.resolve(),
     memory: memory.segments(),
     functions,
-    expression: expressionTraceOf(execState),
-    variables: extractVariables(execState),
+    expression: withOperandValues(expressionTraceOf(execState), variables),
+    variables,
     codeRange: codeRangeOf(execState),
   };
 }

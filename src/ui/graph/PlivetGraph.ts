@@ -1,14 +1,19 @@
 import { dia, shapes } from '@joint/core';
 import {
   ArrowGeometry,
+  MemoryGeometry,
+  MemoryRegion,
   ExpressionNodeModel,
   FoldState,
-  Geometry,
   StepModel,
+  ViewOptions,
   emptyStepModel,
 } from '../../core';
 import strings from '../../strings';
-import { graphGeometry } from './geometry';
+import { IconName, iconFor } from '../controls/icons';
+import { graphGeometry, memoryGeometry } from './geometry';
+import { ViewPanelHandle, viewPanel } from './ViewPanel';
+import { MemoryNode, memoryNodeOf } from './MemoryNode';
 import { StackTable, stackTableOf } from './StackTable';
 import './graph.css';
 
@@ -16,9 +21,13 @@ export interface PlivetGraphOptions {
   model?: StepModel;
 }
 
+/** How many levels of operands and operators the expression expands into. */
+const depthOf = (node: ExpressionNodeModel): number =>
+  node.children.length === 0 ? 0 : 1 + Math.max(...node.children.map(depthOf));
+
 const cellNamespace = {
   ...shapes,
-  plivet: { StackTable },
+  plivet: { MemoryNode, StackTable },
 };
 
 /** One isolated JointJS graph and paper for one PLIVET visualization. */
@@ -26,17 +35,44 @@ export class PlivetGraph {
   private readonly graph: dia.Graph;
   private readonly paper: dia.Paper;
   private readonly folds = new FoldState();
+  private readonly view = new ViewOptions();
+  private readonly panel: ViewPanelHandle;
   private readonly paperHost: HTMLDivElement;
+  /** What the toolbar says the drawing is scaled to. */
+  private readonly zoomLabel: HTMLSpanElement;
   private readonly resizeObserver: ResizeObserver | null;
   private model: StepModel;
+  /** The map as it is drawn now, so a click can act on what it sees. */
+  private memory: MemoryGeometry = {
+    segments: [],
+    arrows: [],
+    width: 0,
+    height: 0,
+  };
   private scale = 1;
   private contentWidth = 0;
+  private contentHeight = 0;
 
   constructor(
     private readonly container: HTMLElement,
     options: PlivetGraphOptions = {}
   ) {
     this.model = options.model || emptyStepModel();
+    // The switches read the map back, so the panel is built before the toolbar
+    // that carries it and refreshed by every render.
+    this.panel = viewPanel(
+      this.view,
+      () => this.render(this.model),
+      (region: MemoryRegion) =>
+        this.memory.segments.some((segment) => segment.key === region)
+    );
+    // The zoom buttons are three magnifiers, so the percentage they are
+    // moving is written beside them. It is a live region for the same reason
+    // the step counter is: pressing one of them changes nothing else that a
+    // reader who is not watching the drawing would notice.
+    this.zoomLabel = document.createElement('span');
+    this.zoomLabel.className = 'plivet-graph__status';
+    this.zoomLabel.setAttribute('role', 'status');
     this.container.classList.add('plivet-graph');
     this.container.appendChild(this.toolbar());
     this.paperHost = document.createElement('div');
@@ -58,14 +94,32 @@ export class PlivetGraph {
     });
     this.paper.on('element:pointerclick', (_view, event) => {
       const target = event.target as Element | null;
-      const fold =
-        target === null ? null : target.closest('[data-fold-target]');
-      const group =
-        fold === null ? null : fold.getAttribute('data-fold-target');
+      // An aggregate's triangle folds its members away; a segment's title bar
+      // folds the whole segment away. Both are clicks on the same paper.
+      const hit =
+        target === null
+          ? null
+          : target.closest('[data-fold-target], [data-collapse-target]');
+      if (hit === null) {
+        return;
+      }
+      const group = hit.getAttribute('data-fold-target');
+      const segment = hit.getAttribute('data-collapse-target');
       if (group !== null) {
         this.folds.toggle(decodeURIComponent(group));
-        this.render(this.model);
+      } else if (segment !== null) {
+        // What the click flips is what the user is looking at: a segment
+        // nobody has clicked is drawn collapsed when it is empty, and the
+        // geometry is where that decision was made.
+        const drawn = this.memory.segments.find((one) => one.key === segment);
+        this.folds.toggleSegment(
+          segment,
+          typeof drawn !== 'undefined' && drawn.collapsed
+        );
+      } else {
+        return;
       }
+      this.render(this.model);
     });
 
     this.resizeObserver =
@@ -80,20 +134,48 @@ export class PlivetGraph {
 
   render(model: StepModel): void {
     this.model = model;
-    const geometry = graphGeometry(model, this.folds);
-    const expressionCells = this.expressionCells(model, geometry);
+    // A step that knows its memory is drawn as a memory map; a step that only
+    // has call frames - the empty model this starts on - keeps the tables.
+    const memory = memoryGeometry(model, this.folds, this.view);
+    this.memory = memory;
+    // Which of the two it is, is a question about the model rather than about
+    // the geometry: a reader who switches every region off is looking at an
+    // empty memory map, not asking for the tables back.
+    const frames =
+      model.memory.length === 0
+        ? graphGeometry(model, this.folds)
+        : { stacks: [], arrows: [] };
+    this.contentWidth = frames.stacks.reduce(
+      (maximum, stack) => Math.max(maximum, stack.x + stack.width),
+      memory.width
+    );
+    this.contentHeight = frames.stacks.reduce(
+      (maximum, stack) => Math.max(maximum, stack.y + stack.height),
+      memory.height
+    );
+    // The expression window sits under the memory map, not beside it: the two
+    // are read one after the other, and a step is easier to follow when the
+    // memory does not move sideways as the expression grows.
+    const expressionCells = this.view.isExpressionShown()
+      ? this.expressionCells(model, 24, this.contentHeight + 24)
+      : [];
+    this.panel.refresh();
     this.paper.freeze();
     this.graph.resetCells([
-      ...geometry.stacks.map(stackTableOf),
-      ...geometry.arrows.map((arrow) => this.pointerLink(arrow)),
+      ...memory.segments.map(memoryNodeOf),
+      ...frames.stacks.map(stackTableOf),
+      ...[...memory.arrows, ...frames.arrows].map((arrow) =>
+        this.pointerLink(arrow)
+      ),
       ...expressionCells,
     ]);
-    this.resize(geometry);
+    this.resize();
     this.paper.unfreeze();
   }
 
   setScale(scale: number): void {
     this.scale = Math.max(0.4, Math.min(2, scale));
+    this.zoomLabel.textContent = `${Math.round(this.scale * 100)}%`;
     this.paper.scale(this.scale, this.scale);
     this.resize();
   }
@@ -112,7 +194,14 @@ export class PlivetGraph {
     const link = new shapes.standard.Link({ z: 2 });
     link.source(arrow.from);
     link.target(arrow.to);
-    link.router('manhattan', { step: 10, padding: 8 });
+    if (typeof arrow.vertices !== 'undefined') {
+      // The layout has decided where this one goes; routing it again would
+      // only send it back through the segments it was drawn around.
+      link.vertices(arrow.vertices);
+      link.router('normal');
+    } else {
+      link.router('manhattan', { step: 10, padding: 8 });
+    }
     link.connector('rounded', { radius: 8 });
     link.attr({
       line: {
@@ -129,24 +218,20 @@ export class PlivetGraph {
     return link;
   }
 
-  private expressionCells(model: StepModel, geometry: Geometry): dia.Cell[] {
+  private expressionCells(
+    model: StepModel,
+    originX: number,
+    originY: number
+  ): dia.Cell[] {
     if (model.expression === null) {
-      this.contentWidth = geometry.stacks.reduce(
-        (maximum, stack) => Math.max(maximum, stack.x + stack.width),
-        0
-      );
       return [];
     }
-    const nodeWidth = 152;
-    const nodeHeight = 68;
-    const gapX = 22;
-    const gapY = 36;
-    const originX =
-      geometry.stacks.reduce(
-        (maximum, stack) => Math.max(maximum, stack.x + stack.width),
-        0
-      ) + 80;
-    const originY = 90;
+    const nodeWidth = 138;
+    const nodeHeight = 54;
+    const gapX = 18;
+    const gapY = 30;
+    const titleHeight = 30;
+    const treeTop = originY + titleHeight + 16;
     const widths = new Map<string, number>();
     const measure = (node: ExpressionNodeModel): number => {
       const width =
@@ -168,7 +253,7 @@ export class PlivetGraph {
       const leaves = widths.get(node.key) || 1;
       const x =
         originX + (leftLeaf + leaves / 2) * (nodeWidth + gapX) - nodeWidth / 2;
-      const y = originY + depth * (nodeHeight + gapY);
+      const y = treeTop + depth * (nodeHeight + gapY);
       const element = new shapes.standard.Rectangle({ z: 4 });
       element.position(x, y);
       element.resize(nodeWidth, nodeHeight);
@@ -186,17 +271,16 @@ export class PlivetGraph {
           ry: 5,
         },
         label: {
-          text: `${
-            node.order < 0
-              ? '—'
-              : `${strings.expressionOrder} ${node.order + 1}`
-          } · ${node.text}\n= ${
-            node.value === null ? strings.expressionNotEvaluated : node.value
-          }`,
+          // The tree is the expansion: an operator over the operands it takes
+          // and what it made of them. Nothing here needs numbering.
+          // An operator that has not run yet is worth nothing yet, and an
+          // empty line says that better than a sentence about it does.
+          text:
+            node.value === null ? node.text : `${node.text}\n= ${node.value}`,
           fill: '#111111',
           fontFamily: "Consolas, 'Courier New', monospace",
-          fontSize: 12,
-          textWrap: { width: -10, height: -8, ellipsis: true },
+          fontSize: 13,
+          textWrap: { width: -12, height: -8, ellipsis: true },
         },
       });
       nodes.set(node.key, element);
@@ -237,12 +321,13 @@ export class PlivetGraph {
     };
     connect(model.expression.root);
 
-    const title = new shapes.standard.Rectangle({ z: 4 });
-    title.position(originX, 42);
-    title.resize(
-      Math.max(nodeWidth, totalLeaves * (nodeWidth + gapX) - gapX),
-      30
+    const treeWidth = Math.max(
+      nodeWidth,
+      totalLeaves * (nodeWidth + gapX) - gapX
     );
+    const title = new shapes.standard.Rectangle({ z: 4 });
+    title.position(originX, originY);
+    title.resize(treeWidth, titleHeight);
     title.attr({
       body: { fill: '#26384a', stroke: '#26384a', rx: 4, ry: 4 },
       label: {
@@ -254,48 +339,70 @@ export class PlivetGraph {
       },
     });
     cells.push(title);
-    this.contentWidth = originX + totalLeaves * (nodeWidth + gapX) - gapX + 50;
+    this.contentWidth = Math.max(this.contentWidth, originX + treeWidth + 24);
+    this.contentHeight = Math.max(
+      this.contentHeight,
+      treeTop + (depthOf(model.expression.root) + 1) * (nodeHeight + gapY) + 24
+    );
     return cells;
   }
 
+  /**
+   * The bar over the drawing: the zoom, what it is at, and the switches for
+   * what is drawn at all.
+   *
+   * It is the editor's control bar again - the same joined group, the same
+   * magnifiers, the same buttons - because a reader works between the two
+   * panels and there is no reason for the same gesture to look different on
+   * each side of the splitter. What it does not share is the stylesheet: the
+   * icons are a module, and the paint is `--plivet-button-*`, so the canvas
+   * still mounts on a page that has never heard of `controls.css`.
+   */
   private toolbar(): HTMLDivElement {
     const toolbar = document.createElement('div');
     toolbar.className = 'plivet-graph__toolbar';
-    toolbar.append(
-      this.zoomButton('−', strings.graphZoomOut, () =>
+
+    const zoom = document.createElement('div');
+    zoom.className = 'plivet-graph__group';
+    zoom.append(
+      this.zoomButton('zoomOut', strings.graphZoomOut, () =>
         this.setScale(this.scale - 0.1)
       ),
-      this.zoomButton('100%', strings.graphZoomReset, () => this.setScale(1)),
-      this.zoomButton('+', strings.graphZoomIn, () =>
+      this.zoomButton('zoomReset', strings.graphZoomReset, () =>
+        this.setScale(1)
+      ),
+      this.zoomButton('zoomIn', strings.graphZoomIn, () =>
         this.setScale(this.scale + 0.1)
       )
     );
+
+    // The percentage stays with the buttons that move it, and the disclosure
+    // keeps the right-hand end: its panel hangs from that edge, and anywhere
+    // else on the bar it would open off the side of the canvas.
+    toolbar.append(zoom, this.zoomLabel, this.panel.root);
     return toolbar;
   }
 
   private zoomButton(
-    label: string,
+    icon: IconName,
     title: string,
     action: () => void
   ): HTMLButtonElement {
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = 'plivet-graph__zoom';
-    button.textContent = label;
+    button.className = 'plivet-graph__button';
     button.title = title;
+    // The picture carries no name, so the button says what it is itself.
+    button.setAttribute('aria-label', title);
+    button.appendChild(iconFor(icon));
     button.addEventListener('click', action);
     return button;
   }
 
-  private resize(geometry?: Geometry): void {
-    const current = geometry || graphGeometry(this.model, this.folds);
-    const bottom = current.stacks.reduce(
-      (maximum, stack) => Math.max(maximum, stack.y + stack.height),
-      0
-    );
+  private resize(): void {
     const bounds = this.graph.getBBox();
     const contentBottom = Math.max(
-      bottom,
+      this.contentHeight,
       bounds === null ? 0 : bounds.y + bounds.height
     );
     const contentRight = Math.max(

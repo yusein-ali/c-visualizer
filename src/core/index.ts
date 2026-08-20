@@ -17,8 +17,31 @@ export type {
   SyntaxErrorModel,
 } from './server';
 export { extractModel } from './extractModel';
-export { extractVariables, formatAddress } from './variables';
+export { extractVariables, formatAddress, narrowToType } from './variables';
 export { layout, connectionColor } from './layout';
+export {
+  MEMORY_CAPTION_HEIGHT,
+  MEMORY_COLUMN_HEADER_HEIGHT,
+  MEMORY_ENTRY_HEIGHT,
+  MEMORY_FOLD_WIDTH,
+  MEMORY_FONT_SIZE,
+  MEMORY_GROUP_HEIGHT,
+  MEMORY_PADDING_X,
+  MEMORY_ROW_HEIGHT,
+  MEMORY_TITLE_HEIGHT,
+  MEMORY_TITLE_TOGGLE_WIDTH,
+  layoutMemory,
+} from './memoryLayout';
+export type {
+  MemoryCaptionGeometry,
+  MemoryColumnGeometry,
+  MemoryColumnKey,
+  MemoryFoldGeometry,
+  MemoryGeometry,
+  MemoryRowGeometry,
+  MemoryRowKind,
+  MemorySegmentGeometry,
+} from './memoryLayout';
 export type {
   ArrowGeometry,
   CellGeometry,
@@ -27,15 +50,19 @@ export type {
   StackGeometry,
 } from './layout';
 export { FoldState } from './foldState';
+export { ViewOptions } from './viewOptions';
 export { HISTORY_LIMIT, StepHistory } from './history';
 export {
   CELL_FONT_SIZE,
   CELL_HEIGHT,
+  MEMORY_ALIGNMENT,
   MEMORY_START_ADDRESSES,
   cellWidth,
   emptyStepModel,
   foldGroupOf,
   isWithinFold,
+  startsCollapsed,
+  startsShown,
 } from './model';
 export type {
   CellKind,
@@ -45,6 +72,7 @@ export type {
   ExpressionNodeKind,
   ExpressionNodeModel,
   FunctionModel,
+  MemoryGroupModel,
   MemoryRegion,
   MemorySegmentModel,
   PointerModel,

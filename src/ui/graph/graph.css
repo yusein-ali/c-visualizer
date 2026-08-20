@@ -1,6 +1,16 @@
+/*
+ * The canvas is a window onto the drawing, not the drawing itself: the paper
+ * is as tall as the step needs and this scrolls it, which is also what makes
+ * the toolbar's `position: sticky` stick to something.
+ *
+ * How tall that window is, is the host's to say. `--plivet-graph-height` is
+ * what the handle under the canvas sets in the shell; unset - embedded in a
+ * page that has never heard of a handle - this is the 95vh it always was.
+ */
 .plivet-graph {
   width: 100%;
-  min-height: 95vh;
+  height: var(--plivet-graph-height, 95vh);
+  min-height: 200px;
   border: 1px solid #000;
   overflow: auto;
   background: #fff;
@@ -11,35 +21,195 @@
   top: 0;
   z-index: 10;
   display: flex;
-  gap: 0.35rem;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
   padding: 0.4rem;
-  border-bottom: 1px solid #bbb;
-  background: rgb(255 255 255 / 92%);
+  border-bottom: 1px solid var(--plivet-line, #bbbbbb);
+  background: var(--plivet-surface, #ffffff);
+  font-size: 14px;
 }
 
-.plivet-graph__zoom {
-  min-width: 2.75rem;
+/*
+ * The bar is the editor's control bar again: the same geometry, the same
+ * joined group, and the same three colours through `--plivet-button-*`, so a
+ * reader working between the two panels meets one set of controls rather than
+ * two. The paint is named rather than borrowed - `controls.css` is not
+ * imported here - so the canvas still dresses its own buttons on a page that
+ * mounts it alone.
+ */
+.plivet-graph__group {
+  display: flex;
+}
+
+.plivet-graph__button,
+.plivet-graph__config-summary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.5rem;
   min-height: 2rem;
-  padding: 0.2rem 0.55rem;
-  border: 1px solid #777;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid var(--plivet-line, #333333);
   border-radius: 0.25rem;
-  color: #111;
-  background: #f6f6f6;
-  font:
-    600 1.2rem/1 system-ui,
-    sans-serif;
+  background: var(--plivet-button-bg, #f6f6f6);
+  color: var(--plivet-button-color, #333333);
+  font: inherit;
   cursor: pointer;
 }
 
-.plivet-graph__zoom:hover,
-.plivet-graph__zoom:focus-visible {
-  background: #e7edf4;
+/* One group reads as one control: only its ends are rounded. */
+.plivet-graph__group .plivet-graph__button + .plivet-graph__button {
+  margin-left: -1px;
+}
+
+.plivet-graph__group .plivet-graph__button {
+  border-radius: 0;
+}
+
+.plivet-graph__group .plivet-graph__button:first-child {
+  border-radius: 0.25rem 0 0 0.25rem;
+}
+
+.plivet-graph__group .plivet-graph__button:last-child {
+  border-radius: 0 0.25rem 0.25rem 0;
+}
+
+.plivet-graph__button:hover,
+.plivet-graph__button:focus-visible,
+.plivet-graph__config-summary:hover,
+.plivet-graph__config-summary:focus-visible {
+  background: var(--plivet-button-hover-bg, #e7edf4);
+}
+
+/*
+ * What the zoom is at, now that the three buttons are magnifiers rather than a
+ * minus, a percentage and a plus. It is announced rather than merely written,
+ * as the step counter is, because pressing a magnifier changes nothing else a
+ * reader who is not watching the drawing would notice.
+ */
+.plivet-graph__status {
+  color: var(--plivet-ink, #111111);
+}
+
+/*
+ * A summary is a list item, and its marker is drawn outside the button we have
+ * just made of it. The chevron that replaces it is the pair the segments fold
+ * with, so one gesture reads as one gesture across the canvas.
+ */
+.plivet-graph__config-summary {
+  gap: 0.35rem;
+  padding: 0.25rem 0.75rem;
+  list-style: none;
+}
+
+.plivet-graph__config-summary::-webkit-details-marker {
+  display: none;
+}
+
+.plivet-graph__config-summary::after {
+  content: '\25B2';
+  font-size: 0.6em;
+}
+
+.plivet-graph__config[open] .plivet-graph__config-summary::after {
+  content: '\25BC';
+}
+
+/*
+ * The switches over what the canvas draws.
+ *
+ * The handle is one of the toolbar's buttons and is painted by the same rule
+ * as the zoom ones. The panel under it is painted as the map is - the slate
+ * title bar, the pale column header, the grid lines between rows - because it
+ * hangs over the drawing rather than sitting on the page. Those colours are
+ * `MemoryNode`'s; it sets them as SVG attributes, so this is the one place
+ * they are written twice, and they are named here so the panel only has to be
+ * kept in step in one direction.
+ */
+.plivet-graph {
+  --plivet-graph-title: #26384a;
+  --plivet-graph-title-text: #ffffff;
+  --plivet-graph-grid: #cfd8e1;
+  --plivet-graph-header: #eef2f6;
+  --plivet-graph-header-text: #4a5b6c;
+  --plivet-graph-hover: #f7f9fb;
+  --plivet-graph-ink: #111111;
+}
+
+/* The far end of the bar: the panel hangs from this edge. */
+.plivet-graph__config {
+  position: relative;
+  margin-left: auto;
+}
+
+/*
+ * The panel is taken out of the flow so that opening it covers the drawing for
+ * as long as it is open, rather than pushing the memory map down and moving
+ * what the reader is looking at.
+ */
+.plivet-graph__config-body {
+  position: absolute;
+  right: 0;
+  z-index: 11;
+  min-width: 15rem;
+  margin-top: 0.35rem;
+  overflow: hidden;
+  border: 1px solid var(--plivet-graph-title);
+  border-radius: 0.25rem;
+  background: #fff;
+  box-shadow: 0 2px 8px rgb(38 56 74 / 25%);
+  color: var(--plivet-graph-ink);
+  font:
+    14px/1.35 system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
+  text-align: left;
+}
+
+.plivet-graph__config-title {
+  margin: 0;
+  padding: 0.3rem 0.6rem;
+  border-bottom: 1px solid var(--plivet-graph-grid);
+  background: var(--plivet-graph-header);
+  color: var(--plivet-graph-header-text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.plivet-graph__config-option {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.3rem 0.6rem;
+  cursor: pointer;
+}
+
+.plivet-graph__config-option + .plivet-graph__config-option {
+  border-top: 1px solid var(--plivet-graph-grid);
+}
+
+/* The expression is not one of the regions, and the map's own rule for that
+   is a heavier line than the one between two rows of a table. */
+.plivet-graph__config-option--apart {
+  border-top: 1px solid var(--plivet-graph-title);
+}
+
+.plivet-graph__config-option:hover {
+  background: var(--plivet-graph-hover);
+}
+
+.plivet-graph__config-option input {
+  accent-color: var(--plivet-graph-title);
+  margin: 0;
 }
 
 .plivet-graph__paper {
   min-width: 100%;
 }
 
-.plivet-graph .plivet-fold-cell {
+.plivet-graph .plivet-fold-cell,
+.plivet-graph .plivet-collapse-cell {
   cursor: pointer;
 }

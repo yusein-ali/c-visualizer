@@ -57,6 +57,13 @@ export interface ArrowGeometry {
   mid: Point;
   to: Point;
   color: string;
+  /**
+   * Points the line must pass through, in order. The memory view sets them - a
+   * pointer between two segments in the same column is drawn out into the
+   * gutter beside them and run down it - and leaves the router to it
+   * otherwise.
+   */
+  vertices?: Point[];
 }
 
 export interface Geometry {

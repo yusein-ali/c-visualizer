@@ -94,7 +94,7 @@ next Node major as an advisory job that may fail without blocking.
 src/index.ts                 the public entry: `new Plivet(element, options)`
   └─ src/main.ts             the standalone page, mounting one into #root
   └─ app/Plivet.ts           owns the bus, the interpreter client and the theme
-       ├─ ui/shell/          two-column CSS grid: five mount points and the footer
+       ├─ ui/shell/          two-column CSS grid: five mount points, three drag handles, the footer
        ├─ ui/controls/       six debug buttons, text size, theme switch, step counter
        ├─ app/EditorController.ts → ui/editor/  (CodeMirror 6)
        ├─ ui/console/        a `pre` and a `textarea`

@@ -7,3 +7,5 @@
  */
 export { PlivetShell } from './PlivetShell';
 export type { PlivetShellOptions } from './PlivetShell';
+export { Splitter } from './Splitter';
+export type { SplitterAxis, SplitterOptions } from './Splitter';

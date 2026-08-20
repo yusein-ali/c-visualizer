@@ -6,6 +6,7 @@ import {
   displayTypeOf,
   functionPointerInfoOf,
 } from '../interpreter/RuntimeTypeInfo';
+import { basicSizeof } from '../interpreter/RecordTable';
 import { VariableModel } from './model';
 
 /**
@@ -23,6 +24,42 @@ import { VariableModel } from './model';
 
 export const formatAddress = (address: number): string =>
   `0x${address.toString(16).toUpperCase()}`;
+
+/**
+ * The number as the declared type can actually hold it.
+ *
+ * The engine computes in JavaScript numbers, so an `int` that has never been
+ * assigned comes back as whatever the bytes happen to say - 3909824860, a
+ * value no `int` can hold. A memory view that prints it has stopped
+ * describing C. Anything wider than the type is wrapped the way the machine
+ * wraps it, signed or not; floating types and anything that is not a plain
+ * integer are left alone.
+ */
+export function narrowToType(value: number, type: string): number | null {
+  if (!Number.isFinite(value) || Number.isNaN(value)) {
+    return null;
+  }
+  if (
+    type.indexOf('*') !== -1 ||
+    type.indexOf('[') !== -1 ||
+    /\b(float|double)\b/.test(type)
+  ) {
+    return null;
+  }
+  if (!/\b(char|short|int|long|unsigned|signed|bool|_Bool)\b/.test(type)) {
+    return null;
+  }
+  const bits = basicSizeof(type) * 8;
+  if (bits >= 64) {
+    return null;
+  }
+  const whole = BigInt(Math.trunc(value));
+  return Number(
+    type.indexOf('unsigned') === -1
+      ? BigInt.asIntN(bits, whole)
+      : BigInt.asUintN(bits, whole)
+  );
+}
 
 /** Whether the element of an array value is a `Variable` and not a raw value. */
 const isVariable = (element: any): boolean =>
@@ -55,7 +92,12 @@ function formatValue(value: any, type: string): string {
     return formatAddress(value);
   }
   if (typeof value === 'number' && type.indexOf('char') !== -1) {
-    return `'${String.fromCharCode(value)}' (${value})`;
+    const held = narrowToType(value, type);
+    return `'${String.fromCharCode(value & 0xff)}' (${held === null ? value : held})`;
+  }
+  if (typeof value === 'number') {
+    const held = narrowToType(value, type);
+    return String(held === null ? value : held);
   }
   return String(value);
 }

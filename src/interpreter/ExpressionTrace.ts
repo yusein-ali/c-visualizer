@@ -18,11 +18,6 @@ import type {
   ExpressionNodeModel,
 } from '../core/model';
 
-interface Evaluated {
-  order: number;
-  value: string;
-}
-
 interface StateWithExpression extends ExecState {
   plivetExpression?: ExpressionModel | null;
 }
@@ -30,37 +25,45 @@ interface StateWithExpression extends ExecState {
 const ASSIGNMENT = /^(?:=|\+=|-=|\*=|\/=|%=|<<=|>>=|&=|\|=|\^=)$/;
 
 /**
- * Records values while the interpreter recursively evaluates an expression,
- * then leaves only a plain tree on the execution snapshot at a step boundary.
+ * Leaves a plain tree of the statement about to run on each execution
+ * snapshot.
+ *
+ * It is the statement the editor is highlighting, expanded: the operators, the
+ * operands under them, and what each name holds going in. It used to be the
+ * statement that had just finished, numbered in evaluation order, which read
+ * as a different program the moment a call suspended one - the caller's
+ * half-evaluated assignment shown against a line inside the callee.
+ *
+ * Values recorded while the interpreter evaluates are kept for the statement
+ * they belong to, so a statement suspended part-way through a call still shows
+ * what it got before it stopped. What the operands hold going in is filled in
+ * by `extractModel`: the execution state is only assembled at the end of the
+ * step, and reading the frames from here would read them too early.
  */
 export class ExpressionRecorder {
   private active: UniExpr | null = null;
-  private values = new WeakMap<UniExpr, Evaluated>();
-  private order = 0;
+  private values = new WeakMap<UniExpr, string>();
 
   capture(expr: UniExpr, value: unknown): void {
     if (this.active === null) {
       return;
     }
-    this.values.set(expr, {
-      order: this.order,
-      value: expressionValue(value),
-    });
-    this.order += 1;
+    this.values.set(expr, expressionValue(value));
   }
 
   beforeYield(state: ExecState, next: UniExpr): void {
-    this.attach(state);
+    if (next !== this.active) {
+      this.values = new WeakMap<UniExpr, string>();
+    }
     this.active = next;
-    this.values = new WeakMap<UniExpr, Evaluated>();
-    this.order = 0;
+    this.attach(state);
   }
 
   finish(state: ExecState): void {
-    this.attach(state);
+    // Nothing is about to run any more.
     this.active = null;
-    this.values = new WeakMap<UniExpr, Evaluated>();
-    this.order = 0;
+    this.values = new WeakMap<UniExpr, string>();
+    this.attach(state);
   }
 
   private attach(state: ExecState): void {
@@ -78,7 +81,7 @@ export function expressionTraceOf(state: ExecState): ExpressionModel | null {
 
 function expressionOf(
   expression: UniExpr,
-  values: WeakMap<UniExpr, Evaluated>
+  values: WeakMap<UniExpr, string>
 ): ExpressionModel {
   return {
     range: rangeOf(expression),
@@ -86,9 +89,21 @@ function expressionOf(
   };
 }
 
+/**
+ * What the interpreter recorded for a node, if it has run already. An operator
+ * that has not run yet is worth nothing yet, and says so by staying empty.
+ */
+function valueOf(
+  expression: UniExpr,
+  values: WeakMap<UniExpr, string>
+): string | null {
+  const evaluated = values.get(expression);
+  return typeof evaluated === 'undefined' ? null : evaluated;
+}
+
 function nodeOf(
   expression: UniExpr,
-  values: WeakMap<UniExpr, Evaluated>,
+  values: WeakMap<UniExpr, string>,
   keys: { value: number }
 ): ExpressionNodeModel {
   if (expression instanceof UniVariableDec) {
@@ -96,21 +111,18 @@ function nodeOf(
       (item) => item.value !== null && containsExpandableOperator(item.value)
     );
     if (typeof definition !== 'undefined') {
-      const evaluated = values.get(expression);
       const left: ExpressionNodeModel = {
         key: `expression-${keys.value++}`,
         kind: 'operand',
         text: definition.name,
-        value: definition.name,
-        order: -1,
+        value: null,
         children: [],
       };
       return {
         key: `expression-${keys.value++}`,
         kind: 'assignment',
         text: '=',
-        value: typeof evaluated === 'undefined' ? null : evaluated.value,
-        order: typeof evaluated === 'undefined' ? -1 : evaluated.order,
+        value: valueOf(expression, values),
         children: [left, nodeOf(definition.value, values, keys)],
       };
     }
@@ -119,13 +131,11 @@ function nodeOf(
   const children = childrenOf(expression).map((child) =>
     nodeOf(child, values, keys)
   );
-  const evaluated = values.get(expression);
   return {
     key: `expression-${keys.value++}`,
     kind: kindOf(expression, children.length),
     text: expressionText(expression),
-    value: typeof evaluated === 'undefined' ? null : evaluated.value,
-    order: typeof evaluated === 'undefined' ? -1 : evaluated.order,
+    value: valueOf(expression, values),
     children,
   };
 }

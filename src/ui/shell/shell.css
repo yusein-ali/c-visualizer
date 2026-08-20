@@ -71,21 +71,37 @@
   box-sizing: inherit;
 }
 
+/*
+ * Side by side, the two columns are separated by a handle, and the handle is a
+ * grid track of its own. The proportions Bootstrap was asked for are still
+ * here - as the fallback of `--plivet-side-width`, which is unset until
+ * somebody drags. A drag replaces the first track with a length, the last one
+ * is the only flexible track left, and the canvas takes whatever is over.
+ */
 @media (min-width: 768px) {
   .plivet {
-    grid-template-columns: minmax(0, 6fr) minmax(0, 6fr);
+    grid-template-columns: var(--plivet-side-width, minmax(0, 6fr)) auto minmax(
+        0,
+        6fr
+      );
   }
 }
 
 @media (min-width: 992px) {
   .plivet {
-    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+    grid-template-columns: var(--plivet-side-width, minmax(0, 5fr)) auto minmax(
+        0,
+        7fr
+      );
   }
 }
 
 @media (min-width: 1200px) {
   .plivet {
-    grid-template-columns: minmax(0, 4fr) minmax(0, 8fr);
+    grid-template-columns: var(--plivet-side-width, minmax(0, 4fr)) auto minmax(
+        0,
+        8fr
+      );
   }
 }
 
@@ -95,8 +111,92 @@
   min-width: 0;
 }
 
+.plivet__column {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
 .plivet__main {
   min-width: 0;
+}
+
+/*
+ * The handles between the boxes.
+ *
+ * Each is a `separator` with a tab stop, so the grip is drawn for the pointer
+ * and the focus ring for the keyboard. The two that resize a box rather than a
+ * column are offered at every width; the one between the columns is offered
+ * only where there are two columns.
+ */
+.plivet__splitter {
+  position: relative;
+  flex: none;
+  background-color: transparent;
+  touch-action: none;
+}
+
+.plivet__splitter--x {
+  width: 9px;
+  cursor: col-resize;
+}
+
+/*
+ * Stacked on a narrow screen there is no boundary between the columns to move.
+ * This has to come after the rule it overrides: a media query carries no
+ * specificity of its own, so between two rules naming one class, the later one
+ * wins at every width - which is how the handle came to be hidden at all of
+ * them.
+ */
+@media (max-width: 767.98px) {
+  .plivet__splitter--x {
+    display: none;
+  }
+}
+
+.plivet__splitter--y {
+  height: 9px;
+  cursor: row-resize;
+}
+
+/* The grip: a line down the middle of the handle, in the shell's own ink. */
+.plivet__splitter::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  border-radius: 1px;
+  background-color: var(--plivet-line);
+  opacity: 35%;
+}
+
+.plivet__splitter--x::after {
+  width: 3px;
+  height: 28px;
+}
+
+.plivet__splitter--y::after {
+  width: 28px;
+  height: 3px;
+}
+
+.plivet__splitter:hover::after,
+.plivet__splitter:focus-visible::after,
+.plivet__splitter--active::after {
+  opacity: 100%;
+}
+
+.plivet__splitter:focus-visible {
+  outline: 2px solid var(--plivet-line);
+  outline-offset: -2px;
+}
+
+/*
+ * A drag that crosses the editor would otherwise select the code under it.
+ * The handle is a child of the root, so the root can see it is being held.
+ */
+.plivet:has(.plivet__splitter--active) {
+  user-select: none;
 }
 
 /*
@@ -111,8 +211,12 @@
   border: 1px solid var(--plivet-line);
 }
 
+/*
+ * The height the editor opens at. `--plivet-editor-height` is what the handle
+ * under it sets; unset, this is the 62vh the box has always had.
+ */
 .plivet__editor .cm-editor {
-  height: 62vh;
+  height: var(--plivet-editor-height, 62vh);
 }
 
 .plivet__footer {

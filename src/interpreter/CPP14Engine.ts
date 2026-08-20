@@ -13,6 +13,7 @@ import { UniIdent } from 'unicoen.ts/dist/node/UniIdent';
 import { UniMethodCall } from 'unicoen.ts/dist/node/UniMethodCall';
 import { UniNoneLiteral } from 'unicoen.ts/dist/node/UniNoneLiteral';
 import { UniProgram } from 'unicoen.ts/dist/node/UniProgram';
+import { UniStringLiteral } from 'unicoen.ts/dist/node/UniStringLiteral';
 import { UniUnaryOp } from 'unicoen.ts/dist/node/UniUnaryOp';
 import { UniVariableDec } from 'unicoen.ts/dist/node/UniVariableDec';
 import {
@@ -39,6 +40,80 @@ import { UnionTable } from './UnionTable';
  * the static area at 10000, which is where a text segment belongs.
  */
 export const CODE_SEGMENT_BASE = 0x1000;
+
+/**
+ * Where the engine's static area begins (`Scope` starts its cursors at
+ * `new Address(0, 10000, 20000, 50000)`). Below it is the code area, which is
+ * where string literals and the library's own functions are written.
+ */
+const STATIC_AREA_BASE = 10000;
+
+/** Where one string literal is, if it is anywhere: not every literal is. */
+export interface StringLiteralLocation {
+  /** The engine's own address, or `null` for a literal it never wrote out. */
+  address: number | null;
+  text: string;
+  /** The bytes it would occupy, terminator included. */
+  size: number;
+}
+
+/**
+ * Every string literal in the program, in the order it was written.
+ *
+ * The engine only puts a literal in memory when something is initialized with
+ * it: `const char *p = "hi"` writes the bytes and hands over the address, but
+ * `printf("%d\n", n)` passes the bytes themselves and never gives them a
+ * home. In C every literal is an object in read-only memory, so the program is
+ * read for them rather than the memory alone.
+ *
+ * The walk is reflective because the node classes have no common accessor for
+ * their children, and a switch over every one of them would have to be revised
+ * each time unicoen adds a node.
+ */
+function stringLiteralsIn(root: unknown): string[] {
+  const texts: string[] = [];
+  const seen = new Set<unknown>();
+  const walk = (node: unknown): void => {
+    if (node === null || typeof node !== 'object' || seen.has(node)) {
+      return;
+    }
+    seen.add(node);
+    if (node instanceof UniStringLiteral) {
+      const text = PlivetCPP14Engine.escapeText(String(node.value));
+      if (texts.indexOf(text) === -1) {
+        texts.push(text);
+      }
+      return;
+    }
+    for (const child of Object.values(node as Record<string, unknown>)) {
+      if (Array.isArray(child)) {
+        child.forEach(walk);
+      } else {
+        walk(child);
+      }
+    }
+  };
+  walk(root);
+  return texts;
+}
+
+/** A control character reads better as the escape it was written with. */
+const ESCAPES: Record<string, string> = {
+  '\n': '\\n',
+  '\t': '\\t',
+  '\r': '\\r',
+  '\0': '\\0',
+  '\v': '\\v',
+  '\f': '\\f',
+};
+
+const escapedText = (text: string): string =>
+  // eslint-disable-next-line no-control-regex
+  text.replace(/[\u0000-\u001f]/g, (character) =>
+    typeof ESCAPES[character] === 'undefined'
+      ? `\\x${character.charCodeAt(0).toString(16).padStart(2, '0')}`
+      : ESCAPES[character]
+  );
 
 /** Runtime reality is looser than unicoen.ts's declarations for tagless types. */
 interface RuntimeClassDec {
@@ -210,6 +285,8 @@ export class PlivetCPP14Engine extends CPP14Engine {
   private declarationSpecifiers = new DeclarationSpecifiers();
   private designatedInitializers = new DesignatedInitializers();
   private readonly recordArrays = new Map<number, RecordArrayAllocation>();
+  /** Every string literal the program contains, in source order. */
+  private sourceStrings: string[] = [];
   private readonly declarationInfoByAddress = new Map<
     number,
     RuntimeDeclarationInfo
@@ -420,6 +497,7 @@ export class PlivetCPP14Engine extends CPP14Engine {
 
   protected *executeStepByStep(dec: UniProgram): any {
     this.entryPoint = this.getEntryPoint(dec);
+    this.sourceStrings = stringLiteralsIn(dec);
     return yield* super.executeStepByStep(dec);
   }
 
@@ -531,6 +609,97 @@ export class PlivetCPP14Engine extends CPP14Engine {
   functionNameAt(address: number): string | null {
     const dec = this.functionAt(address);
     return dec === null ? null : dec.name;
+  }
+
+  /**
+   * The string literals the program loaded, as objects.
+   *
+   * `"hello"` is not a variable and never becomes one: the engine writes its
+   * bytes into the low code area as consecutive `char` entries and hands the
+   * address to whatever named it, so `ExecState` - which only walks scopes -
+   * has never seen them, and a canvas built from it showed a `const char *`
+   * pointing at nothing. They are read-only memory, and this is where they are
+   * read out of.
+   */
+  stringLiterals(): StringLiteralLocation[] {
+    const written = this.writtenStrings();
+    const byText = new Map(written.map((one) => [one.text, one]));
+    const literals: StringLiteralLocation[] = [];
+    // Source order, and one object per distinct literal: a C implementation is
+    // free to pool them, and two copies of `"%d\n"` in the same program are
+    // one string in read-only memory rather than two.
+    for (const text of this.sourceStrings) {
+      const materialized = byText.get(text);
+      literals.push({
+        address:
+          typeof materialized === 'undefined' ? null : materialized.address,
+        text: escapedText(text),
+        size: text.length + 1,
+      });
+      byText.delete(text);
+    }
+    // Anything the engine wrote that the source did not obviously spell - a
+    // literal the preprocessor built, say - is still in memory and still worth
+    // showing.
+    for (const one of byText.values()) {
+      literals.push({
+        address: one.address,
+        text: escapedText(one.text),
+        size: one.text.length + 1,
+      });
+    }
+    return literals;
+  }
+
+  /**
+   * The strings the engine has actually written into the low code area, read
+   * back as runs of consecutive `char` bytes.
+   */
+  private writtenStrings(): { address: number; text: string }[] {
+    const scope = this.globalScope;
+    if (scope === null) {
+      return [];
+    }
+    const addresses = Array.from(scope.typeOnMemory.entries())
+      .filter(
+        ([address, type]) => address < STATIC_AREA_BASE && type === 'char'
+      )
+      .map(([address]) => address)
+      .sort((left, right) => left - right);
+
+    const written: { address: number; text: string }[] = [];
+    let start: number | null = null;
+    let bytes: number[] = [];
+    const flush = () => {
+      if (start !== null && 0 < bytes.length) {
+        written.push({ address: start, text: String.fromCharCode(...bytes) });
+      }
+      start = null;
+      bytes = [];
+    };
+    let previous: number | null = null;
+    for (const address of addresses) {
+      if (previous !== null && address !== previous + 1) {
+        flush();
+      }
+      const value = scope.objectOnMemory.get(address);
+      const byte =
+        value === null || typeof value === 'undefined'
+          ? 0
+          : Number(value.valueOf());
+      if (byte === 0) {
+        // The NUL ends this string; the next byte starts another.
+        flush();
+      } else {
+        if (start === null) {
+          start = address;
+        }
+        bytes.push(byte);
+      }
+      previous = address;
+    }
+    flush();
+    return written;
   }
 
   /** Plain text-segment entries for the Worker model. */

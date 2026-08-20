@@ -1,5 +1,6 @@
 import { ExecState } from 'unicoen.ts/dist/interpreter/Engine/ExecState';
 import { Variable } from 'unicoen.ts/dist/interpreter/Engine/Variable';
+import { MEMORY_ALIGNMENT, MEMORY_START_ADDRESSES } from '../core/model';
 import { RuntimeDeclarationInfo } from './DeclarationSpecifiers';
 import { RuntimeEnumInfo, RuntimeEnumTypes } from './EnumTable';
 import {
@@ -37,7 +38,23 @@ interface VariableWithTypeInfo extends Variable {
   plivetRecordInfo?: RuntimeRecordInfo;
   plivetDeclarationInfo?: RuntimeDeclarationInfo;
   plivetAddress?: number;
+  plivetSize?: number;
   plivetPointerValue?: number;
+}
+
+/** A string literal, as the read-only memory it occupies. */
+export interface RuntimeStringLiteral {
+  /**
+   * Where the engine wrote it, or `null` for a literal it never wrote out -
+   * an argument like the format string of a `printf` is passed as bytes and
+   * given no address, though in C it is an object like any other.
+   */
+  address: number | null;
+  /** Where the memory view shows it, in the read-only band. */
+  displayAddress: number;
+  text: string;
+  /** The bytes it takes, terminator included. */
+  size: number;
 }
 
 export interface RuntimeFunctionLocation {
@@ -47,6 +64,7 @@ export interface RuntimeFunctionLocation {
 
 interface ExecStateWithTypeInfo extends ExecState {
   plivetFunctions?: RuntimeFunctionLocation[];
+  plivetStrings?: RuntimeStringLiteral[];
 }
 
 export type DeclarationInfoLookup = (
@@ -79,22 +97,61 @@ export function runtimeFunctionsOf(
  * The engine still computes with numbers; the canvas gains the source-level
  * type and enumerator names that unicoen.ts otherwise discards.
  */
+/**
+ * Where the engine keeps what it allocates for itself. `ExecState.makeImple`
+ * walks 10000 to 20000 for static storage and 20000 to 50000 for the heap, and
+ * hands back a `Heap:<address>` variable for every cell it finds allocated
+ * there, so a block's engine address is already an offset into a band.
+ */
+const ENGINE_HEAP_BASE = 20000;
+
+/** A block `malloc` returned, rather than an object the program named. */
+const isHeapObject = (variable: Variable): boolean =>
+  variable.getName().startsWith('Heap:');
+
 export function annotateRuntimeVariables(
   state: ExecState,
   enumTypes: RuntimeEnumTypes,
   recordTypes: RuntimeRecordTypes,
   declarationInfoAt: DeclarationInfoLookup = () => null,
   functionPointerTypes: RuntimeFunctionPointerTypes = {},
-  functionAt: FunctionLookup = () => null
+  functionAt: FunctionLookup = () => null,
+  strings: { address: number | null; text: string; size: number }[] = []
 ): ExecState {
   const displayAddresses = new Map<number, number>();
   for (const stack of state.getStacks()) {
     let cursor: number | null = null;
     for (const variable of stack.getVariables()) {
       const shape = displayShapeOf(variable, recordTypes);
+      if (isHeapObject(variable)) {
+        // A heap block keeps the offset the engine gave it instead of taking
+        // the next place in this walk. Packing them closes the hole a `free`
+        // leaves, which moves every block above it down onto an address that
+        // something may still be pointing at: two live pointers into the heap
+        // then read as the same address, and one of them is a pointer to
+        // memory that has been given back. The hole is also the truth about
+        // the heap, and a reader can see the block that went.
+        annotateVariable(
+          variable,
+          enumTypes,
+          recordTypes,
+          declarationInfoAt,
+          MEMORY_START_ADDRESSES.heap + (variable.address - ENGINE_HEAP_BASE),
+          displayAddresses,
+          variable.address,
+          shape.size
+        );
+        continue;
+      }
+      // Every named object starts on a word, whatever its own alignment would
+      // allow: these are the addresses the memory view prints, and a band of
+      // memory that begins mid-word reads as a mistake rather than as the
+      // packing it is. Members inside an aggregate are laid out from their
+      // parent and still pack as C packs them, so a `char[3]` is three
+      // consecutive bytes.
       cursor = alignAddress(
         cursor === null ? variable.address : cursor,
-        shape.alignment
+        Math.max(shape.alignment, MEMORY_ALIGNMENT)
       );
       annotateVariable(
         variable,
@@ -102,11 +159,32 @@ export function annotateRuntimeVariables(
         recordTypes,
         declarationInfoAt,
         cursor,
-        displayAddresses
+        displayAddresses,
+        variable.address,
+        shape.size
       );
       cursor += shape.size;
     }
   }
+  // A string literal is an object at an address like any other, so it takes a
+  // display address in the read-only band and joins the table the pointer
+  // values are translated through - otherwise `const char *p = "hi"` would
+  // show the engine's own low address and point at nothing on the canvas.
+  let readOnly = alignAddress(
+    MEMORY_START_ADDRESSES.readOnly,
+    MEMORY_ALIGNMENT
+  );
+  const literals: RuntimeStringLiteral[] = strings.map((literal) => {
+    const displayAddress = readOnly;
+    // The literal occupies the bytes it occupies; the next one still starts on
+    // a word, as a compiler laying out `.rodata` would place it.
+    readOnly += alignAddress(literal.size, MEMORY_ALIGNMENT);
+    if (literal.address !== null) {
+      displayAddresses.set(literal.address, displayAddress);
+    }
+    return { ...literal, displayAddress };
+  });
+  (state as ExecStateWithTypeInfo).plivetStrings = literals;
   for (const stack of state.getStacks()) {
     for (const variable of stack.getVariables()) {
       annotatePointerValues(variable, displayAddresses);
@@ -114,6 +192,12 @@ export function annotateRuntimeVariables(
     }
   }
   return state;
+}
+
+/** The string literals this step's memory holds. */
+export function runtimeStringsOf(state: ExecState): RuntimeStringLiteral[] {
+  const literals = (state as ExecStateWithTypeInfo).plivetStrings;
+  return typeof literals === 'undefined' ? [] : literals;
 }
 
 /**
@@ -159,6 +243,16 @@ export function declarationInfoOf(
   return typeof info === 'undefined' ? null : info;
 }
 
+/**
+ * How many bytes the object occupies, as the display layout counts them. The
+ * memory view says it beside the type: a reader who is looking at an address
+ * wants to know how far the next one is.
+ */
+export function displaySizeOf(variable: Variable): number | null {
+  const size = (variable as VariableWithTypeInfo).plivetSize;
+  return typeof size === 'undefined' ? null : size;
+}
+
 export function displayAddressOf(variable: Variable): number {
   const address = (variable as VariableWithTypeInfo).plivetAddress;
   return typeof address === 'undefined' ? variable.address : address;
@@ -176,10 +270,14 @@ function annotateVariable(
   declarationInfoAt: DeclarationInfoLookup,
   displayAddress: number = variable.address,
   displayAddresses: Map<number, number> = new Map(),
-  engineAddress: number = variable.address
+  engineAddress: number = variable.address,
+  displaySize?: number
 ): void {
   const annotated = variable as VariableWithTypeInfo;
   annotated.plivetAddress = displayAddress;
+  if (typeof displaySize === 'number') {
+    annotated.plivetSize = displaySize;
+  }
   displayAddresses.set(engineAddress, displayAddress);
   if (annotated.plivetDeclarationInfo === undefined) {
     const declarationInfo = declarationInfoAt(variable.address);
@@ -278,7 +376,8 @@ function annotateVariable(
         declarationInfoAt,
         childAddress,
         displayAddresses,
-        childEngineAddress
+        childEngineAddress,
+        childShape.size
       );
       if (typeof field === 'undefined' && variable.type.indexOf('[') === -1) {
         engineChildCursor += Math.max(1, basicSizeof(child.type));

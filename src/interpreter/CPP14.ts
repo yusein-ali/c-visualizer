@@ -71,7 +71,8 @@ export class PlivetCPP14Interpreter extends Interpreter {
       this.recordTypes,
       (address) => this.plivetEngine.declarationInfoAt(address),
       this.functionPointerTypes,
-      (address) => this.plivetEngine.functionNameAt(address)
+      (address) => this.plivetEngine.functionNameAt(address),
+      this.plivetEngine.stringLiterals()
     );
     return annotateRuntimeFunctions(
       annotated,

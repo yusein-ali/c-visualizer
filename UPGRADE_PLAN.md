@@ -513,6 +513,63 @@ compatible with use as an unmodified dependency of this MIT application, and
 the generated `dist/licenses.html` includes the package and its full licence
 text.
 
+The process memory is drawn as a memory map rather than through the stack
+tables: `layoutMemory` in [src/core/memoryLayout.ts](src/core/memoryLayout.ts)
+places one node per segment in two columns - the registers over the stack on
+the left, and the heap, BSS, initialized data, read-only memory and text
+descending on the right - every node the same width and sharing one set of
+columns, and a
+`plivet.MemoryNode` element draws each as a titled box - the segment's name and
+the addresses it covers - over a table of objects. An object is two bands: its
+type and size written small above its identifier, in the reading font, and its
+value, which ends the row so that a pointer's arrow leaves from the right-hand
+edge and arrives at the address column of what it names. Members are indented
+under the aggregate that holds them, the stack's rows are grouped under the
+frame that declared them, and a segment holding nothing at this step says so on
+one line instead of showing a bare header. Each segment collapses to its own
+title bar - a click anywhere on the bar, which keeps the name, the addresses
+and a chevron - so that a reader watching the stack can put the rest of the
+address space away; the state lives beside the aggregate folds in
+`FoldState`, and the shared columns keep their widths so that nothing else on
+the map moves when one segment closes. A pointer is drawn from the row of
+the object that holds the address to the row of the object at it, along the
+edges of their nodes rather than into the address column: two rows in the same
+column of segments are joined on their left-hand edges, out in the gutter
+beside them, and two in different columns on the sides that face each other. Values are printed as the declared
+type can hold them - `narrowToType` wraps to the width and sign of the type,
+so an unassigned `int` reads as a negative number rather than as raw bytes -
+and addresses are padded to the width they occupy. The stack tables and
+`layout` remain for a step that carries no segments.
+
+The expression window sits under the memory map rather than beside it, and it
+expands the statement the editor is highlighting: the operators, the operands
+under them, and what each name holds going in. It used to show the statement
+that had just finished, numbered in evaluation order, which read as a different
+program the moment a call suspended one - the caller's half-evaluated
+assignment against a line inside the callee. `ExpressionRecorder` now attaches
+the statement about to run, and `extractModel` fills the operands in from the
+variables it has already extracted, where the execution state is assembled.
+
+Read-only memory holds the string literals as well as the `const` objects with
+static storage. A literal is never a variable - the engine writes its bytes
+into the low code area and hands the address to whatever named it, so
+`ExecState`, which only walks scopes, has never seen one - and
+`PlivetCPP14Engine.stringLiterals()` reads them back out. Nor does the engine
+write out every literal: one that initializes a pointer or an array is put in
+memory and its address handed over, while one passed to a call - the format
+string of a `printf`, the name and mode `fopen` is given - is passed as bytes
+and never given a home, so the program is walked for its literals as well as
+the memory. Each takes a display address in the read-only band, which is also
+what a `const char *` naming it is shown to hold, so the pointer's arrow lands
+on the string. A `const` local stays on the stack, where its storage really
+is.
+
+Every segment, and every named object in one, starts on a four-byte boundary
+(`MEMORY_ALIGNMENT`): these are the addresses the memory view prints, and a
+band that begins mid-word reads as a mistake rather than as the packing it is.
+Inside an aggregate the members are still laid out as C lays them out, so a
+`char[5]` is five consecutive addresses.
+
 The graph renders the existing layout through a custom JointJS stack-table
 element and routed links, retains fold state, and uses paper scaling instead of
 the canvas slider/spinner. `StepModel` now also carries a plain evaluated
@@ -552,7 +609,11 @@ protocol in `baseline/README.md` before declaring the exit criterion met.
    render the operands, operators, evaluation order and intermediate values in
    JointJS without sending interpreter or AST class instances across the Worker
    boundary. Include also the assignment if applicable so that expression expansion forms a
-   complete statement.
+   complete statement. This is the picture half of Phase 12 item 13, which
+   frames the same expansion with an explanation of the statement around it, and
+   the evaluation nodes added to `StepModel` here are the runtime half of the
+   construct tooltips in Phase 12 item 4. The data is built once and drawn three
+   ways.
 7. Address redraw cost before considering this phase done. The current code
    rebuilds the entire scene per step; an SVG graph cannot absorb that during a
    run. Either diff the graph against the previous `StepModel`, or suspend
@@ -561,6 +622,101 @@ protocol in `baseline/README.md` before declaring the exit criterion met.
 8. Convert canvas to visualize the C-program memory along with standard segments and registers.
 9. The variables must be properly visualized in the segments: registers, heap, stack, read-only memory (data and bss must be properly separated)
 10. Each segment must have their own start addresses
+11. Give each segment a node of its own with a table inside it, rather than a
+    cascade of stack tables. **Done.** The address a row occupies is carried on
+    the cell (`CellModel.address`) and its size is annotated onto the variable
+    (`plivetSize`), so the memory view writes an address column and a
+    type-and-size caption without re-parsing the text the stack table wants.
+    What remains open is the connection between an object and the memory cells
+    it covers, which wants its own visual module rather than more table.
+12. Place the segments as a reader uses them - registers and stack on the left,
+    the rest of the address space beside them - print values to the width of
+    their type, and put the expression window underneath. **Done.**
+13. Align the segments and the objects in them to four bytes. **Done.** What
+    item 10 still wants is separate: a segment's objects take their display
+    addresses from the frame they were declared in, not from the segment's own
+    base, so a `const` global is shown in read-only memory carrying an address
+    from the data range.
+
+14. Let the reader decide what the canvas draws. **Done.** The graph toolbar
+    carries a disclosure - "View", painted as one of the zoom buttons and
+    opening a panel drawn in the map's own palette - holding one checkbox per
+    memory region and one for the expression under them. The answers live in
+    `ViewOptions` beside `FoldState` in the core. A region that is not shown is
+    dropped before `layoutMemory` runs rather than hidden after it, so the map
+    closes up over it and the pointers into it go with its rows; that is what
+    tells it from a collapsed segment, which keeps its title bar and its place.
+    A region nobody has switched is drawn only while it holds something -
+    barring the four bands items 17 and 18 keep on the map - so a program that
+    puts nothing in its BSS has no BSS on the canvas and the box ticks itself
+    on at the first object that lands there - the switches say what the map is
+    drawing at this step, not what was last clicked - while a region the reader
+    answered for keeps their answer as the folds do. A step is drawn as a map
+    or as the call-frame tables according to whether the model carries memory,
+    so switching every region off leaves an empty map rather than bringing the
+    tables back. Phase 12 item 16 wants the same panel for the teaching views;
+    this is the half of it that the visualization owns.
+15. Draw a pointer that crosses between the columns down the gap between them.
+    **Done.** Both ends already touched the sides that face each other, but the
+    line between them was handed to a router, which drew a pointer running
+    right to left back through the node it started in. Every arrow is now
+    given its lane by the layout: down the outside of its own column when both
+    ends are in it, and down the space between the columns when it crosses,
+    one lane per crossing, with the right-hand column moved over to make the
+    room. No arrow on the memory map is routed by JointJS any more.
+
+16. Give a heap block the address `malloc` gave it. **Done.** Display
+    addresses were assigned by walking a stack's variables and packing them
+    one after another, which for the heap closed the hole a `free` leaves:
+    every block above the freed one moved down onto an address that another
+    pointer still held, so two live pointers read as the same address and both
+    drew an arrow into the same block. A block named `Heap:<address>` now takes
+    its display address from the heap band and the offset the engine gave it
+    (`ENGINE_HEAP_BASE` in
+    [src/interpreter/RuntimeTypeInfo.ts](src/interpreter/RuntimeTypeInfo.ts)),
+    so freed storage leaves a gap in the addresses, a pointer to it names
+    nothing on the map and is drawn with no arrow, and the reader can see the
+    fragmentation. This is item 13's rule - a segment's objects take their
+    addresses from the segment - applied to the one band where reusing an
+    address is visibly wrong; the static bands still take theirs from the walk.
+17. Start read-only memory and the text segment on the map and put away.
+    **Done.** Both hold what the program was loaded with rather than what it is
+    doing - the code, and the constants and string literals beside it - so
+    their tables say the same thing at every step, and a reader stepping
+    through a program is watching the stack rather than re-reading the
+    literals. They are drawn as their title bars until a click opens one, and
+    they are drawn whatever they hold: a bar saying where the code and the
+    constants live is worth its one line even at a step that has put nothing in
+    them, which is the one place the empty-band rule of item 14 does not apply.
+    Both defaults are `startsCollapsed` and `startsShown` in
+    [src/core/model.ts](src/core/model.ts), where the regions are named, rather
+    than at the two call sites that used to spell each rule out.
+18. Keep the stack and the heap on the map, and put them away while they are
+    empty. **Done.** They are the two bands a reader steps through a program to
+    watch, and under item 14's rule they were the two that arrived late: the
+    stack appeared at the first call and the heap at the first `malloc`, so the
+    map taught that a band exists once something is in it. Both now join the
+    static pair in `ALWAYS_SHOWN`, and `startsCollapsed` does the rest - an
+    empty segment is its title bar alone, so the map says where the first frame
+    and the first allocation will land without spending a table on a row saying
+    the band is empty, and each opens itself as soon as the program puts
+    something there. Only the registers, the BSS and the initialized data are
+    left to the empty-band rule, and the reader's own answer still overrides
+    all of it.
+19. Dress the canvas toolbar as the editor's control bar. **Done.** The two
+    panels a reader works between had two sets of buttons: the control bar's
+    joined groups, and three lone buttons over the paper wearing a heavier font
+    and a palette of their own. The toolbar now carries the same geometry, the
+    same joined group and the same `--plivet-button-*` paint, and the zoom
+    buttons are the control bar's own magnifiers from
+    [src/ui/controls/icons.ts](src/ui/controls/icons.ts) rather than a minus, a
+    percentage and a plus. What the "100%" button used to say is now written
+    beside them, announced as the step counter is and for the same reason:
+    pressing a magnifier changes nothing else a reader who is not watching the
+    drawing would notice. The disclosure keeps the right-hand end of the bar,
+    because the panel hangs from that edge. Only the icons are shared -
+    `controls.css` is not imported here - so a canvas mounted alone still
+    paints its own buttons.
 
 Exit criterion: the visualization matches the Phase 0 screenshots, folding and
 zoom work, and run-to-breakpoint does not regress against Phase 6.
@@ -591,7 +747,12 @@ fan-out in `PlivetApp` - now `Plivet` - checkable.
    Bootstrap grid. They become static markup plus CSS grid, under the `plivet-`
    prefix. **Done.** `src/ui/shell/` is the two-column grid, the five mount
    points and the footer, at the same breakpoints Bootstrap was being asked
-   for. The four stylesheets under `src/css/` went with it.
+   for. The four stylesheets under `src/css/` went with it. The three
+   boundaries a reader sizes for themselves - between the columns, under the
+   editor and under the canvas - carry a `Splitter` each: a drag, or an arrow
+   key, writes a length onto `--plivet-side-width`, `--plivet-editor-height`
+   or `--plivet-graph-height` on the root, and the breakpoint proportions stay
+   where they were, as the fallback of each `var()`.
 2. Controls: the six debug buttons, the step counter and the debug status. The
    `DEBUG_STATE` to enablement mapping in
    `CtrlButtons.componentWillReceiveProps` is worth preserving as-is; it is the
@@ -877,7 +1038,8 @@ it, and can be taken in any order or dropped.
    - **Subexpressions.** Hovering inside a compound expression reports the
      innermost subexpression under the pointer, its type and its current value,
      from the same evaluation data Phase 8 item 6 renders on the canvas. One
-     source of truth, two presentations.
+     source of truth, three presentations: the hover, the canvas expansion, and
+     the statement explanation of item 13.
    - **Preprocessor.** The existing macro tooltip reports one replacement step;
      report the full expansion of a macro defined in terms of other macros, so a
      nested definition does not have to be unfolded by hand.
@@ -913,7 +1075,8 @@ it, and can be taken in any order or dropped.
    This is the point at which the two panes stop being separate pictures of the
    same program. `src/components/hoverText.ts` should return records rather
    than assembled lines for this; it is already the only place that knows the
-   facts, and formatting is the tooltip's business.
+   facts, and formatting is the tooltip's business. Item 13 reads those same
+   records, so the record is the interface both surfaces are written against.
 8. **Pinned watches.** A `showTooltip` `StateField` holding tooltips the reader
    pinned by clicking a variable, updated on every step. A watch window with no
    new user interface.
@@ -940,7 +1103,26 @@ it, and can be taken in any order or dropped.
 12. **Session serialisation.** -- not strictly required -- `EditorState.toJSON` and `fromJSON`, plus the
     breakpoint set, so a session can be saved, handed in, or replayed by a
     teacher looking at how a student got where they are.
-13. Create a view for explaining currently active statement.
+13. **One explanation of the current statement.** A teaching view that says
+    what the statement under the step marker does, and it is the general case
+    that the expression expansion of Phase 8 item 6 sits inside rather than a
+    view beside it. The expansion draws the operands, the operators, the
+    evaluation order and the intermediate values; the explanation puts that
+    picture under a reading of the whole statement - which kind of statement it
+    is, which branch or which iteration this is, what it leaves behind when it
+    finishes - so the expression window beneath the memory map is this view's
+    picture, and switching the explanation off takes the expansion with it.
+
+    Its content is item 4's tooltip data read as a whole rather than one hover
+    at a time: the construct record for the statement, and the subexpression
+    records for the expressions inside it. Nothing here computes a second
+    description of a construct. If the explanation wants a line the tooltip does
+    not have, the line is added to the construct record in `outline.ts` or to the
+    per-construct evaluation results in `StepModel`, and both surfaces gain it -
+    which is why this item follows item 4 for the facts and item 7 for their
+    shape, since item 7 is what turns `hoverText.ts` from assembled lines into
+    the records this view reads.
+
 14. Create a view for visualizing the call stack.
 15. Create a view for visualizing the mutation of variables among the function calls.
 16. Add a control panel to activate and de-active the views.
