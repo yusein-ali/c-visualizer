@@ -8,7 +8,13 @@ const tsConfigFile = `tsconfig.${isProduction ? 'prod' : 'dev'}.json`;
 
 module.exports = {
   mode: isProduction ? 'production' : 'development',
-  entry: './src/index.tsx',
+  // Keep the application users rely on separate from the Phase 8/9 migration.
+  // `index.html` remains the stable CodeMirror/Konva application; replacement
+  // graph and shell work is imported only from `migration.tsx` until cutover.
+  entry: {
+    main: './src/index.tsx',
+    migration: './src/migration.tsx',
+  },
   output: {
     filename: 'js/[name].js',
     chunkFilename: 'js/[name].bundle.js',
@@ -88,6 +94,13 @@ module.exports = {
   plugins: [
     new HtmlWebpackPlugin({
       template: 'src/index.html',
+      filename: 'index.html',
+      chunks: ['main'],
+    }),
+    new HtmlWebpackPlugin({
+      template: 'src/index.html',
+      filename: 'migration.html',
+      chunks: ['migration'],
     }),
     new webpack.ProvidePlugin({
       $: 'jquery',

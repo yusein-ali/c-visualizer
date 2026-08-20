@@ -445,15 +445,18 @@ it, and the variable, pointer, array, struct and library tooltips.
 
 ## Phase 7: CodeMirror 6
 
-**Status: complete, with one deviation.** `src/ui/editor/` holds the editor, the
+**Status: complete.** `src/ui/editor/` holds the editor, the
 breakpoint gutter, the step highlight, the `@codemirror/lint` diagnostics and the
 read-only debug session that replaced the modal; `DebugExtensions` and
 `attachDebugExtensions` export the array a host view takes through
 `StateEffect.appendConfig`, and `test/editor-extensions.test.ts` covers the
-line-number conversion against a headless view. The deviation: the editor
-replaced Ace in place rather than behind a second Webpack entry point. The
-cutover was a single commit, so every commit still left a working application,
-but that second entry point does not exist for Phases 8 and 9 to build behind.
+line-number conversion against a headless view. Commit `49cda77` replaced Ace
+inside the only entry point while also completing Phase 1. That historical
+ordering cannot be changed without reintroducing Ace, so the current
+CodeMirror/Konva application is the stable baseline at `index.html` and a
+separate `migration.html`, rooted at `src/migration.tsx`, is the working entry
+for Phases 8 and 9. Both start from the same working application; replacement
+graph and shell modules are imported only by the migration entry until cutover.
 
 Build the new editor in `src/ui/editor/`, wired to the same event bus, behind the
 adapter described in constraint 4. From here through Phase 9, build behind a
@@ -838,8 +841,8 @@ Recorded here so the constraints above are not quietly dropped. Not in scope now
 6. Extract `src/core/`, split `CanvasDrawer`, define `StepModel`.
 7. Bound `stateHistory`.
 8. Worker client and Worker; `StepAll` without the timer.
-9. CodeMirror editor, behind the second entry point. **Done, in place: there
-   is no second entry point.**
+9. CodeMirror editor. **Done.** It originally landed in place in `49cda77`; the
+   stable and migration entry points are now separated for the remaining work.
 10. Debug extensions: breakpoints, step highlight, diagnostics. **Done.**
 11. JointJS graph, behind the second entry point.
 12. Redraw diffing or suspension, measured against the benchmark.

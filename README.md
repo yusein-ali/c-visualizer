@@ -46,3 +46,12 @@ npm run build
 ```
 
 to update `bist/` by webpack.
+
+During the framework migration, `npm start` serves two independently bundled
+entry points:
+
+- `http://localhost:8080/` is the stable application.
+- `http://localhost:8080/migration.html` is the Phase 8/9 working application.
+
+Keep replacement graph and shell imports behind `src/migration.tsx` until the
+Phase 9 cutover.
