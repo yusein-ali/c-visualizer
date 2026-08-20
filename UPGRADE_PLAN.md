@@ -21,13 +21,17 @@ In scope:
 - Replacing Ace with CodeMirror 6 and react-konva with JointJS.
 - Moving the interpreter into a Web Worker.
 - Removing React and its satellite libraries entirely.
+- Teaching features built on CodeMirror 6, in Phase 12, after parity is
+  proven.
 
 Not in scope for now:
 
-- No Sphinx directive, no A+ active elements, no grader submission. Phase 12
+- No Sphinx directive, no A+ active elements, no grader submission. Phase 13
   records what that work will need so the constraints below are not quietly
   dropped.
-- No visual redesign. Parity with the current UI is the target.
+- No visual redesign. Parity with the current UI is the target up to and
+  including Phase 11; Phase 12 adds to the editor without redrawing the
+  application.
 - No new interpreter work, and no Java or Python. Those interpreters were never
   finished and are removed in Phase 1; C is the only supported language.
 - No standalone `file://` support. The application is served over http(s); the
@@ -71,7 +75,7 @@ without forcing every patch-level update to edit the engine range.
 
 ## Constraints that keep the extension cheap later
 
-These are the decisions that make Phase 12 a small job instead of a rewrite. They
+These are the decisions that make Phase 13 a small job instead of a rewrite. They
 cost little now and are expensive to retrofit.
 
 1. **Mount into an element, do not own the page.** The public entry point is
@@ -98,6 +102,20 @@ cost little now and are expensive to retrofit.
    changes.
 6. **The Worker protocol carries plain data only.** No class instances cross the
    boundary, in either direction.
+7. **The source is a named set of files, not a string.** `Request.sourcecode` at
+   `src/server.ts:27` is a single translation unit, `#include` is discarded by
+   the preprocessor (`src/interpreter/preprocess.ts:238`), and the `files` map at
+   `src/server.ts:68` is a virtual filesystem for `fopen`, not source. The
+   interactive-code directive PLIVET is meant to embed in is multi-file by
+   design: directives sharing a `:block_id:` render as editor tabs, exactly one
+   of them is the main file, `:hidden:` parts are editable and submitted without
+   appearing inline, and every part goes into the same submission. A block whose
+   files PLIVET can only concatenate is not embeddable. So carry a list of
+   `{ path, text }` records plus an entry path through the Worker protocol
+   (Phase 6) and the editor adapter (Phase 7) from the start, even while only one
+   entry is ever populated. Widening a string afterwards touches every
+   `controlEvent` branch, the breakpoint and step-highlight line mapping, and the
+   Worker message shapes at once.
 
 ## Facts this plan relies on
 
@@ -133,6 +151,11 @@ Verified against the current tree; re-check if the code moves.
 
 ## Phase 0: baseline
 
+**Status: complete.** `baseline/` holds the parity checklist, the screenshots and
+the programs behind them, the capability probes, and the run-to-breakpoint
+benchmark with the targets it sets for Phases 5 to 8. The defects that were
+already there are recorded as expected, in `baseline/results/RESULTS.md`.
+
 1. Run the current application in an isolated Node 16 environment and record the
    results of `yarn test`, `yarn build`, and a browser smoke test.
 2. Write down the functional checklist that defines parity: load the editor,
@@ -148,6 +171,9 @@ Exit criterion: parity and performance are defined in writing, and known existin
 failures are documented so they are not confused with migration regressions.
 
 ## Phase 1: reduce scope to C
+
+**Status: complete** (`49cda77`). No reference to Java, Python or a second
+interface language remains in `src/`.
 
 Deleting the unfinished interpreters before migrating anything is strictly
 cheaper than porting them, so this comes first and runs under the existing build.
@@ -189,6 +215,9 @@ remains in `src/`, the C sample still loads and runs, and the `Java8` and
 
 ## Phase 2: standardize on npm
 
+**Status: complete** (`d5b7103`). Node 24.15.0 and npm 11.12.1 are pinned, and
+`package-lock.json` is the only lockfile.
+
 1. Change `engines` to support Node 24 and npm 11, and add a `packageManager`
    declaration for the chosen npm 11 patch release.
 2. Update `.tool-versions` to the selected Node 24 patch and remove the Yarn pin.
@@ -206,6 +235,10 @@ Exit criterion: npm is the only package manager referenced by source-controlled
 configuration and scripts.
 
 ## Phase 3: build and development server
+
+**Status: complete** (`990fbe1`). `npm start` serves on port 8080 and
+`npm run build` produces a working production bundle under Node 24, with no
+legacy OpenSSL flag and the interpreter still in its own `CPP14` chunk.
 
 Upgrade as a coherent set, because the Webpack packages expose coupled plugin and
 loader APIs: Webpack 5, webpack-cli, webpack-dev-server 5, webpack-merge,
@@ -242,6 +275,9 @@ flags.
 
 ## Phase 4: TypeScript and linting
 
+**Status: complete** (`f68a815`). `npm run lint` and `npm run typecheck` both run
+without webpack, and neither rewrites source.
+
 1. Upgrade TypeScript to 5.x and the Babel TypeScript preset together. Keep
    `strict`, `noUnusedLocals`, `noUnusedParameters`, `noImplicitReturns`.
 2. Remove TSLint, its plugins and configs, and `tslint-loader`.
@@ -258,6 +294,10 @@ Exit criterion: `npm run lint` and `npm run typecheck` pass independently of
 Webpack.
 
 ## Phase 5: extract the portable core
+
+**Status: not started.** There is no `src/core/`, `pointerConnectionManager` is
+still the module singleton at `CanvasDrawer.ts:194`, and `stateHistory` is still
+unbounded. This is the next phase.
 
 The two files worth keeping are `server.ts` (372 lines) and `CanvasDrawer.ts`
 (535 lines). This phase makes them independent of the UI so later phases can move
@@ -294,6 +334,9 @@ no renderer. The application still passes the Phase 0 checklist.
 
 ## Phase 6: interpreter in a Web Worker
 
+**Status: not started**, and blocked on Phase 5: an `ExecState` cannot cross the
+boundary, so `StepModel` has to exist first.
+
 1. Move `Server` into `src/core/interpreter.worker.ts`, instantiated with
    `new Worker(new URL('./interpreter.worker.ts', import.meta.url))`.
 2. Keep the existing `Request` shape as the message in. Replace the `Response`
@@ -311,6 +354,16 @@ Exit criterion: stepping and run-to-breakpoint work with the interpreter off the
 main thread, and run-to-breakpoint beats the Phase 0 benchmark.
 
 ## Phase 7: CodeMirror 6
+
+**Status: complete, with one deviation.** `src/ui/editor/` holds the editor, the
+breakpoint gutter, the step highlight, the `@codemirror/lint` diagnostics and the
+read-only debug session that replaced the modal; `DebugExtensions` and
+`attachDebugExtensions` export the array a host view takes through
+`StateEffect.appendConfig`, and `test/editor-extensions.test.ts` covers the
+line-number conversion against a headless view. The deviation: the editor
+replaced Ace in place rather than behind a second Webpack entry point. The
+cutover was a single commit, so every commit still left a working application,
+but that second entry point does not exist for Phases 8 and 9 to build behind.
 
 Build the new editor in `src/ui/editor/`, wired to the same event bus, behind the
 adapter described in constraint 4. From here through Phase 9, build behind a
@@ -343,6 +396,9 @@ are exported as a standalone array that attaches to any `EditorView`.
 
 ## Phase 8: visualization on JointJS
 
+**Status: not started.** There is no `@joint/core` dependency and the
+visualization is still react-konva. Item 6 depends on `StepModel` from Phase 5.
+
 1. Add `@joint/core`. Note the licence: it is MPL-2.0 against PLIVET's MIT. This
    is fine for a dependency but should be a recorded decision, and the
    `licenses.html` generation must keep working.
@@ -371,6 +427,12 @@ Exit criterion: the visualization matches the Phase 0 screenshots, folding and
 zoom work, and run-to-breakpoint does not regress against Phase 6.
 
 ## Phase 9: remove React
+
+**Status: item 3 complete, the rest not started.** The console is
+`src/ui/console/` — a `pre` and a `textarea`, framework-free, with `Console.tsx`
+as wiring only — and it took the last Ace import out of the tree, so `react-ace`,
+`@types/ace` and `ace-builds` are gone from `package.json`. Layout, controls,
+files, the switches and the cutover are all still React.
 
 Build the replacement shell under `src/ui/` as plain TypeScript classes, each
 taking a mount element and an options object, each subscribing to an
@@ -407,6 +469,9 @@ tree.
 
 ## Phase 10: instance scoping
 
+**Status: not started.** `emitter.ts` is still a module-level bus, and there is
+no `Plivet` entry point.
+
 1. `emitter.ts` becomes a class. Each PLIVET instance constructs its own bus and
    passes it to its components. The typed event union stays; it is the registry.
 2. The Worker client is per instance. Two instances on one page must not share
@@ -419,6 +484,14 @@ tree.
 Exit criterion: two independent instances run on one page.
 
 ## Phase 11: tests, CI and maintenance
+
+**Status: partly complete.** Eleven Jest suites cover the debug extensions, the
+tooltips, the console, the `DEBUG_STATE` enablement mapping, the preprocessor and
+the interpreter end to end, and CI runs `npm ci` and `npm test` on the pinned
+Node. Still open: the Jest upgrade and moving its `globals` configuration into
+`transform`, dropping Enzyme, running lint, typecheck and build in CI, the
+second non-blocking Node major, and the dependency grouping in `renovate.json`,
+which still carries the old ignore list and no `unicoen.ts` exclusion.
 
 1. Upgrade Jest and its TypeScript support as a compatible set, moving the
    deprecated ts-jest `globals` configuration into `transform`. Drop Enzyme and
@@ -443,7 +516,169 @@ Exit criterion: two independent instances run on one page.
 Exit criterion: the Phase 0 checklist is covered by automated tests wherever it
 can be, and CI is green from a clean dependency cache.
 
-## Phase 12: deferred to the extension
+## Phase 12: teaching features
+
+**Status: not started**, by design — see the paragraph below.
+
+Everything before this phase is parity work: the same application on a stack
+that is still supported. This phase is what the new stack was worth changing
+for. It begins only once the acceptance checklist passes, so that no feature
+here can be confused with a migration regression.
+
+Two rules bound the whole phase:
+
+- **The Phase 7 package budget holds.** Anything shipping inside the debug
+  extension array may use only `@codemirror/state`, `view`, `language`,
+  `commands`, `autocomplete` and `@codemirror/lint` - the packages an
+  interactive-code page already loads. A feature needing a new package
+  (`@codemirror/search`, `@codemirror/merge`) belongs to `PlivetEditor` alone,
+  or is bundled into PLIVET's own chunk and paid for in bundle size. Decide
+  which side of that line an item falls on before building it.
+- **Constraint 6 holds.** A feature that needs runtime facts needs them as
+  plain data in `StepModel`. Nothing reaches back into an interpreter object
+  from the main thread because a decoration wanted a value.
+
+Items 1 to 4 are the phase. The rest are independent of each other and of
+it, and can be taken in any order or dropped.
+
+1. **Inline values.** An end-of-line `WidgetType` under the current step
+   showing what the variables in that statement now hold, dispatched on the
+   same effect as the step highlight in `src/ui/editor/stepHighlight.ts`. This
+   is the largest single teaching gain available: it removes the mental step of
+   mapping the graph back onto the line being executed. Restrict it to the
+   variables the current statement reads or assigns; a whole frame rendered per
+   line is noise. `StepModel` grows a per-step list of `{ name, display }`.
+2. **A teaching linter.** `src/ui/editor/diagnostics.ts` maps `SyntaxErrorData`
+   and nothing else, yet a `@codemirror/lint` diagnostic also carries
+   `severity`, `actions` - one-click fixes - and `renderMessage` for structured
+   DOM. Add the static checks that `Construct.ts` and `RuntimeTypeInfo.ts`
+   already have the information for: `scanf` missing the `&`, an assignment
+   used as a condition, a format specifier disagreeing with its argument, a
+   variable read before it is initialised, a non-`void` function that can fall
+   off its end. Attach a fix action only where the fix is unambiguous, and link
+   the message into `libraryHelp` where an entry exists. Add `lintGutter()` so
+   a warning is visible without hovering for it. Write the rules as a table
+   walked by one pass, not a pass per rule; the value of this item is that a
+   teacher can add the next rule cheaply.
+3. **Runtime diagnostics.** The same lint API, raised at the step that goes
+   wrong rather than after the run: division by zero, an index past the end of
+   an array, a dereference of a pointer with no target, a read of uninitialised
+   memory. The interpreter detects most of these already and reports them as
+   console text with no position attached, which is why they teach so little;
+   carry the position through the Worker alongside the message. Cleared on
+   restart, like every other debug decoration.
+4. **A tooltip for every construct, not only for declarations.**
+   `constructText` in `src/components/hoverText.ts` formats five kinds richly -
+   `variableDec`, `typeDec`, `enumerator`, `recordField`, `functionDec` - and
+   every other kind falls through to its label and a detail string that
+   `detailOf` in `src/interpreter/outline.ts:149` returns empty for. Hovering an
+   `if` says "if statement", which the reader could already see. Control flow is
+   where a beginner's model of C actually breaks, so it is the wrong half of the
+   language to leave unexplained. Each kind gets what a reader cannot recover by
+   looking:
+   - **Function definition.** Beyond the current return type, identifier and
+     parameters: definition or declaration, storage class, and while stepping
+     the current activation - the arguments it was called with, and how many
+     times it has been entered.
+   - **Function call.** The callee's declared signature, arguments paired with
+     the parameters they initialise, the values passed at this step, and the
+     value returned once it returns. C passes by value and nothing on screen
+     says so today; this is the single most reliable beginner misconception.
+   - **`if`.** The controlling expression, the integer it evaluated to at this
+     step, and which branch was taken. C has no boolean type, so show the value
+     and the zero / nonzero reading of it rather than `true`.
+   - **`for`.** The three clauses named as the standard names them -
+     initialisation, controlling expression, iteration expression - the loop
+     variables as they stand, and the iteration count so far.
+   - **`while` and `do`-`while`.** The controlling expression, its current
+     value, the iteration count, and for `do`-`while` the fact that the body ran
+     before the first test.
+   - **`switch`.** The controlling expression's value, the label selected, and
+     whether control falls into the next label. Fall-through is invisible in the
+     source and is the classic trap.
+   - **`return`.** The expression, the value it yields here, and the function it
+     leaves.
+   - **`break` and `continue`.** Which enclosing loop or `switch` it leaves or
+     restarts. A `break` inside a `switch` inside a loop is ambiguous to a
+     reader and unambiguous to the parser.
+   - **Assignment.** The object assigned, its value before and after, and any
+     conversion the assignment itself performs - the truncation in
+     `int i = 2.7` is done by the assignment, not by the literal.
+   - **Cast and conditional expression.** For a cast, the source and destination
+     types and whether the conversion can lose information; for `?:`, the arm
+     chosen and the common type the two arms are brought to.
+   - **Subexpressions.** Hovering inside a compound expression reports the
+     innermost subexpression under the pointer, its type and its current value,
+     from the same evaluation data Phase 8 item 6 renders on the canvas. One
+     source of truth, two presentations.
+   - **Preprocessor.** The existing macro tooltip reports one replacement step;
+     report the full expansion of a macro defined in terms of other macros, so a
+     nested definition does not have to be unfolded by hand.
+
+   Three things this needs. The static half is `outline.ts` recording the
+   clauses and the enclosing loop or `switch` for each construct - today
+   `constructAt` deliberately knows nothing about enclosure, which is right for
+   choosing a construct and insufficient for describing one. The runtime half is
+   `StepModel` carrying per-construct evaluation results, the same data items 1
+   and 3 need, so build it once. And a tooltip shows a runtime line only when
+   the step it belongs to is the current one; the static description always
+   stands on its own, and a stopped session shows no values rather than the last
+   run's.
+
+5. **Completion from the program's own symbols.** `completeAnyWord` in
+   `PlivetEditor.ts` is a placeholder that completes any word in the buffer,
+   including misspellings. Replace it with a `CompletionSource` over the syntax
+   tree and `Construct.ts`: variables in scope with their types, struct and
+   union members after `.` and `->`, and the `libraryHelp` names with
+   `Completion.info` rendering the signature and description into the side
+   panel. The reference material becomes reachable while typing instead of only
+   on hover.
+6. **Snippets.** `snippetCompletion` skeletons for `for`, `while`, `switch`,
+   `struct`, `printf` and `scanf`, with tab-through fields. Beginners spend a
+   disproportionate share of their time on C's punctuation. The snippet shows
+   the syntax rather than hiding it, which is the difference between this and a
+   block editor.
+7. **Structured hover, and cross-highlighting with the graph.**
+   `src/ui/editor/tooltip.ts` sets `textContent`; `create()` may return any DOM.
+   Render type, address and current value as a small table, and select the
+   matching node in the JointJS paper while the tooltip is open. Then the
+   reverse: hovering a node in the graph marks the declaration in the editor.
+   This is the point at which the two panes stop being separate pictures of the
+   same program. `src/components/hoverText.ts` should return records rather
+   than assembled lines for this; it is already the only place that knows the
+   facts, and formatting is the tooltip's business.
+8. **Pinned watches.** A `showTooltip` `StateField` holding tooltips the reader
+   pinned by clicking a variable, updated on every step. A watch window with no
+   new user interface.
+9. **Editor affordances**, worth one pull request together:
+   `highlightSelectionMatches` to light up every occurrence of the identifier
+   under the cursor (`@codemirror/search`, so standalone only); `foldGutter`
+   plus a fold service for function bodies and for the `#if 0` regions already
+   tracked as `Expansion`s; a coverage gutter using `gutterLineClass` to shade
+   lines by execution count, which makes loop behaviour and dead branches
+   visible at a glance; `selectParentSyntax` on a key, which is a direct lesson
+   in nesting; `EditorView.announce` per step so a screen reader follows the
+   run; and the pieces missing from `PlivetEditor`'s extension list today -
+   `drawSelection`, `dropCursor`, `rectangularSelection`, `placeholder` and
+   `highlightSpecialChars`, the last of which turns a pasted non-breaking space
+   from a mystery into a visible character.
+10. **Protected regions.** A `transactionFilter` rejecting edits outside marked
+    spans turns a program into a fill-in-the-blank exercise, which is the shape
+    an A+ task usually takes. No new package, and it composes with the read-only
+    compartment in `debugExtensions.ts` rather than competing with it.
+11. **The preprocessed source, side by side.** `@codemirror/merge` against the
+    output of `src/interpreter/preprocess.ts`, showing what `#define` and
+    `#include` actually did. The merge view is a second editor, so it is not
+    part of the debug array and does not travel to a host page.
+12. **Session serialisation.** `EditorState.toJSON` and `fromJSON`, plus the
+    breakpoint set, so a session can be saved, handed in, or replayed by a
+    teacher looking at how a student got where they are.
+
+Exit criterion: each item lands as its own pull request, behind no flag; the
+debug extension array still attaches to an `EditorView` somebody else built;
+and the Phase 0 checklist still passes.
+
+## Phase 13: deferred to the extension
 
 Recorded here so the constraints above are not quietly dropped. Not in scope now.
 
@@ -458,6 +693,13 @@ Recorded here so the constraints above are not quietly dropped. Not in scope now
 - Deciding how local stepping coexists with the grader's remote Execute: the
   interactive-code block submits to A+ for grading, while PLIVET interprets
   locally for study. They are complementary, not competing.
+- Multi-file interpretation: resolving `#include` between the block's own files,
+  honouring the entry file the directive names, and mapping steps, breakpoints
+  and diagnostics back to the tab a line belongs to. Constraint 7 lands the
+  protocol shape in Phases 6 and 7; only the interpreter work is deferred here.
+  `unicoen.ts` parses one translation unit and will not be upgraded, so the
+  likely shape is PLIVET splicing the files into one unit before parsing and
+  keeping a line map back to the originals — a preprocessor pass, not a linker.
 
 ## Acceptance checklist
 
@@ -480,23 +722,39 @@ Recorded here so the constraints above are not quietly dropped. Not in scope now
 
 ## Pull-request sequence
 
-1. Baseline, parity checklist and performance benchmark.
+1. Baseline, parity checklist and performance benchmark. **Done.**
 2. Reduce scope to C; delete the Java and Python interpreters, samples and
-   selector.
-3. npm conversion and lockfile migration.
-4. Webpack 5 and development server.
-5. TypeScript 5, ESLint and Prettier.
+   selector. **Done.**
+3. npm conversion and lockfile migration. **Done.**
+4. Webpack 5 and development server. **Done.**
+5. TypeScript 5, ESLint and Prettier. **Done.**
 6. Extract `src/core/`, split `CanvasDrawer`, define `StepModel`.
 7. Bound `stateHistory`.
 8. Worker client and Worker; `StepAll` without the timer.
-9. CodeMirror editor, behind the second entry point.
-10. Debug extensions: breakpoints, step highlight, diagnostics.
+9. CodeMirror editor, behind the second entry point. **Done, in place: there
+   is no second entry point.**
+10. Debug extensions: breakpoints, step highlight, diagnostics. **Done.**
 11. JointJS graph, behind the second entry point.
 12. Redraw diffing or suspension, measured against the benchmark.
-13. Shell: layout, controls, console, files, switches.
+13. Shell: layout, controls, console, files, switches. **Console done.**
 14. Instance scoping and the `Plivet` entry point.
 15. Cut over; delete React and the old entry point.
 16. Tests, CI and dependency-update automation.
+
+Then Phase 12, once the acceptance checklist passes:
+
+17. Inline value widgets under the current step.
+18. Teaching linter with quick fixes and a lint gutter.
+19. Runtime diagnostics carried from the Worker with their positions.
+20. Construct tooltips: the static half - clauses, enclosure, conversions.
+21. Construct tooltips: the runtime half - conditions, iterations, arguments,
+    returned values.
+22. Symbol and library completion; snippets.
+23. Structured hover and editor-to-graph cross-highlighting.
+24. Editor affordances: occurrence highlight, folding, coverage gutter,
+    accessibility announcements.
+
+Items 8 to 12 of that phase are independent and taken only if wanted.
 
 Each pull request must leave install, lint, typecheck, test and build green.
 Phases 7 to 9 stay behind the second entry point precisely so that this holds.
