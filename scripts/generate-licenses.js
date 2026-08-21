@@ -10,7 +10,15 @@ const fs = require('fs');
 const path = require('path');
 const checker = require('license-checker-rseidelsohn');
 
-const OUT = path.resolve(__dirname, '..', 'dist', 'licenses.html');
+/*
+ * Where the report goes. `npm run build` leaves it beside the generated page;
+ * `npm run deploy` sets LICENSE_OUT, because a deployed bundle links to the
+ * copy that travels with it into the host's assets rather than to one beside
+ * a page it does not own.
+ */
+const OUT = process.env.LICENSE_OUT
+  ? path.resolve(process.env.LICENSE_OUT)
+  : path.resolve(__dirname, '..', 'dist', 'licenses.html');
 const AUTHOR = 'Yusein R. Ali';
 const UPSTREAM = 'https://github.com/RYOSKATE/PLIVET';
 

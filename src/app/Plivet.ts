@@ -87,6 +87,13 @@ export interface PlivetOptions {
    * instruction in a comment.
    */
   editableRegions?: EditableRegion[];
+  /**
+   * Where the footer's licence report is. A deployed bundle ships the report
+   * beside itself, under the host's assets, rather than beside the page that
+   * includes it. Left out, the page-relative `./licenses.html` the standalone
+   * build writes.
+   */
+  licenses?: string;
 }
 
 /**
@@ -131,6 +138,7 @@ export class Plivet {
       fromYear: 2026,
       dark: isDark(this.theme),
       files: features.loadFile !== false,
+      licenses: options.licenses,
     });
 
     this.controls = new ControlBar(this.shell.controls, {

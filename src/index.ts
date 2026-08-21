@@ -21,6 +21,13 @@ export {
   parseConfig,
   readConfig,
 } from './app/config';
+export {
+  LEGACY_MOUNT_ELEMENT_ID,
+  MOUNT_ELEMENT_ID,
+  findMount,
+  mount,
+  whenReady,
+} from './app/mount';
 export type { ViewSelection } from './core';
 export type { Theme } from './app/theme';
 export type { EditableRegion, SessionJSON } from './ui/editor';

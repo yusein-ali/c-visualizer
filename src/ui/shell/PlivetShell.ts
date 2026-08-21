@@ -32,6 +32,13 @@ export interface PlivetShellOptions {
   fromYear?: number;
   dark?: boolean;
   /**
+   * Where the third-party licence report is, if it is not next to the page.
+   * The deployed bundle ships it beside itself rather than beside its host, so
+   * the embed entry passes the address it was served from. Default: the
+   * standalone page's own copy.
+   */
+  licenses?: string;
+  /**
    * Whether the column keeps a box for the upload panel. A page whose programs
    * read no files has no use for the box, and the editor and console take the
    * room back. Default: it is there.
@@ -245,7 +252,7 @@ export class PlivetShell {
       document.createTextNode(' '),
       this.link(UPSTREAM, 'PLIVET upstream'),
       document.createTextNode(' '),
-      this.link(LICENSES, 'LICENSES')
+      this.link(options.licenses ?? LICENSES, 'LICENSES')
     );
 
     footer.append(copyright, document.createElement('br'), links);

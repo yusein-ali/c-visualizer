@@ -234,6 +234,7 @@ export function parseConfig(text: string): PlivetOptions {
   const files = filesOf(parsed.files);
   const editableRegions = regionsOf(parsed.editableRegions);
   const features = featuresOf(parsed.features);
+  const licenses = string(parsed.licenses, 'licenses');
   const views = viewsOf(parsed.views);
   if (typeof sourceCode !== 'undefined') {
     options.sourceCode = sourceCode;
@@ -255,6 +256,9 @@ export function parseConfig(text: string): PlivetOptions {
   }
   if (typeof views !== 'undefined') {
     options.views = views;
+  }
+  if (typeof licenses !== 'undefined') {
+    options.licenses = licenses;
   }
   return options;
 }

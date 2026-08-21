@@ -1491,8 +1491,13 @@ Recorded here so the constraints above are not quietly dropped. Not in scope now
 - Substituting the host's `InteractiveEditor` for PLIVET's own editor through the
   Phase 7 adapter, attaching the debug extensions with
   `StateEffect.appendConfig`.
-- `output.publicPath`, or a runtime `__webpack_public_path__`, so the interpreter
-  chunks and the Worker resolve under Sphinx `_static`.
+- ~~`output.publicPath`, or a runtime `__webpack_public_path__`, so the interpreter
+  chunks and the Worker resolve under Sphinx `_static`.~~ Done: `npm run deploy`
+  and `webpack.config.deploy.js` build `src/embed.ts` into `dist/embed/`, with
+  webpack's `auto` public path resolving the chunks, the Worker and the licence
+  report from wherever the host served the script. The extension registers the
+  directory and writes `#c-visualizer` and `#c-visualizer-config`; further
+  blocks on a page are `new window.CVisualizer(element, options)`.
 - Deciding how local stepping coexists with the grader's remote Execute: the
   interactive-code block submits to A+ for grading, while PLIVET interprets
   locally for study. They are complementary, not competing.

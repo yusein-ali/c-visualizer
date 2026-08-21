@@ -77,6 +77,7 @@ Ace, Konva or a second interface language.
 npm ci              # install from the committed lockfile
 npm start           # dev server on :8080 (/ is one instance, /dev.html is two)
 npm run build       # production build into dist/ (+ dist/licenses.html)
+npm run deploy      # embeddable assets into dist/embed/ (one script tag, hashed chunks)
 npm test            # jest
 npm run typecheck   # tsc --noEmit, no webpack
 npm run lint        # eslint over the whole tree
@@ -92,7 +93,8 @@ next Node major as an advisory job that may fail without blocking.
 
 ```
 src/index.ts                 the public entry: `new Plivet(element, options)`
-  └─ src/main.ts             the standalone page, mounting one into #root
+  └─ src/main.ts             the standalone page, mounting one into #c-visualizer (or #root)
+  └─ src/embed.ts            `npm run deploy`: the same mount, plus `window.CVisualizer`, for a host page
   └─ app/Plivet.ts           owns the bus, the interpreter client and the theme
        ├─ ui/shell/          two-column CSS grid: five mount points, three drag handles, the footer
        ├─ ui/controls/       six debug buttons, text size, theme switch, step counter
