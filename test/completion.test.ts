@@ -1,9 +1,10 @@
 import { EditorState } from '@codemirror/state';
+import { EditorView } from '@codemirror/view';
 import { CompletionContext, CompletionResult } from '@codemirror/autocomplete';
 import { cpp } from '@codemirror/lang-cpp';
 import { PlivetCPP14Interpreter } from '../src/interpreter/CPP14';
 import { Construct } from '../src/interpreter/Construct';
-import { ProgramCompletions } from '../src/ui/editor';
+import { cSnippets, ProgramCompletions } from '../src/ui/editor';
 
 /**
  * What the editor offers while the reader types.
@@ -176,9 +177,92 @@ describe('completion from the program', () => {
     expect(offeredAt(completions, doc, inString, true)).toBeNull();
   });
 
-  it('offers nothing before a program has been checked', () => {
+  it('offers no name before a program has been checked', () => {
+    // The skeletons stand on their own - they are the language, not the
+    // program - and there is nothing else to say until a check has run.
     const completions = new ProgramCompletions();
     const result = offeredAt(completions, program, 12, true);
-    expect(labels(result)).toEqual([]);
+    expect(labels(result)).toEqual([
+      'for',
+      'while',
+      'switch',
+      'struct',
+      'printf',
+      'scanf',
+    ]);
+  });
+});
+
+describe('snippets', () => {
+  /** Applying a completion the way `acceptCompletion` does, and reading back. */
+  const applied = (label: string, doc: string, pos: number): string => {
+    const state = EditorState.create({
+      doc,
+      extensions: [cpp()],
+      selection: { anchor: pos },
+    });
+    const view = new EditorView({ state });
+    const option = cSnippets.find((snippet) => snippet.label === label)!;
+    const apply = option.apply as (
+      view: EditorView,
+      completion: unknown,
+      from: number,
+      to: number
+    ) => void;
+    apply(view, option, pos, pos);
+    const text = view.state.doc.toString();
+    view.destroy();
+    return text;
+  };
+
+  it('offers the six skeletons alongside the program’s own names', () => {
+    const completions = completionsOf(program);
+    const at = program.indexOf('  return count;') + 2;
+    const offered = labels(offeredAt(completions, program, at, true));
+    expect(offered).toEqual(
+      expect.arrayContaining([
+        'for',
+        'while',
+        'switch',
+        'struct',
+        'printf',
+        'scanf',
+      ])
+    );
+  });
+
+  it('offers one entry where a snippet and a library name are the same word', () => {
+    const completions = completionsOf(program, [
+      {
+        name: 'printf',
+        signature: 'int printf(const char* format, ...)',
+        description: 'writes formatted text to the output',
+      },
+    ] as never);
+    const at = program.indexOf('  return count;') + 2;
+    const result = offeredAt(completions, program, at, true);
+    const offered = labels(result);
+    expect(offered.filter((label) => label === 'printf')).toHaveLength(1);
+    // And it is the template that carries the library's own signature.
+    expect(detailOf(result, 'printf')).toBe(
+      'int printf(const char* format, ...)'
+    );
+  });
+
+  it('writes a loop whose counter is one field mentioned three times', () => {
+    const written = applied('for', 'int main() {\n  \n}', 15);
+    expect(written).toContain('for (int i = 0; i < count; i++) {');
+    expect(written).toContain('}');
+  });
+
+  it('writes a scanf with the address operator already there', () => {
+    expect(applied('scanf', '', 0)).toBe('scanf("%d", &value);');
+  });
+
+  it('indents the body with what the editor indents with', () => {
+    const written = applied('while', 'int main() {\n  \n}', 15);
+    // The line the template writes with one tab lands one indent unit past
+    // the line the snippet was written on.
+    expect(written.split('\n')[2]).toBe('    ');
   });
 });

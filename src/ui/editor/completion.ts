@@ -6,6 +6,7 @@ import {
   CompletionSource,
 } from '@codemirror/autocomplete';
 import { syntaxTree } from '@codemirror/language';
+import { cSnippets, snippetLabels } from './snippets';
 import { Construct, ParameterDetail } from '../../interpreter/Construct';
 
 /**
@@ -176,12 +177,38 @@ export class ProgramCompletions {
       return null;
     }
     const line = context.state.doc.lineAt(context.pos).number;
+    const symbols = this.inScope(line);
     return {
       from: word === null ? context.pos : word.from,
-      options: this.inScope(line).map(asCompletion),
+      options: this.withSnippets(symbols),
       validFor: /^\w*$/,
     };
   };
+
+  /**
+   * The names in scope, with the skeletons of C's punctuation in front of
+   * them.
+   *
+   * Where a snippet and a name are the same word - `printf` is both a
+   * template and a library function - one entry is offered rather than two,
+   * and it is the template carrying the library's own signature and sentence.
+   * The description stays in `libraryHelp`, which is the only place that
+   * knows what `printf` is; what the snippet adds is the shape.
+   */
+  private withSnippets(symbols: ProgramSymbol[]): Completion[] {
+    const described = new Map(symbols.map((symbol) => [symbol.label, symbol]));
+    const snippets = cSnippets.map((snippet) => {
+      const symbol = described.get(String(snippet.label));
+      return typeof symbol === 'undefined'
+        ? snippet
+        : { ...snippet, detail: symbol.detail, info: infoDom(symbol) };
+    });
+    return snippets.concat(
+      symbols
+        .filter((symbol) => !snippetLabels.has(symbol.label))
+        .map(asCompletion)
+    );
+  }
 
   /**
    * The members of the record a `.` or `->` was written after.

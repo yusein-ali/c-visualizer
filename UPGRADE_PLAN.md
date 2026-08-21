@@ -962,7 +962,7 @@ and 10.
 
 ## Phase 12: teaching features
 
-**Status: items 1 to 5 done.** Items 1 to 4 are the phase proper; the rest are
+**Status: items 1 to 6 done.** Items 1 to 4 are the phase proper; the rest are
 independent of it and of each other, and can be taken in any order or dropped.
 
 Everything before this phase is parity work: the same application on a stack
@@ -1194,11 +1194,23 @@ it, and can be taken in any order or dropped.
    source out turns completion off rather than falling back to the buffer's
    own words; the library arrives from the application, so `libraryHelp` stays
    the one place that knows what `printf` is.
-6. **Snippets.** `snippetCompletion` skeletons for `for`, `while`, `switch`,
-   `struct`, `printf` and `scanf`, with tab-through fields. Beginners spend a
-   disproportionate share of their time on C's punctuation. The snippet shows
-   the syntax rather than hiding it, which is the difference between this and a
-   block editor.
+6. **Snippets.** **Done.** `snippetCompletion` skeletons for `for`, `while`,
+   `switch`, `struct`, `printf` and `scanf`, with tab-through fields. Beginners
+   spend a disproportionate share of their time on C's punctuation. The snippet
+   shows the syntax rather than hiding it, which is the difference between this
+   and a block editor.
+
+   `src/ui/editor/snippets.ts` holds the six, and they arrive through the same
+   completion source item 5 built, above the names in scope: a reader who has
+   typed `for` wants the loop rather than a variable beginning with those
+   letters. Two things the templates lean on. A field written twice under one
+   name is one field, so the counter of a `for` is declared, tested and
+   incremented by a single tab stop - which is the fact about a `for` that is
+   worth teaching. And a leading tab in a template is one level of
+   indentation, expanded to whatever the editor indents with, so the result
+   matches the file it lands in. Where a snippet and a library function are
+   the same word, one entry is offered rather than two, and it is the template
+   carrying `libraryHelp`'s own signature and sentence.
 7. **Structured hover, and cross-highlighting with the graph.**
    `src/ui/editor/tooltip.ts` sets `textContent`; `create()` may return any DOM.
    Render type, address and current value as a small table, and select the
