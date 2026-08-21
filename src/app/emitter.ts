@@ -1,4 +1,5 @@
 import type { CONTROL_EVENT, DEBUG_STATE, StepModel } from '../core';
+import type { StatementExplanation } from '../ui/records';
 import type { Theme } from './theme';
 import type { ZOOM_COMMAND } from '../ui/controls';
 
@@ -23,7 +24,12 @@ export interface EventPayloads {
   changeOutput: [output: string];
   /** The editor's text size, not the visualization's scale. */
   zoom: [command: ZOOM_COMMAND];
-  draw: [model: StepModel];
+  /**
+   * The step to draw, and what its statement is doing. The two travel
+   * together because they are one picture: the canvas draws the memory and,
+   * under it, a reading of the statement that moved it.
+   */
+  draw: [model: StepModel, explanation: StatementExplanation];
   /**
    * The object the reader is pointing at, and which panel they are pointing
    * from. The origin is what stops the two panels answering each other: a

@@ -29,6 +29,7 @@ import {
   HoverFact,
   HoverRecord,
 } from '../ui/editor';
+import { emptyStatementExplanation, StatementExplanation } from '../ui/records';
 
 /**
  * What PLIVET says about a position in the source.
@@ -224,6 +225,8 @@ export class HoverTextSource {
   private variables: VariableModel[] = [];
   private constructStates: ConstructStateModel[] = [];
   private evaluations: EvaluationModel[] = [];
+  /** Where the step marker is, which is which statement is being explained. */
+  private codeRange: CodeRangeModel | null = null;
 
   setExpansions(expansions: Expansion[]): void {
     this.expansions = expansions;
@@ -241,6 +244,7 @@ export class HoverTextSource {
    * again - a tooltip shows the last run's values to nobody.
    */
   setStep(model: StepModel): void {
+    this.codeRange = model.codeRange;
     this.variables = model.variables;
     this.constructStates = model.constructStates;
     this.evaluations = model.evaluations;
@@ -286,6 +290,95 @@ export class HoverTextSource {
     }
     return null;
   };
+
+  /**
+   * The statement under the step marker, read as a whole rather than one
+   * hover at a time.
+   *
+   * It is item 4's records gathered: the construct the marker is on, with
+   * what it is doing at this step, and under it the parts of the statement
+   * that have produced a value. Nothing here describes a construct a second
+   * time - a line this wants and the tooltip has not is added to the
+   * construct record, and both surfaces gain it.
+   *
+   * The source is handed in because the values are recorded by range: what an
+   * operator came to means nothing without the operator, and only the text
+   * the reader wrote says what that was.
+   */
+  explainStatement(source: string): StatementExplanation {
+    const range = this.codeRange;
+    if (range === null) {
+      return emptyStatementExplanation();
+    }
+    const construct = constructAt(
+      this.constructs,
+      range.begin.y,
+      range.begin.x
+    );
+    return {
+      statement:
+        construct === null
+          ? this.constructStateRecord(range)
+          : this.constructRecord(construct),
+      parts: this.evaluatedParts(source),
+    };
+  }
+
+  /**
+   * What the step is inside, when the parser has no construct that opens on
+   * this line. The marker sits on statements the outline does not record - a
+   * bare call, the head of a block - and the run still knows which loop or
+   * function it is in.
+   */
+  private constructStateRecord(range: CodeRangeModel): HoverRecord | null {
+    let found: ConstructStateModel | null = null;
+    for (const state of this.constructStates) {
+      if (
+        rangeCovers(state.range, range.begin.y, range.begin.x) &&
+        (found === null || rangeSpan(state.range) < rangeSpan(found.range))
+      ) {
+        found = state;
+      }
+    }
+    return found === null
+      ? null
+      : { title: nameOfKind(found.kind), facts: found.facts.map(runtimeFact) };
+  }
+
+  /**
+   * The parts of the statement that came to something, in the order they are
+   * written. Each is the text the reader wrote and what it turned out to be,
+   * which is the same pair the tooltip gives for one of them at a time.
+   */
+  private evaluatedParts(source: string): HoverRecord[] {
+    const lines = source.split('\n');
+    const written = (evaluation: EvaluationModel): string => {
+      const { begin, end } = evaluation.range;
+      if (begin.y !== end.y || begin.y < 1 || lines.length < begin.y) {
+        return '';
+      }
+      return lines[begin.y - 1].slice(begin.x, end.x).trim();
+    };
+    return this.evaluations
+      .slice()
+      .sort(
+        (left, right) =>
+          left.range.begin.y - right.range.begin.y ||
+          left.range.begin.x - right.range.begin.x ||
+          rangeSpan(right.range) - rangeSpan(left.range)
+      )
+      .flatMap((evaluation) => {
+        const text = written(evaluation);
+        return text === ''
+          ? []
+          : [
+              {
+                title: text,
+                facts: [fact(strings.value, evaluation.value, true)],
+              },
+            ];
+      });
+  }
 
   /**
    * What a pinned name holds, or a record saying that nothing of that name is

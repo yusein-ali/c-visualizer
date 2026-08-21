@@ -1,6 +1,7 @@
 import { EditorState } from '@codemirror/state';
 import { EditorView, Tooltip, hoverTooltip } from '@codemirror/view';
 import { rowAt } from './positions';
+import { Explanation, Fact } from '../records';
 
 /**
  * What the pointer is over, in the terms the rest of PLIVET speaks: a
@@ -18,39 +19,16 @@ export interface HoverContext {
 }
 
 /**
- * One thing said about the position under the pointer.
+ * What a tooltip says, and one line of it.
  *
- * A fact with a label reads as a row of a table - `type`, `int` - and one
- * without is a sentence standing on its own, which is what a note about the
- * language is: "the body runs once before the first test" has no left-hand
- * column to put anything in.
+ * They are the records of `src/ui/records.ts` under the names the editor
+ * calls them by: a hover is an explanation of the position under the pointer,
+ * and the statement section on the canvas is an explanation of the statement
+ * under the marker. One shape, so that a fact added for either shows up in
+ * both.
  */
-export interface HoverFact {
-  label: string;
-  value: string;
-  /** Set where the value is program text and belongs in the monospace. */
-  code?: boolean;
-}
-
-/**
- * What PLIVET has to say about a position, as records rather than as lines.
- *
- * The application is the only place that knows the facts, and how they are
- * set is the editor's business - which is what lets the same records be read
- * by the tooltip here and by the statement explanation on the canvas without
- * either of them parsing the other's prose.
- */
-export interface HoverRecord {
-  /** The headline: the name of a construct, or a variable and what it holds. */
-  title: string;
-  facts: HoverFact[];
-  /**
-   * The object the record is about, where it is about one. While the tooltip
-   * is open the canvas lights up the row holding that object, which is the
-   * point at which the two panels stop being separate pictures.
-   */
-  object?: string;
-}
+export type HoverFact = Fact;
+export type HoverRecord = Explanation;
 
 export type HoverText = (context: HoverContext) => HoverRecord | null;
 

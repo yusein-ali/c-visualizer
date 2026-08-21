@@ -962,7 +962,7 @@ and 10.
 
 ## Phase 12: teaching features
 
-**Status: items 1 to 12 done.** Items 1 to 4 are the phase proper; the rest are
+**Status: items 1 to 13 done.** Items 1 to 4 are the phase proper; the rest are
 independent of it and of each other, and can be taken in any order or dropped.
 
 Everything before this phase is parity work: the same application on a stack
@@ -1339,7 +1339,7 @@ it, and can be taken in any order or dropped.
     be restored into its blanks. What arrives from outside is checked rather
     than trusted, since it may be another version's, another tool's, or half
     of one.
-13. **One explanation of the current statement.** A teaching view that says
+13. **One explanation of the current statement.** **Done.** A teaching view that says
     what the statement under the step marker does, and it is the general case
     that the expression expansion of Phase 8 item 6 sits inside rather than a
     view beside it. The expansion draws the operands, the operators, the
@@ -1358,6 +1358,21 @@ it, and can be taken in any order or dropped.
     which is why this item follows item 4 for the facts and item 7 for their
     shape, since item 7 is what turns `hoverText.ts` from assembled lines into
     the records this view reads.
+
+    `HoverTextSource.explainStatement` gathers them and the records themselves
+    moved to `src/ui/records.ts`, because a widget that imported the other
+    widget could not be lifted out on its own and this is the one thing the
+    tooltip and the canvas have to agree about. The source text is handed in:
+    the values are recorded by range, and what an operator came to means
+    nothing without the operator, which only the text the reader wrote can
+    say. Two rules decide what is printed. The parts are printed only where
+    there is no expansion to draw - when there is one, the tree says what each
+    operator came to, and saying it twice on one screen is noise rather than
+    emphasis. And the section is one switch rather than two: the reading and
+    the picture are one view of one step, so the box that takes the
+    explanation away takes the expansion with it. A step whose records have
+    not arrived falls back to the summary the geometry works out on its own,
+    so the heading always has something under it.
 
 14. Create a view for visualizing the call stack.
 15. Create a view for visualizing the mutation of variables among the function calls.

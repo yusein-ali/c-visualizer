@@ -1,5 +1,6 @@
 import { Bus } from '../src/app/emitter';
 import { emptyStepModel } from '../src/core';
+import { emptyStatementExplanation } from '../src/ui/records';
 
 describe('the bus', () => {
   it('delivers a signal to every slot that answers it', () => {
@@ -19,7 +20,9 @@ describe('the bus', () => {
 
   it('carries a signal nobody listens for', () => {
     const bus = new Bus();
-    expect(() => bus.signal('draw', emptyStepModel())).not.toThrow();
+    expect(() =>
+      bus.signal('draw', emptyStepModel(), emptyStatementExplanation())
+    ).not.toThrow();
   });
 
   /** Phase 10's point: one page, two buses, and no path between them. */

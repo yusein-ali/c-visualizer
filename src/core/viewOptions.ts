@@ -27,6 +27,13 @@ import { MemoryRegion } from './model';
  */
 export class ViewOptions {
   private readonly chosen = new Map<MemoryRegion, boolean>();
+  /**
+   * Whether the statement section is drawn at all. It is one answer rather
+   * than two: the reading of the statement and the expansion under it are one
+   * view of one step - the picture is what the words are about - so switching
+   * the explanation off takes the expansion with it.
+   */
+  private statement = true;
 
   /**
    * Whether the memory map draws this region at all. `whenUntouched` is the
@@ -47,8 +54,17 @@ export class ViewOptions {
     this.showRegion(region, !this.isRegionShown(region, shownNow));
   }
 
+  public isStatementShown(): boolean {
+    return this.statement;
+  }
+
+  public showStatement(shown: boolean): void {
+    this.statement = shown;
+  }
+
   /** Back to what the canvas decides for itself. */
   public clear(): void {
     this.chosen.clear();
+    this.statement = true;
   }
 }

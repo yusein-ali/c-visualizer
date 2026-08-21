@@ -1,5 +1,6 @@
 import { MemoryRegion, ViewOptions } from '../src/core';
 import { MEMORY_REGIONS, memoryRegionName, viewPanel } from '../src/ui/graph';
+import strings from '../src/strings';
 
 /** What the map is drawing, as the graph reports it back to the panel. */
 const drawing = (regions: MemoryRegion[]) => (region: MemoryRegion) =>
@@ -16,19 +17,34 @@ const boxFor = (panel: HTMLElement, text: string) =>
   )!;
 
 describe('the canvas view panel', () => {
-  it('offers a switch per memory region, and nothing else', () => {
+  it('offers a switch per memory region, and one for the statement', () => {
     const { root } = viewPanel(
       new ViewOptions(),
       () => undefined,
       drawing(MEMORY_REGIONS)
     );
 
-    // The statement section under the map has no switch: it is always drawn,
-    // so that the memory above it does not move as the program steps.
-    expect(boxesOf(root)).toHaveLength(MEMORY_REGIONS.length);
+    // The statement section is one switch rather than two: the reading and
+    // the expansion under it are one view of one step.
+    expect(boxesOf(root)).toHaveLength(MEMORY_REGIONS.length + 1);
     MEMORY_REGIONS.forEach((region: MemoryRegion) => {
       expect(boxFor(root, memoryRegionName(region)).checked).toBe(true);
     });
+    expect(boxFor(root, strings.graphViewStatement).checked).toBe(true);
+  });
+
+  it('takes the statement section off and puts it back', () => {
+    const view = new ViewOptions();
+    const { root } = viewPanel(view, () => undefined, drawing(MEMORY_REGIONS));
+    const box = boxFor(root, strings.graphViewStatement);
+
+    box.checked = false;
+    box.dispatchEvent(new Event('change'));
+    expect(view.isStatementShown()).toBe(false);
+
+    box.checked = true;
+    box.dispatchEvent(new Event('change'));
+    expect(view.isStatementShown()).toBe(true);
   });
 
   it('ticks the regions the map is actually drawing', () => {

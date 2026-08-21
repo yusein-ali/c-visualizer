@@ -36,6 +36,8 @@ const strings = {
   graphViewOptions: 'View',
   graphViewOptionsTitle: 'Choose what the canvas draws',
   graphViewRegions: 'Memory regions',
+  graphViewSections: 'Sections',
+  graphViewStatement: 'Statement',
   memoryRegisters: 'Registers',
   memoryText: 'Text',
   memoryReadOnly: 'Read-only memory',

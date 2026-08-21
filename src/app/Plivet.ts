@@ -9,6 +9,7 @@ import {
 } from '../core';
 import { PlivetShell } from '../ui/shell';
 import type { EditableRegion, SessionJSON } from '../ui/editor';
+import type { StatementExplanation } from '../ui/records';
 import { isSession } from '../ui/editor';
 import { ControlBar, ZOOM_COMMAND } from '../ui/controls';
 import { PlivetConsole } from '../ui/console';
@@ -131,7 +132,9 @@ export class Plivet {
       // Typable exactly while the program is blocked on a read.
       this.console.setAccepting(debugState === 'stdin')
     );
-    bus.slot('draw', (model: StepModel) => this.graph.render(model));
+    bus.slot('draw', (model: StepModel, explanation: StatementExplanation) =>
+      this.graph.render(model, explanation)
+    );
     // The editor's tooltip lights up the row the canvas draws for the same
     // object. What the canvas said itself comes back here and is ignored.
     bus.slot(

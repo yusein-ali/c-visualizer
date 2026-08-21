@@ -292,7 +292,11 @@ export class EditorController {
       }
       this.bus.signal('changeState', debugState, step);
       this.bus.signal('changeOutput', output);
-      this.bus.signal('draw', model);
+      this.bus.signal(
+        'draw',
+        model,
+        this.hover.explainStatement(this.sourcecode)
+      );
       this.setHighlightOnCode(debugState, model);
     } catch (e) {
       console.log(e);

@@ -10,12 +10,13 @@ export interface ViewPanelHandle {
 }
 
 /**
- * The switches that decide what the canvas draws: one per memory region.
+ * The switches that decide what the canvas draws: one per memory region, and
+ * one for the statement section under them.
  *
- * The statement section under the map has no switch. It is a heading with one
- * line under it when the statement has nothing to expand, so it costs the map
- * almost nothing, and a section that comes and goes is harder to read past
- * than one that is always in the same place.
+ * The statement section is one switch rather than two. The reading of the
+ * statement and the expansion under it are one view of one step - the picture
+ * is what the words are about - so the box that takes the explanation away
+ * takes its picture with it.
  *
  * It is a disclosure rather than a row of checkboxes because the toolbar sits
  * over the paper and stays there while the reader scrolls: eight controls
@@ -71,9 +72,24 @@ export function viewPanel(
     })
   );
 
+  const sections = document.createElement('div');
+  sections.className = 'plivet-graph__config-group';
+  sections.setAttribute('role', 'group');
+  sections.setAttribute('aria-label', strings.graphViewSections);
+
+  const sectionTitle = document.createElement('p');
+  sectionTitle.className = 'plivet-graph__config-title';
+  sectionTitle.textContent = strings.graphViewSections;
+
+  const statement = checkbox(strings.graphViewStatement, (shown) => {
+    view.showStatement(shown);
+    onChange();
+  });
+  sections.append(sectionTitle, statement.label);
+
   const body = document.createElement('div');
   body.className = 'plivet-graph__config-body';
-  body.append(regions);
+  body.append(regions, sections);
 
   root.append(summary, body);
 
@@ -81,6 +97,7 @@ export function viewPanel(
     for (const [region, box] of boxes) {
       box.checked = drawn(region);
     }
+    statement.input.checked = view.isStatementShown();
   };
   refresh();
   return { root, refresh };

@@ -16,12 +16,18 @@ import strings from '../../strings';
 import { IconName, iconFor } from '../controls/icons';
 import { graphGeometry, memoryGeometry, statementSummary } from './geometry';
 import { ViewPanelHandle, viewPanel } from './ViewPanel';
+import {
+  emptyStatementExplanation,
+  Explanation,
+  StatementExplanation,
+} from '../records';
 import { MemoryNode, memoryNodeOf } from './MemoryNode';
 import { StackTable, stackTableOf } from './StackTable';
 import './graph.css';
 
 export interface PlivetGraphOptions {
   model?: StepModel;
+  explanation?: StatementExplanation;
   /**
    * The object the pointer is over, and null when it leaves. The canvas says
    * which object rather than which cell: a row is what a reader points at,
@@ -48,6 +54,9 @@ const HEADING_WIDTH = 320;
 const HEADING_HEIGHT = 26;
 /** The room between a heading and the section it names. */
 const HEADING_GAP = 10;
+/** One line of the statement's reading, and the room under the last of them. */
+const STATEMENT_LINE_HEIGHT = 20;
+const STATEMENT_GAP = 14;
 /** The room between the memory map and the statement section under it. */
 const SECTION_GAP = 36;
 /** Where the drawing starts, which is where `layoutMemory` puts the map. */
@@ -55,6 +64,12 @@ const ORIGIN_X = 24;
 const ORIGIN_Y = 24;
 /** What the map has to come down by to leave its own heading room. */
 const MEMORY_DROP = HEADING_HEIGHT + HEADING_GAP;
+
+/** A record's facts as lines: `label: value`, or the sentence on its own. */
+const explanationFacts = (explanation: Explanation): string[] =>
+  explanation.facts.map((fact) =>
+    fact.value === '' ? fact.label : `${fact.label}: ${fact.value}`
+  );
 
 const lowered = (point: Point, dy: number): Point => ({
   x: point.x,
@@ -111,6 +126,12 @@ export class PlivetGraph {
   private readonly zoomLabel: HTMLSpanElement;
   private readonly resizeObserver: ResizeObserver | null;
   private model: StepModel;
+  /**
+   * What the statement under the marker is doing, in the records the tooltip
+   * reads. It is kept beside the model for the same reason the model is: a
+   * fold or a switch redraws the scene without a new step.
+   */
+  private explanation: StatementExplanation;
   /** The map as it is drawn now, so a click can act on what it sees. */
   private memory: MemoryGeometry = {
     segments: [],
@@ -136,6 +157,7 @@ export class PlivetGraph {
     options: PlivetGraphOptions = {}
   ) {
     this.model = options.model || emptyStepModel();
+    this.explanation = options.explanation ?? emptyStatementExplanation();
     this.onFocus = options.onFocus;
     // The switches read the map back, so the panel is built before the toolbar
     // that carries it and refreshed by every render.
@@ -226,8 +248,11 @@ export class PlivetGraph {
     this.render(this.model);
   }
 
-  render(model: StepModel): void {
+  render(model: StepModel, explanation?: StatementExplanation): void {
     this.model = model;
+    if (typeof explanation !== 'undefined') {
+      this.explanation = explanation;
+    }
     // A step that knows its memory is drawn as a memory map; a step that only
     // has call frames - the empty model this starts on - keeps the tables.
     // Both sections come down by the height of the memory heading: the map
@@ -413,29 +438,74 @@ export class PlivetGraph {
     originX: number,
     originY: number
   ): dia.Cell[] {
+    // The reading and the picture are one view: a reader who has switched the
+    // statement off is not asking to keep its expansion.
+    if (!this.view.isStatementShown()) {
+      return [];
+    }
     const cells: dia.Cell[] = [
       this.sectionHeading(strings.graphStatementHeading, originX, originY),
     ];
-    const bodyY = originY + HEADING_HEIGHT + HEADING_GAP;
+    const headingBottom = originY + HEADING_HEIGHT + HEADING_GAP;
     this.contentWidth = Math.max(
       this.contentWidth,
       originX + HEADING_WIDTH + ORIGIN_X
     );
-    this.contentHeight = Math.max(this.contentHeight, bodyY);
+    this.contentHeight = Math.max(this.contentHeight, headingBottom);
+    // What kind of statement this is and what it is doing, over the drawing
+    // of the expression it contains. The expansion draws the operands and the
+    // operators; this says what the statement they make up is for.
+    const said = this.explanationLines(model);
+    const reading =
+      said.length === 0
+        ? []
+        : [this.statementLine(said, originX, headingBottom)];
+    const bodyY =
+      headingBottom + said.length * STATEMENT_LINE_HEIGHT + STATEMENT_GAP;
     if (model.expression !== null) {
       return cells.concat(
+        reading,
         this.expressionCells(model.expression, originX, bodyY)
       );
     }
-    return cells.concat(
-      this.statementLine(statementSummary(model), originX, bodyY)
+    return cells.concat(reading);
+  }
+
+  /**
+   * The statement, read out.
+   *
+   * The records come from the application, which is the only place that knows
+   * what a construct is; what is left here is where the lines go. A step
+   * whose records have not arrived - the empty model the canvas opens on -
+   * falls back to the summary the geometry can work out on its own, so the
+   * section always has something under its heading.
+   *
+   * The parts of the statement are printed only where there is no expansion
+   * to draw. When there is one, the tree under this says what each operator
+   * came to, and saying it twice on one screen is noise rather than emphasis.
+   */
+  private explanationLines(model: StepModel): string[] {
+    const { statement, parts } = this.explanation;
+    if (statement === null) {
+      return [statementSummary(model)];
+    }
+    const lines = [statement.title].concat(explanationFacts(statement));
+    if (model.expression !== null) {
+      return lines;
+    }
+    return lines.concat(
+      parts.map((part) => `${part.title} = ${part.facts[0]?.value ?? ''}`)
     );
   }
 
-  /** One line of prose where there is no tree to draw. */
-  private statementLine(text: string, x: number, y: number): dia.Element {
-    const height = 32;
-    const width = Math.max(HEADING_WIDTH, text.length * 7.4 + 24);
+  /** The reading of the statement: one line per fact, left-aligned. */
+  private statementLine(lines: string[], x: number, y: number): dia.Element {
+    const text = lines.join('\n');
+    const height = Math.max(32, lines.length * STATEMENT_LINE_HEIGHT);
+    const width = Math.max(
+      HEADING_WIDTH,
+      Math.max(...lines.map((line) => line.length)) * 7.4 + 24
+    );
     const line = new shapes.standard.Rectangle({ z: 4 });
     line.position(x, y);
     line.resize(width, height);
