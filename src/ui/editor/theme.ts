@@ -321,6 +321,14 @@ export const debugTheme = EditorView.baseTheme({
     opacity: '0.85',
     whiteSpace: 'normal',
   },
+  // The part of an exercise the reader is meant to write. Only drawn where
+  // some of the file is protected: with no regions declared there is nothing
+  // to tell apart.
+  '.plivet-editable': {
+    backgroundColor: 'var(--plivet-editable-bg, rgba(70, 130, 180, 0.08))',
+    borderBottom:
+      '1px solid var(--plivet-editable-line, rgba(70, 130, 180, 0.5))',
+  },
   // How often the run has been to a line, in four bands. The colour is the
   // step marker's, thinned: it is the same fact - where the program goes -
   // said about the whole run rather than about this step.

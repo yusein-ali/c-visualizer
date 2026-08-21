@@ -25,6 +25,13 @@ import {
   coverageField,
   showCoverage as markCoverage,
 } from './coverage';
+import {
+  EditableRegion,
+  editableRegions,
+  protectedField,
+  protectedRegions,
+  showEditableRegions,
+} from './protected';
 import { inlineValueField } from './inlineValues';
 import {
   showStep as markStep,
@@ -84,6 +91,10 @@ export class DebugExtensions {
       focusField,
       watchField,
       coverageField,
+      // Where the reader may type. Declared always and empty by default, so a
+      // program with no blanks is editable everywhere.
+      protectedField,
+      protectedRegions,
       // The gutter is what makes a warning visible without hovering for one.
       // A reader who does not know a rule exists never hovers to find out.
       lintGutter(),
@@ -128,6 +139,19 @@ export class DebugExtensions {
    */
   showFocus(view: EditorView, range: SourceRange | null): void {
     markFocus(view, range);
+  }
+
+  /**
+   * The spans the reader may edit. An empty list means the whole document,
+   * which is what PLIVET standalone is; a list turns the program into the
+   * fill-in-the-blank an exercise usually is.
+   */
+  setEditableRegions(view: EditorView, regions: EditableRegion[]): void {
+    showEditableRegions(view, regions);
+  }
+
+  editableRegions(state: EditorState): EditableRegion[] {
+    return editableRegions(state);
   }
 
   /**

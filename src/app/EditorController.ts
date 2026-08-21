@@ -12,6 +12,7 @@ import {
 import strings from '../strings';
 import { Expansion } from '../interpreter/Expansion';
 import {
+  EditableRegion,
   LibraryFunction,
   PlivetEditor,
   ProgramCompletions,
@@ -43,6 +44,12 @@ export interface EditorControllerOptions {
   dark?: boolean;
   /** The program the editor opens with. */
   doc?: string;
+  /**
+   * The spans of that program the reader may edit. Left out, the whole file
+   * is theirs; given, everything outside them is fixed, which is the shape an
+   * exercise usually takes.
+   */
+  editableRegions?: EditableRegion[];
 }
 
 /**
@@ -114,7 +121,13 @@ export class EditorController {
   private runtimeLints: TeachingDiagnostic[] = [];
 
   constructor(mount: HTMLElement, options: EditorControllerOptions) {
-    const { bus, client, dark = false, doc = strings.sourceCode } = options;
+    const {
+      bus,
+      client,
+      dark = false,
+      doc = strings.sourceCode,
+      editableRegions = [],
+    } = options;
     this.bus = bus;
     this.client = client;
     this.sourcecode = doc;
@@ -132,6 +145,10 @@ export class EditorController {
       completions: this.completions.source,
       onChange: (code: string) => this.edited(code),
     });
+
+    if (editableRegions.length !== 0) {
+      this.editor.debug.setEditableRegions(this.editor.view, editableRegions);
+    }
 
     this.bus.slot(
       'debug',

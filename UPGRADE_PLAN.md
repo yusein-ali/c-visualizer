@@ -962,7 +962,7 @@ and 10.
 
 ## Phase 12: teaching features
 
-**Status: items 1 to 9 done.** Items 1 to 4 are the phase proper; the rest are
+**Status: items 1 to 10 done.** Items 1 to 4 are the phase proper; the rest are
 independent of it and of each other, and can be taken in any order or dropped.
 
 Everything before this phase is parity work: the same application on a stack
@@ -1289,10 +1289,26 @@ it, and can be taken in any order or dropped.
    variables hold - the same values item 1 prints at the end of the line -
    because that is what a reader who cannot see the marker would otherwise
    hover every name on the line to learn.
-10. **Protected regions.** A `transactionFilter` rejecting edits outside marked
-    spans turns a program into a fill-in-the-blank exercise, which is the shape
-    an A+ task usually takes. No new package, and it composes with the read-only
-    compartment in `debugExtensions.ts` rather than competing with it.
+10. **Protected regions.** **Done.** A `transactionFilter` rejecting edits
+    outside marked spans turns a program into a fill-in-the-blank exercise,
+    which is the shape an A+ task usually takes. No new package, and it
+    composes with the read-only compartment in `debugExtensions.ts` rather than
+    competing with it: read-only is the debugger holding the document while a
+    program runs and is about time, this is about place, and a running session
+    freezes the blanks along with everything else.
+
+    The regions arrive through `PlivetOptions.editableRegions` and are empty by
+    default, so the feature costs nothing until a page asks for it - PLIVET
+    standalone is a file with no regions, editable everywhere. A blank grows
+    with what is typed into it, its start holding against text inserted there
+    and its end giving way, so an edit at either edge lands inside rather than
+    pushing the region off the text it was drawn around. A refused transaction
+    is dropped whole rather than stripped of its changes, because the selection
+    it carries was worked out against the document the edit would have made.
+    The one change that always goes through is the application replacing the
+    program: a host handing PLIVET a new file is not a student typing outside
+    the blank, and it says so with an annotation rather than by turning the
+    filter off.
 11. **The preprocessed source, side by side.** `@codemirror/merge` against the
     output of `src/interpreter/preprocess.ts`, showing what `#define` and
     `#include` actually did. The merge view is a second editor, so it is not

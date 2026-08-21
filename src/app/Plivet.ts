@@ -8,6 +8,7 @@ import {
   emptyStepModel,
 } from '../core';
 import { PlivetShell } from '../ui/shell';
+import type { EditableRegion } from '../ui/editor';
 import { ControlBar, ZOOM_COMMAND } from '../ui/controls';
 import { PlivetConsole } from '../ui/console';
 import { PlivetGraph } from '../ui/graph';
@@ -38,6 +39,14 @@ export interface PlivetOptions {
   sourceCode?: string;
   /** Which theme to open in. The switch in the control bar changes it after. */
   theme?: Theme;
+  /**
+   * The parts of the program the reader may edit, as offsets into
+   * `sourceCode`. Left out, all of it. This is how a page hands over a
+   * fill-in-the-blank exercise: everything outside these spans is fixed, and
+   * the filter that holds them is the editor's own behaviour rather than an
+   * instruction in a comment.
+   */
+  editableRegions?: EditableRegion[];
 }
 
 export class Plivet {
@@ -75,6 +84,7 @@ export class Plivet {
       client,
       dark: isDark(this.theme),
       doc: options.sourceCode,
+      editableRegions: options.editableRegions,
     });
 
     this.console = new PlivetConsole(this.shell.console, {

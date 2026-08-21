@@ -29,6 +29,7 @@ import { autocompletion, CompletionSource } from '@codemirror/autocomplete';
 import { cpp } from '@codemirror/lang-cpp';
 import { DebugExtensions, DebugExtensionOptions } from './debugExtensions';
 import { excludedRegionFolding } from './folding';
+import { unprotected } from './protected';
 import strings from '../../strings';
 import { ThemeControl } from './theme';
 
@@ -198,6 +199,9 @@ export class PlivetEditor {
   replaceCode(code: string): void {
     this.view.dispatch({
       changes: { from: 0, to: this.view.state.doc.length, insert: code },
+      // A host handing PLIVET a new program is not a student typing outside
+      // the blank, so the protected-region filter lets this one through.
+      annotations: unprotected.of(true),
     });
   }
 
