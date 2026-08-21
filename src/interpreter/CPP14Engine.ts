@@ -7,16 +7,21 @@ import { Variable } from 'unicoen.ts/dist/interpreter/Engine/Variable';
 import { UniArray } from 'unicoen.ts/dist/node/UniArray';
 import { UniBinOp } from 'unicoen.ts/dist/node/UniBinOp';
 import { UniClassDec } from 'unicoen.ts/dist/node/UniClassDec';
+import { UniDoWhile } from 'unicoen.ts/dist/node/UniDoWhile';
 import { UniExpr } from 'unicoen.ts/dist/node/UniExpr';
+import { UniFor } from 'unicoen.ts/dist/node/UniFor';
 import { UniFunctionDec } from 'unicoen.ts/dist/node/UniFunctionDec';
 import { UniIdent } from 'unicoen.ts/dist/node/UniIdent';
+import { UniIf } from 'unicoen.ts/dist/node/UniIf';
 import { UniIntLiteral } from 'unicoen.ts/dist/node/UniIntLiteral';
 import { UniMethodCall } from 'unicoen.ts/dist/node/UniMethodCall';
 import { UniNoneLiteral } from 'unicoen.ts/dist/node/UniNoneLiteral';
 import { UniProgram } from 'unicoen.ts/dist/node/UniProgram';
 import { UniStringLiteral } from 'unicoen.ts/dist/node/UniStringLiteral';
+import { UniSwitch } from 'unicoen.ts/dist/node/UniSwitch';
 import { UniUnaryOp } from 'unicoen.ts/dist/node/UniUnaryOp';
 import { UniVariableDec } from 'unicoen.ts/dist/node/UniVariableDec';
+import { UniWhile } from 'unicoen.ts/dist/node/UniWhile';
 import {
   DeclarationSpecifiers,
   RuntimeDeclarationInfo,
@@ -24,6 +29,7 @@ import {
   StorageRegion,
 } from './DeclarationSpecifiers';
 import { DesignatedInitializers } from './DesignatedInitializers';
+import { ConstructRecorder } from './ConstructTrace';
 import { ExpressionRecorder } from './ExpressionTrace';
 import { FieldOffset, RecordTable } from './RecordTable';
 import { RuntimeDiagnostic } from './RuntimeDiagnostic';
@@ -322,6 +328,7 @@ export class PlivetCPP14Engine extends CPP14Engine {
   private globalScope: Scope | null = null;
   private entryPoint: UniFunctionDec | null = null;
   private readonly expressions = new ExpressionRecorder();
+  private readonly constructs = new ConstructRecorder();
   /** What the run has been told off for, in the order it happened. */
   private readonly runtimeDiagnostics: RuntimeDiagnostic[] = [];
   /**
@@ -538,17 +545,72 @@ export class PlivetCPP14Engine extends CPP14Engine {
     if (expr instanceof UniIdent) {
       this.checkRead(expr, scope);
     }
-    const value = yield* super.execExpr(expr, scope);
+    // `Break`, `Continue` and `Return` are how the engine leaves a statement,
+    // so an evaluation that never finishes is ordinary; what the recorder was
+    // told is starting has to be closed either way.
+    const marks = this.constructs.begins(expr);
+    let value: any;
+    try {
+      value = yield* super.execExpr(expr, scope);
+    } finally {
+      this.constructs.ends(marks);
+    }
     const result =
       value instanceof UniFunctionDec
         ? (this.functionAddressOf(value, scope) ?? value)
         : value;
+    this.constructs.yields(expr, marks, result);
     this.expressions.capture(expr, result);
     return result;
   }
 
+  protected *execIf(statement: UniIf, scope: Scope): any {
+    const depth = this.constructs.entered(statement, 'if');
+    try {
+      return yield* super.execIf(statement, scope);
+    } finally {
+      this.constructs.leftAt(depth);
+    }
+  }
+
+  protected *execFor(statement: UniFor, scope: Scope): any {
+    const depth = this.constructs.entered(statement, 'for');
+    try {
+      return yield* super.execFor(statement, scope);
+    } finally {
+      this.constructs.leftAt(depth);
+    }
+  }
+
+  /**
+   * `UniDoWhile` extends `UniWhile`, and the stock dispatch tests the base
+   * class first, so a do-while arrives here too. Only the label differs: what
+   * the engine does with either is what this override is wrapping.
+   */
+  protected *execWhile(statement: UniWhile, scope: Scope): any {
+    const depth = this.constructs.entered(
+      statement,
+      statement instanceof UniDoWhile ? 'doWhile' : 'while'
+    );
+    try {
+      return yield* super.execWhile(statement, scope);
+    } finally {
+      this.constructs.leftAt(depth);
+    }
+  }
+
+  protected *execSwitch(statement: UniSwitch, scope: Scope): any {
+    const depth = this.constructs.entered(statement, 'switch');
+    try {
+      return yield* super.execSwitch(statement, scope);
+    } finally {
+      this.constructs.leftAt(depth);
+    }
+  }
+
   protected *stopByYield(ret: any, nextExpr: UniExpr): any {
     this.expressions.beforeYield(this.currentState, nextExpr);
+    this.constructs.attach(this.currentState);
     return yield* super.stopByYield(ret, nextExpr);
   }
 
@@ -556,6 +618,7 @@ export class PlivetCPP14Engine extends CPP14Engine {
     const state = super.stepExecute();
     if (!this.isStepExecutionRunning()) {
       this.expressions.finish(state);
+      this.constructs.finish(state);
     }
     return state;
   }
@@ -563,6 +626,7 @@ export class PlivetCPP14Engine extends CPP14Engine {
   protected *executeStepByStep(dec: UniProgram): any {
     this.entryPoint = this.getEntryPoint(dec);
     this.sourceStrings = stringLiteralsIn(dec);
+    this.constructs.reset(dec, this.entryPoint);
     return yield* super.executeStepByStep(dec);
   }
 
@@ -577,22 +641,45 @@ export class PlivetCPP14Engine extends CPP14Engine {
    * function its address stands for.
    */
   protected *execMethoodCall(mc: UniMethodCall, scope: Scope): any {
-    if (mc.receiver !== null) {
-      return yield* super.execMethoodCall(mc, scope);
-    }
-    const callee = yield* this.calleeOf(mc, scope);
-    if (callee === null) {
-      return yield* super.execMethoodCall(mc, scope);
-    }
-    const args: any[] = [];
-    for (const arg of mc.args) {
-      args.push(yield* this.execExpr(arg, scope));
-    }
-    return yield* (this as unknown as DispatchingEngine).execFunc(
-      callee,
-      scope,
-      args
+    const depth = this.constructs.calling(
+      mc,
+      this.declarationCalledBy(mc, scope)
     );
+    try {
+      if (mc.receiver !== null) {
+        return yield* super.execMethoodCall(mc, scope);
+      }
+      const callee = yield* this.calleeOf(mc, scope);
+      if (callee === null) {
+        return yield* super.execMethoodCall(mc, scope);
+      }
+      const args: any[] = [];
+      for (const arg of mc.args) {
+        args.push(yield* this.execExpr(arg, scope));
+      }
+      return yield* (this as unknown as DispatchingEngine).execFunc(
+        callee,
+        scope,
+        args
+      );
+    } finally {
+      this.constructs.leftAt(depth);
+    }
+  }
+
+  /**
+   * The definition a call names, where the program defines one. A library
+   * function has no definition to point a tooltip at, and a call through a
+   * pointer only resolves by running the expression - which this must not do,
+   * because it is asked before the call has begun.
+   */
+  private declarationCalledBy(
+    mc: UniMethodCall,
+    scope: Scope
+  ): UniFunctionDec | null {
+    return mc.receiver === null && mc.methodName instanceof UniIdent
+      ? this.functionNamed(mc.methodName.name, scope)
+      : null;
   }
 
   /**
@@ -660,6 +747,20 @@ export class PlivetCPP14Engine extends CPP14Engine {
    * to a declaration could still be either. Its own name settles it: C gives a
    * function and a variable in one scope no way to share one.
    */
+  /**
+   * What an address holds, for the tooltip that wants to say what an
+   * assignment replaced. The engine throws for an object nothing has written,
+   * which is not an error here - it is the answer, and the fact is left off
+   * rather than invented.
+   */
+  private valueAt(address: number, scope: Scope): unknown {
+    try {
+      return scope.getValue(address);
+    } catch {
+      return undefined;
+    }
+  }
+
   private functionNamed(name: string, scope: Scope): UniFunctionDec | null {
     if (!scope.hasValue(name)) {
       return null;
@@ -991,6 +1092,7 @@ export class PlivetCPP14Engine extends CPP14Engine {
   }
 
   protected execAssign(address: number, value: any, scope: Scope): any {
+    this.constructs.assigns(this.valueAt(address, scope));
     this.noteWrite(address);
     const info = this.declarationInfoByAddress.get(address);
     const type = scope.getRawType(address);
@@ -1021,6 +1123,76 @@ export class PlivetCPP14Engine extends CPP14Engine {
     };
     global.setTop('printf', wrapped, 'FUNCTION');
     global.setTop('scanf', plivetScanf, 'FUNCTION');
+  }
+
+  /**
+   * What `malloc` hands back: memory the program has not written yet.
+   *
+   * The engine fills a fresh block with random words, and a random word on the
+   * canvas reads as a value something put there - the wrong lesson twice over,
+   * because the number means nothing and nothing tells it apart from a number
+   * the program computed. A block carved out of memory nothing has held before
+   * is blanked instead, to the same empty value a local declared without an
+   * initializer holds, so the row says `uninitialized` until the program
+   * writes something into it.
+   *
+   * Only memory nothing has held before is blanked. What is already written at
+   * an address the allocator hands out again is the truth about that memory -
+   * a reader who finds the last owner's value in a new block has learned what
+   * `free` does and does not do - so it is left where it is.
+   */
+  protected includeStdlib(global: Scope): void {
+    super.includeStdlib(global);
+    const allocate = global.get('malloc');
+    if (typeof allocate !== 'function') {
+      return;
+    }
+    // A `function` rather than an arrow, for the reason `includeStdio` gives.
+    const wrapped = function (this: unknown, ...args: any[]) {
+      const start = global.address.heapAddress;
+      const requested = Number(args[0]);
+      // What is written where the block is about to land, read before the
+      // allocator writes over it. This engine's heap cursor only moves
+      // forward, so it is empty for every block it carves; an allocator that
+      // filled the hole a `free` left would find the last owner's values here.
+      const held = new Map<number, any>();
+      const span =
+        (Number.isFinite(requested) ? Math.max(requested, 0) : 0) +
+        Engine.structInfoSize;
+      for (let address = start; address < start + span; address += 1) {
+        if (global.objectOnMemory.has(address)) {
+          held.set(address, global.objectOnMemory.get(address));
+        }
+      }
+      const block = allocate.apply(this, args);
+      if (typeof block !== 'number' || block === 0) {
+        // Nothing was allocated: `malloc` answering with a null pointer is the
+        // one case where there is no block to say anything about.
+        return block;
+      }
+      for (
+        let address = block;
+        address < global.address.heapAddress;
+        address += 1
+      ) {
+        const type = global.typeOnMemory.get(address);
+        if (typeof type === 'undefined') {
+          continue;
+        }
+        if (held.has(address)) {
+          global.objectOnMemory.set(address, held.get(address));
+          continue;
+        }
+        // The word a record's block opens with is the address of its members
+        // rather than one of them, and blanking it would lose the block.
+        if (address === block && global.isStructType(type)) {
+          continue;
+        }
+        global.objectOnMemory.set(address, null);
+      }
+      return block;
+    };
+    global.setTop('malloc', wrapped, 'FUNCTION');
   }
 
   /** Allocates each element with the same descriptor/member shape as a scalar. */

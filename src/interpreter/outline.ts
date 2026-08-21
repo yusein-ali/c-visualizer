@@ -17,6 +17,8 @@ import { UniVariableDec } from 'unicoen.ts/dist/node/UniVariableDec';
 import { UniWhile } from 'unicoen.ts/dist/node/UniWhile';
 import {
   Construct,
+  ConstructClause,
+  EnclosingConstruct,
   EnumeratorDetail,
   FunctionDeclarationDetail,
   ParameterDetail,
@@ -449,6 +451,12 @@ function functionDetail(
       .trim(),
     identifier,
     parameters: parameterDetails(node, source, specifiers),
+    // A body is what makes a declaration a definition (6.9.1), and the brace
+    // that settles it can be a screen below the name being hovered.
+    isDefinition: node.block !== null && typeof node.block !== 'undefined',
+    // The same words `returnType` had to drop, kept where they belong: they
+    // describe the function, not the type it returns.
+    storageClasses: unique(returnType.match(NOT_A_TYPE) ?? []),
   };
 }
 
@@ -774,22 +782,212 @@ export function typeDeclarations(code: string): Construct[] {
   return declarations;
 }
 
+/**
+ * The clauses of a construct, named the way the standard names them.
+ *
+ * The text is the source itself rather than the tree printed back: a reader
+ * hovering `for (i = 0; i < n; i++)` is asking about what they wrote, and the
+ * mapper's own spelling of an expression is not always that.
+ */
+function clausesOf(
+  node: any,
+  kind: string,
+  source: string,
+  functions: Map<string, ParameterDetail[]>
+): ConstructClause[] {
+  const written = (child: any): string =>
+    child !== null &&
+    typeof child === 'object' &&
+    child.codeRange &&
+    child.codeRange.begin &&
+    child.codeRange.end
+      ? // A `for` initialization's range takes in the semicolon that ends it,
+        // which is punctuation between the clauses rather than part of one.
+        normalizeSpace(sourceForRange(source, child.codeRange)).replace(
+          /\s*;$/,
+          ''
+        )
+      : '';
+  const clause = (label: string, child: any): ConstructClause[] => {
+    const text = written(child);
+    return text === '' ? [] : [{ label, text }];
+  };
+  switch (kind) {
+    case 'if':
+    case 'while':
+    case 'doWhile':
+    case 'switch':
+      return clause('clauseCondition', node.cond);
+    case 'for':
+      return [
+        ...clause('clauseInitialization', node.init),
+        ...clause('clauseCondition', node.cond),
+        ...clause('clauseIteration', node.step),
+      ];
+    case 'return':
+      return clause('clauseExpression', node.value);
+    case 'ternary':
+      return [
+        ...clause('clauseCondition', node.cond),
+        ...clause('clauseWhenTrue', node.trueExpr),
+        ...clause('clauseWhenFalse', node.falseExpr),
+      ];
+    case 'cast':
+      return [
+        ...(typeof node.type === 'string' && node.type !== ''
+          ? [{ label: 'clauseTargetType', text: node.type }]
+          : []),
+        ...clause('clauseExpression', node.value),
+      ];
+    case 'assignment':
+      return [
+        ...clause('clauseTarget', node.left),
+        ...clause('clauseExpression', node.right),
+      ];
+    case 'call':
+      return callClauses(node, written, functions);
+    default:
+      return [];
+  }
+}
+
+/**
+ * What a call passes, paired with what it initialises.
+ *
+ * C passes by value, and nothing on screen says so: `swap(a, b)` looks exactly
+ * like a call that could change `a`. Writing the parameter beside the argument
+ * it is initialised from is the shortest way to say what actually happens.
+ */
+function callClauses(
+  node: any,
+  written: (child: any) => string,
+  functions: Map<string, ParameterDetail[]>
+): ConstructClause[] {
+  const name = calleeName(node.methodName);
+  const parameters = functions.get(name);
+  const args: any[] = Array.isArray(node.args) ? node.args : [];
+  if (typeof parameters === 'undefined') {
+    // A library function, or one declared after this call: the arguments are
+    // still worth naming, and nothing is invented about what they initialise.
+    return args
+      .map((argument) => written(argument))
+      .filter((text) => text !== '')
+      .map((text) => ({ label: 'clauseArgument', text }));
+  }
+  return args.map((argument, index) => {
+    const parameter = parameters[index];
+    const text = written(argument);
+    return {
+      label: 'clauseArgument',
+      text:
+        typeof parameter === 'undefined'
+          ? text
+          : `${parameter.type} ${parameter.identifier} = ${text}`,
+    };
+  });
+}
+
+/** The parameters of every function the program defines, by name. */
+function functionParameters(
+  root: UniNode,
+  source: string,
+  specifiers?: DeclarationSpecifiers
+): Map<string, ParameterDetail[]> {
+  const found = new Map<string, ParameterDetail[]>();
+  const visit = (node: any): void => {
+    if (node === null || typeof node !== 'object') {
+      return;
+    }
+    if (Array.isArray(node)) {
+      node.forEach(visit);
+      return;
+    }
+    if (typeof node.fields === 'undefined') {
+      return;
+    }
+    if (node instanceof UniFunctionDec && nameOf(node) !== '') {
+      found.set(nameOf(node), parameterDetails(node, source, specifiers));
+    }
+    for (const field of Array.from(node.fields.keys()) as string[]) {
+      if (field !== 'comments' && field !== 'codeRange') {
+        visit(node[field]);
+      }
+    }
+  };
+  visit(root);
+  return found;
+}
+
+/**
+ * What is true of a construct however it runs.
+ *
+ * A `do`-`while` runs its body before its first test, which is the whole
+ * difference between it and a `while` and is spelled nowhere in the source: a
+ * reader has to know the language to see it.
+ */
+const notesOf = (kind: string): string[] =>
+  kind === 'doWhile' ? ['noteBodyBeforeTest'] : [];
+
+/**
+ * The construct a jump leaves. `break` and `continue` differ: a `break` inside
+ * a `switch` inside a loop leaves the switch, while a `continue` there ignores
+ * the switch entirely and restarts the loop.
+ */
+function enclosingOf(
+  kind: string,
+  enclosure: EnclosingConstruct[]
+): EnclosingConstruct | undefined {
+  if (kind === 'return') {
+    for (let i = enclosure.length - 1; 0 <= i; i -= 1) {
+      if (enclosure[i].kind === 'functionDec') {
+        return enclosure[i];
+      }
+    }
+    return undefined;
+  }
+  if (kind !== 'break' && kind !== 'continue') {
+    return undefined;
+  }
+  for (let i = enclosure.length - 1; 0 <= i; i -= 1) {
+    const { kind: enclosingKind } = enclosure[i];
+    if (enclosingKind === 'functionDec') {
+      return undefined;
+    }
+    if (
+      enclosingKind === 'for' ||
+      enclosingKind === 'while' ||
+      enclosingKind === 'doWhile' ||
+      (kind === 'break' && enclosingKind === 'switch')
+    ) {
+      return enclosure[i];
+    }
+  }
+  return undefined;
+}
+
+/** The kinds a jump statement can be talking about. */
+const ENCLOSING_KINDS = ['for', 'while', 'doWhile', 'switch', 'functionDec'];
+
 export function outline(
   root: UniNode,
   source: string = '',
   specifiers?: DeclarationSpecifiers
 ): Construct[] {
   const constructs: Construct[] = [];
+  const functions = functionParameters(root, source, specifiers);
   const visit = (
     node: any,
     automaticStorage: boolean = false,
-    containingRecord: string | null = null
+    containingRecord: string | null = null,
+    enclosure: EnclosingConstruct[] = []
   ) => {
     if (node === null || typeof node !== 'object') {
       return;
     }
     if (Array.isArray(node)) {
-      node.forEach((child) => visit(child, automaticStorage, containingRecord));
+      node.forEach((child) =>
+        visit(child, automaticStorage, containingRecord, enclosure)
+      );
       return;
     }
     if (typeof node.fields === 'undefined') {
@@ -827,12 +1025,18 @@ export function outline(
           }
         });
       } else {
+        const clauses = clausesOf(node, kind, source, functions);
+        const enclosing = enclosingOf(kind, enclosure);
+        const notes = notesOf(kind);
         constructs.push({
           kind,
           detail:
             declaredFunction === null
               ? detailOf(node, declarations)
               : functionText(declaredFunction),
+          clauses: clauses.length === 0 ? undefined : clauses,
+          enclosing,
+          notes: notes.length === 0 ? undefined : notes,
           variableDeclarations:
             declarations.length === 0 ? undefined : declarations,
           declaredFunction:
@@ -870,9 +1074,18 @@ export function outline(
         : node instanceof UniFunctionDec
           ? null
           : containingRecord;
+    // What a `break` or a `return` inside this node would be leaving.
+    const childEnclosure =
+      kind !== null && ENCLOSING_KINDS.indexOf(kind) !== -1 && range
+        ? enclosure.concat({
+            kind,
+            line: range.begin.y,
+            ...(nameOf(node) === '' ? {} : { name: nameOf(node) }),
+          })
+        : enclosure;
     for (const field of Array.from(node.fields.keys()) as string[]) {
       if (field !== 'comments' && field !== 'codeRange') {
-        visit(node[field], childAutomaticStorage, childRecord);
+        visit(node[field], childAutomaticStorage, childRecord, childEnclosure);
       }
     }
   };

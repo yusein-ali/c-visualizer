@@ -1,4 +1,5 @@
 import {
+  ConstructStateModel,
   FoldState,
   Geometry,
   MemoryGeometry,
@@ -8,9 +9,11 @@ import {
   ViewOptions,
   layout,
   layoutMemory,
+  rangeCovers,
+  rangeSpan,
   startsShown,
 } from '../../core';
-import strings from '../../strings';
+import strings, { stringFor } from '../../strings';
 
 const segmentNames: Record<MemoryRegion, string> = {
   registers: strings.memoryRegisters,
@@ -41,6 +44,54 @@ export const MEMORY_REGIONS: MemoryRegion[] = [
 /** What the reader calls a region. */
 export function memoryRegionName(region: MemoryRegion): string {
   return segmentNames[region];
+}
+
+/**
+ * The innermost construct the step is inside.
+ *
+ * The smallest range covering the marker wins, the same rule the tooltip uses
+ * to choose between a loop and the `if` inside it. A record is only ever here
+ * for the step being shown, so a stopped session has none.
+ */
+function innermostConstruct(model: StepModel): ConstructStateModel | null {
+  const { codeRange } = model;
+  if (codeRange === null) {
+    return null;
+  }
+  let found: ConstructStateModel | null = null;
+  for (const state of model.constructStates) {
+    if (
+      rangeCovers(state.range, codeRange.begin.y, codeRange.begin.x) &&
+      (found === null || rangeSpan(state.range) < rangeSpan(found.range))
+    ) {
+      found = state;
+    }
+  }
+  return found;
+}
+
+/**
+ * What the statement section says when there is no expansion to draw.
+ *
+ * The section's heading is always on the canvas, so it always has to have
+ * something under it. This is the construct the step is inside and what it is
+ * doing - read from the same records the tooltip reads, so that the canvas and
+ * the hover never give a reader two accounts of one step.
+ */
+export function statementSummary(model: StepModel): string {
+  const state = innermostConstruct(model);
+  if (state === null) {
+    return strings.statementNotRunning;
+  }
+  const name = stringFor(
+    `construct${state.kind.charAt(0).toUpperCase()}${state.kind.slice(1)}`
+  );
+  const facts = state.facts.map((fact) =>
+    fact.value === ''
+      ? stringFor(fact.label)
+      : `${stringFor(fact.label)}: ${fact.value}`
+  );
+  return facts.length === 0 ? name : `${name} — ${facts.join(', ')}`;
 }
 
 /**

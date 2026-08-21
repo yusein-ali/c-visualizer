@@ -22,7 +22,8 @@ interface StateWithExpression extends ExecState {
   plivetExpression?: ExpressionModel | null;
 }
 
-const ASSIGNMENT = /^(?:=|\+=|-=|\*=|\/=|%=|<<=|>>=|&=|\|=|\^=)$/;
+/** C's assignment operators (6.5.16), which `ConstructTrace` reads too. */
+export const ASSIGNMENT = /^(?:=|\+=|-=|\*=|\/=|%=|<<=|>>=|&=|\|=|\^=)$/;
 
 /**
  * Leaves a plain tree of the statement about to run on each execution
@@ -115,6 +116,8 @@ function nodeOf(
         key: `expression-${keys.value++}`,
         kind: 'operand',
         text: definition.name,
+        // The declarator, which is where the name is written.
+        range: rangeOf(definition),
         value: null,
         children: [],
       };
@@ -122,6 +125,7 @@ function nodeOf(
         key: `expression-${keys.value++}`,
         kind: 'assignment',
         text: '=',
+        range: rangeOf(expression),
         value: valueOf(expression, values),
         children: [left, nodeOf(definition.value, values, keys)],
       };
@@ -135,6 +139,7 @@ function nodeOf(
     key: `expression-${keys.value++}`,
     kind: kindOf(expression, children.length),
     text: expressionText(expression),
+    range: rangeOf(expression),
     value: valueOf(expression, values),
     children,
   };
@@ -186,7 +191,7 @@ function expressionText(expression: UniExpr): string {
     return `(${expression.type})`;
   }
   if (expression instanceof UniMethodCall) {
-    return `${expression.methodName.name}()`;
+    return `${calleeName(expression.methodName)}()`;
   }
   if (expression instanceof UniReturn) {
     return 'return';
@@ -212,8 +217,43 @@ function expressionText(expression: UniExpr): string {
   return expression.constructor.name.replace(/^Uni/, '');
 }
 
+/**
+ * The name a call goes through.
+ *
+ * A call through a function pointer arrives as `(*ops[1])(7, 3)`, whose callee
+ * is the dereference rather than a name, so naming it means reaching past the
+ * operators to the pointer itself. `outline.ts` needs the same reach and has
+ * its own copy: it lives in the interpreter's chunk, and importing it here
+ * would pull the whole outline walk into the core one.
+ */
+function calleeName(node: unknown): string {
+  if (node === null || typeof node !== 'object') {
+    return '';
+  }
+  const named = node as { name?: unknown };
+  if (typeof named.name === 'string' && named.name !== '') {
+    return named.name;
+  }
+  const parts = node as Record<string, unknown>;
+  for (const field of ['expr', 'left', 'receiver', 'methodName']) {
+    const found = calleeName(parts[field]);
+    if (found !== '') {
+      return found;
+    }
+  }
+  return '';
+}
+
 function containsExpandableOperator(expression: UniExpr): boolean {
   if (expression instanceof UniTernaryOp) {
+    return true;
+  }
+  // A call earns a window for its arguments alone. C passes by value, and
+  // `twice(i)` says nothing on screen about the copy it makes of `i` - which
+  // is the misconception the expansion exists to answer, and it is no less
+  // true of `twice(3)`. Only the arguments make a picture, so a call that
+  // takes none is still left out.
+  if (expression instanceof UniMethodCall && 0 < expression.args.length) {
     return true;
   }
   if (
@@ -240,7 +280,12 @@ function rangeOf(expression: UniExpr): CodeRangeModel {
   };
 }
 
-function expressionValue(value: unknown): string {
+/**
+ * A value as a reader would read it. Shared with `ConstructTrace`: the two
+ * surfaces report the same evaluations, and a value that reads one way on the
+ * canvas and another in a tooltip is two answers to one question.
+ */
+export function expressionValue(value: unknown): string {
   if (typeof value === 'undefined') {
     return 'undefined';
   }

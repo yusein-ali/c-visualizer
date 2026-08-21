@@ -198,7 +198,7 @@ export class EditorController {
     try {
       const { debugState, model, output, step, runtime } = response;
       this.setDebugging(debugState !== 'Stop');
-      this.hover.setVariables(model.variables);
+      this.hover.setStep(model);
       this.setRuntimeDiagnostics(typeof runtime === 'undefined' ? [] : runtime);
       if (debugState === 'Executing') {
         return;

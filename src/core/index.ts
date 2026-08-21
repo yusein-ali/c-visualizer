@@ -63,6 +63,8 @@ export {
   emptyStepModel,
   foldGroupOf,
   isWithinFold,
+  rangeCovers,
+  rangeSpan,
   startsCollapsed,
   startsShown,
 } from './model';
@@ -70,6 +72,9 @@ export type {
   CellKind,
   CellModel,
   CodeRangeModel,
+  ConstructFactModel,
+  ConstructStateModel,
+  EvaluationModel,
   ExpressionModel,
   ExpressionNodeKind,
   ExpressionNodeModel,

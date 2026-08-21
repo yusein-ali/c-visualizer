@@ -15,6 +15,7 @@ import {
   MEMORY_REGIONS,
   graphGeometry,
   memoryGeometry,
+  statementSummary,
 } from '../src/ui/graph/geometry';
 
 const cell = (
@@ -611,5 +612,77 @@ describe('memory geometry', () => {
 
     expect(mapOf(step, new FoldState()).segments).toHaveLength(0);
     expect(graphGeometry(step, new FoldState()).stacks).toHaveLength(1);
+  });
+});
+
+/**
+ * The line under the statement heading.
+ *
+ * The heading is always on the canvas, so it always has something under it:
+ * the expansion where the statement has one, and this where it does not. It is
+ * read from the records the tooltip reads, so the two surfaces cannot give a
+ * reader two accounts of one step.
+ */
+describe('what the statement section says without an expansion', () => {
+  const at = (line: number, column = 0, endColumn = 40) => ({
+    begin: { x: column, y: line },
+    end: { x: endColumn, y: line },
+  });
+
+  const stepInside = (): StepModel => ({
+    ...emptyStepModel(),
+    codeRange: at(9, 4, 30),
+    constructStates: [
+      {
+        kind: 'functionDec',
+        range: { begin: { x: 0, y: 3 }, end: { x: 1, y: 20 } },
+        facts: [{ label: 'factTimesEntered', value: '1' }],
+      },
+      {
+        kind: 'for',
+        range: { begin: { x: 2, y: 5 }, end: { x: 3, y: 12 } },
+        facts: [
+          { label: 'factConditionValue', value: '1' },
+          { label: 'factNonzero', value: '' },
+          { label: 'factIterations', value: '3' },
+        ],
+      },
+    ],
+  });
+
+  it('names the innermost construct the step is inside, and what it is doing', () => {
+    // The function encloses the loop; the reader is inside the loop.
+    expect(statementSummary(stepInside())).toBe(
+      'for loop — evaluates to: 1, which C reads as true, because it is not zero, iterations begun so far: 3'
+    );
+  });
+
+  it('says nothing was running when nothing is', () => {
+    expect(statementSummary(emptyStepModel())).toBe('no statement is running');
+  });
+
+  it('says nothing was running when no record covers the marker', () => {
+    // A record is only ever here for the step being shown; one that does not
+    // contain the marker belongs to a construct the step is not inside.
+    const elsewhere: StepModel = {
+      ...stepInside(),
+      codeRange: at(40, 0, 10),
+    };
+    expect(statementSummary(elsewhere)).toBe('no statement is running');
+  });
+
+  it('names a construct that has no facts yet', () => {
+    const bare: StepModel = {
+      ...emptyStepModel(),
+      codeRange: at(6, 4, 20),
+      constructStates: [
+        {
+          kind: 'switch',
+          range: { begin: { x: 2, y: 5 }, end: { x: 3, y: 9 } },
+          facts: [],
+        },
+      ],
+    };
+    expect(statementSummary(bare)).toBe('switch statement');
   });
 });

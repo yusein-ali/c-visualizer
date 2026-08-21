@@ -16,14 +16,16 @@ const boxFor = (panel: HTMLElement, text: string) =>
   )!;
 
 describe('the canvas view panel', () => {
-  it('offers a switch per memory region and one for the expression', () => {
+  it('offers a switch per memory region, and nothing else', () => {
     const { root } = viewPanel(
       new ViewOptions(),
       () => undefined,
       drawing(MEMORY_REGIONS)
     );
 
-    expect(boxesOf(root)).toHaveLength(MEMORY_REGIONS.length + 1);
+    // The statement section under the map has no switch: it is always drawn,
+    // so that the memory above it does not move as the program steps.
+    expect(boxesOf(root)).toHaveLength(MEMORY_REGIONS.length);
     MEMORY_REGIONS.forEach((region: MemoryRegion) => {
       expect(boxFor(root, memoryRegionName(region)).checked).toBe(true);
     });
@@ -68,16 +70,5 @@ describe('the canvas view panel', () => {
     // Asked for by name, a region stays on the map even while it is empty.
     expect(view.isRegionShown('heap', false)).toBe(true);
     expect(draws).toBe(2);
-  });
-
-  it('puts the expression expansion away', () => {
-    const view = new ViewOptions();
-    const { root } = viewPanel(view, () => undefined, drawing([]));
-    const expression = boxFor(root, 'Expression evaluation');
-
-    expect(expression.checked).toBe(true);
-    expression.checked = false;
-    expression.dispatchEvent(new Event('change'));
-    expect(view.isExpressionShown()).toBe(false);
   });
 });

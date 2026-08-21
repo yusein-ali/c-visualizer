@@ -5,6 +5,7 @@ export {
   graphGeometry,
   memoryGeometry,
   memoryRegionName,
+  statementSummary,
 } from './geometry';
 export { StackTable, stackTableOf } from './StackTable';
 export { viewPanel } from './ViewPanel';

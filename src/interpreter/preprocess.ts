@@ -46,6 +46,18 @@
 
 import { Expansion } from './Expansion';
 
+/**
+ * The replacement worth reporting on its own. A macro that expands to its own
+ * body in one step has nothing to add: `A → 3 → 3` says the same thing twice.
+ */
+const stepBefore = (
+  expanded: string,
+  replacement?: string
+): string | undefined =>
+  typeof replacement === 'undefined' || replacement.trim() === expanded.trim()
+    ? undefined
+    : replacement.trim();
+
 interface Macro {
   /** null for an object-like macro; the named parameters otherwise. */
   params: string[] | null;
@@ -290,6 +302,10 @@ class Preprocessor {
           length: name.length,
           name,
           text: this.expandFragment(name, lineNumber, new Set<string>()),
+          replacement: stepBefore(
+            this.expandFragment(name, lineNumber, new Set<string>()),
+            macro.body
+          ),
           definedAt: macro.definedAt,
         });
       }
@@ -403,6 +419,7 @@ class Preprocessor {
             length: expansion.next - i,
             name,
             text: expansion.text,
+            replacement: stepBefore(expansion.text, expansion.replacement),
             definedAt:
               typeof macro === 'undefined' ? undefined : macro.definedAt,
           });
@@ -427,7 +444,7 @@ class Preprocessor {
     after: number,
     lineNumber: number,
     active: Set<string>
-  ): { text: string; next: number } | null {
+  ): { text: string; next: number; replacement?: string } | null {
     if (name === '__LINE__') {
       return { text: String(lineNumber), next: after };
     }
@@ -440,6 +457,7 @@ class Preprocessor {
     if (macro.params === null) {
       return {
         text: this.expandFragment(macro.body, lineNumber, nested),
+        replacement: macro.body,
         next: after,
       };
     }
@@ -485,6 +503,7 @@ class Preprocessor {
     );
     return {
       text: this.expandFragment(substituted, lineNumber, nested),
+      replacement: substituted,
       next: args.next,
     };
   }

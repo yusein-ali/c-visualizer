@@ -190,6 +190,12 @@ export interface ExpressionNodeModel {
   kind: ExpressionNodeKind;
   text: string;
   /**
+   * Where the operand or operator is written. The canvas does not need it; the
+   * tooltip does, so that hovering inside a compound expression can answer
+   * about the innermost part under the pointer rather than the whole line.
+   */
+  range: CodeRangeModel;
+  /**
    * What the node is worth going into the step: an operand's current value, or
    * an operator's result once it has one. `null` until then.
    */
@@ -206,6 +212,65 @@ export interface ExpressionModel {
 export interface CodeRangeModel {
   begin: { x: number; y: number };
   end: { x: number; y: number };
+}
+
+/**
+ * Whether a position falls inside a range the interpreter reported.
+ *
+ * The end column of an expression is one past its last character - `n * 2` in
+ * `return n * 2;` ends at the semicolon's column - so the comparison is strict
+ * at that end and the trailing punctuation stays outside. Both the tooltip and
+ * the canvas ask this question of the same ranges, which is why the answer
+ * lives here rather than once on each side.
+ */
+export const rangeCovers = (
+  range: CodeRangeModel,
+  line: number,
+  column: number
+): boolean =>
+  (range.begin.y < line ||
+    (range.begin.y === line && range.begin.x <= column)) &&
+  (line < range.end.y || (range.end.y === line && column < range.end.x));
+
+/** How much a range covers, for choosing the smallest of several. */
+export const rangeSpan = (range: CodeRangeModel): number =>
+  (range.end.y - range.begin.y) * 1000 + (range.end.x - range.begin.x);
+
+/**
+ * What one part of the statement came to.
+ *
+ * `ExpressionModel` above is the statement *about to* run - structure, and
+ * what its names hold going in - because that is what the marker is on. These
+ * are the values the operators themselves produced, which only exist once the
+ * statement has run, and they are what lets a tooltip answer about the `*` in
+ * `total = a * b + c` rather than about the whole assignment.
+ */
+export interface EvaluationModel {
+  range: CodeRangeModel;
+  value: string;
+}
+
+/** One thing that is true about a construct at this step, and its name. */
+export interface ConstructFactModel {
+  /** A key in `strings.ts`: `factCondition`, `factIterations`, … */
+  label: string;
+  value: string;
+}
+
+/**
+ * What a construct is doing at this step.
+ *
+ * Only the constructs the step is inside are here: the statement about to run,
+ * the loops and the switch around it, and the calls that are still on the
+ * stack. That is exactly the set a runtime line may be shown for - a tooltip
+ * never says what a loop did on a step the reader is not on, and a stopped
+ * session says nothing at all.
+ */
+export interface ConstructStateModel {
+  range: CodeRangeModel;
+  /** The construct kind, the same key `Construct.kind` uses. */
+  kind: string;
+  facts: ConstructFactModel[];
 }
 
 /**
@@ -252,6 +317,10 @@ export interface StepModel {
   variables: VariableModel[];
   /** What the statement about to run reads or assigns, in source order. */
   inlineValues: InlineValueModel[];
+  /** What the constructs the step is inside are doing, for the tooltips. */
+  constructStates: ConstructStateModel[];
+  /** What the parts of the statement the step just finished came to. */
+  evaluations: EvaluationModel[];
   /**
    * Where the next statement to execute is, which is what the editor
    * highlights and what a breakpoint is compared against.
@@ -267,6 +336,8 @@ export const emptyStepModel = (): StepModel => ({
   expression: null,
   variables: [],
   inlineValues: [],
+  constructStates: [],
+  evaluations: [],
   codeRange: null,
 });
 

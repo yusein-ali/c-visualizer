@@ -11,6 +11,20 @@ export interface Construct {
   kind: string;
   /** The declared type, the called name - whatever makes the kind concrete. */
   detail: string;
+  /**
+   * The parts the standard names, in the order it names them. This is what a
+   * reader cannot recover by looking: `for (i = 0; i < n; i++)` is three
+   * clauses with three different jobs and one pair of parentheses.
+   */
+  clauses?: ConstructClause[];
+  /** The loop, switch or function a jump statement leaves. */
+  enclosing?: EnclosingConstruct;
+  /**
+   * What is true of this construct whatever the program does with it, as keys
+   * in `strings.ts`. A `do`-`while` runs its body before its first test, and
+   * nothing in the source says so.
+   */
+  notes?: string[];
   /** Source-level details retained for variable-declaration tooltips. */
   variableDeclarations?: VariableDeclarationDetail[];
   /** The same, for the types a `typeDec` declares - one per name it gives. */
@@ -26,6 +40,33 @@ export interface Construct {
   column: number;
   endLine: number;
   endColumn: number;
+}
+
+/**
+ * One named part of a construct.
+ *
+ * `label` is a key in `strings.ts`, not a phrase: the interpreter says which
+ * clause this is and the interface says it in English, the same arrangement
+ * `TypeDeclarationDetail.nameKind` uses.
+ */
+export interface ConstructClause {
+  label: string;
+  /** The clause as the source spells it. */
+  text: string;
+}
+
+/**
+ * What a `break`, a `continue` or a `return` leaves. A break inside a switch
+ * inside a loop is ambiguous to a reader and unambiguous to the parser, which
+ * is the whole reason this is recorded.
+ */
+export interface EnclosingConstruct {
+  /** The construct kind: `for`, `while`, `switch`, `functionDec`. */
+  kind: string;
+  /** The line it opens on, so a reader can be pointed at it. */
+  line: number;
+  /** Its name, where it has one. */
+  name?: string;
 }
 
 /**
@@ -88,6 +129,18 @@ export interface FunctionDeclarationDetail {
   returnType: string;
   identifier: string;
   parameters: ParameterDetail[];
+  /**
+   * Whether this is a definition - a declaration with a body - or a
+   * declaration that only says the function exists somewhere (6.9.1). The
+   * brace that settles it can be a screen away from the name.
+   */
+  isDefinition: boolean;
+  /**
+   * The storage-class and function specifiers written in front of the return
+   * type: `static`, `extern`, `inline`. They are not part of the type, which
+   * is why `returnType` above does not carry them.
+   */
+  storageClasses: string[];
 }
 
 /**

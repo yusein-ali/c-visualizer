@@ -68,14 +68,32 @@ describe('editor tooltip addresses', () => {
           { identifier: 'c', type: 'enum Color' },
           { identifier: 'values', type: 'const int * const' },
         ],
+        isDefinition: true,
+        storageClasses: ['static'],
       })
     ).toBe(
       'return type: const char *\n' +
         'identifier: label\n' +
         'parameters:\n' +
         '  c: enum Color\n' +
-        '  values: const int * const'
+        '  values: const int * const\n' +
+        'storage class: static\n' +
+        'declares: a definition, with a body'
     );
+  });
+
+  it('tells a declaration with no body from a definition', () => {
+    // A prototype and the definition it belongs to read the same up to the
+    // brace, which can be a screen away from the name being hovered.
+    expect(
+      formatFunctionDeclaration({
+        returnType: 'int',
+        identifier: 'add',
+        parameters: [{ identifier: 'a', type: 'int' }],
+        isDefinition: false,
+        storageClasses: [],
+      })
+    ).toContain('declares: a declaration, with no body');
   });
 
   it('says none for a function that takes no parameters', () => {
@@ -84,8 +102,16 @@ describe('editor tooltip addresses', () => {
         returnType: 'int',
         identifier: 'main',
         parameters: [],
+        isDefinition: true,
+        storageClasses: [],
       })
-    ).toBe('return type: int\nidentifier: main\nparameters: none');
+    ).toBe(
+      'return type: int\n' +
+        'identifier: main\n' +
+        'parameters: none\n' +
+        'storage class: none\n' +
+        'declares: a definition, with a body'
+    );
   });
 
   it('identifies a typedef name without assigning it a storage class', () => {

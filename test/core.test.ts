@@ -147,6 +147,8 @@ describe('extractModel', () => {
       expression: null,
       variables: [],
       inlineValues: [],
+      constructStates: [],
+      evaluations: [],
       codeRange: null,
     });
     expect(extractModel(undefined).stacks).toEqual([]);
@@ -294,6 +296,62 @@ int main(void) {
     expect(argument.children[0]).toMatchObject({ text: 'a', value: '1' });
     expect(argument.value).toBeNull();
   });
+
+  it('expands a call whose arguments are only names or constants', () => {
+    // The window used to appear only where a statement held an operator, so
+    // `twice(i)` and `twice(3)` - the plainest calls there are - drew nothing.
+    // C passes by value, and the copy a call makes of its argument is the
+    // misconception this picture exists to answer.
+    const code = `
+int twice(int n) {
+  return n * 2;
+}
+int main(void) {
+  int i = 4;
+  int a = twice(i);
+  int b = twice(3);
+  return a + b;
+}
+`;
+    const roots = execute(code)
+      .map(extractModel)
+      .filter((model) => model.expression !== null && model.codeRange !== null)
+      .map((model) => ({
+        line: model.codeRange!.begin.y,
+        root: model.expression!.root,
+      }));
+    const named = roots.find((one) => one.line === 7)!;
+    const constant = roots.find((one) => one.line === 8)!;
+    expect(named.root.children[1]).toMatchObject({
+      text: 'twice()',
+      kind: 'operator',
+    });
+    // The argument is worth what it holds going in, which is the point.
+    expect(named.root.children[1].children[0]).toMatchObject({
+      text: 'i',
+      value: '4',
+    });
+    expect(constant.root.children[1].children[0]).toMatchObject({
+      text: '3',
+    });
+  });
+
+  it('leaves a declaration with nothing to expand alone', () => {
+    // A call earns the window for its arguments; a statement with neither an
+    // operator nor a call has no picture to draw, and drawing an empty one
+    // would put a window under every line of a program.
+    const code = `
+int main(void) {
+  int i = 0;
+  return i;
+}
+`;
+    expect(
+      execute(code)
+        .map(extractModel)
+        .every((model) => model.expression === null)
+    ).toBe(true);
+  });
 });
 
 describe('layout', () => {
@@ -419,7 +477,6 @@ describe('view options', () => {
   it('shows everything until something is switched off', () => {
     const view = new ViewOptions();
     expect(view.isRegionShown('text')).toBe(true);
-    expect(view.isExpressionShown()).toBe(true);
 
     view.toggleRegion('text');
     expect(view.isRegionShown('text')).toBe(false);
@@ -428,15 +485,6 @@ describe('view options', () => {
 
     view.showRegion('text', true);
     expect(view.isRegionShown('text')).toBe(true);
-  });
-
-  it('puts the expression away and brings it back', () => {
-    const view = new ViewOptions();
-    view.showExpression(false);
-    expect(view.isExpressionShown()).toBe(false);
-
-    view.clear();
-    expect(view.isExpressionShown()).toBe(true);
   });
 
   it('starts a region holding nothing off the map, and opens what it draws', () => {
@@ -754,6 +802,64 @@ int main(void) {
 
     expect(model.pointers.some((one) => one.from === live.key)).toBe(true);
     expect(model.pointers.some((one) => one.from === dangling.key)).toBe(false);
+  });
+});
+
+describe('a block malloc has just handed back', () => {
+  const code = `#include<stdlib.h>
+struct Point { int x; int y; };
+int main(void) {
+  int* numbers = malloc(sizeof(int) * 2);
+  struct Point* point = malloc(sizeof(struct Point));
+  numbers[0] = 7;
+  (*point).y = 5;
+  return 0;
+}
+`;
+  const states = execute(code);
+  const models = states.map((state) => extractModel(state));
+  /** What every row of the heap band says it holds. */
+  const heapValues = (model: StepModel): string[] =>
+    model.memory
+      .find((segment) => segment.key === 'heap')!
+      .rows.map((row) => row.find((cell) => cell.kind === 'value')!.text);
+  /** The last step at which the heap holds both of the words written into it. */
+  const written = (): StepModel =>
+    modelWith(
+      states,
+      (one) =>
+        heapValues(one).indexOf('7') !== -1 &&
+        heapValues(one).indexOf('5') !== -1
+    );
+
+  it('says the memory is uninitialized rather than showing a number', () => {
+    // The two words of the first block, before the program has written into
+    // either of them. A number here reads as a value something put in the
+    // block, which is the one thing it is not.
+    const model = models.find((one) => heapValues(one).length === 2)!;
+    expect(heapValues(model)).toEqual(['uninitialized', 'uninitialized']);
+  });
+
+  it('holds what the program writes, and says nothing about the rest', () => {
+    const values = heapValues(written());
+    expect(values).toContain('7');
+    expect(values).toContain('5');
+    // `numbers[1]` and the record's other member were never written.
+    expect(values.filter((text) => text === 'uninitialized')).toHaveLength(2);
+  });
+
+  it('leaves a record block able to find its own members', () => {
+    // The word a record's block opens with is the address of its members
+    // rather than one of them: blank that and the arrow from `point` lands on
+    // nothing.
+    const model = written();
+    const value = model.memory
+      .flatMap((segment) => segment.rows)
+      .find((row) =>
+        row.some((cell) => cell.kind === 'name' && cell.text === 'point')
+      )!
+      .find((cell) => cell.kind === 'value')!;
+    expect(model.pointers.some((one) => one.from === value.key)).toBe(true);
   });
 });
 

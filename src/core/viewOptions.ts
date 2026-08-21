@@ -1,7 +1,7 @@
 import { MemoryRegion } from './model';
 
 /**
- * What the reader has asked the canvas to draw.
+ * Which memory regions the reader has asked the canvas to draw.
  *
  * This is the second kind of view state, beside `FoldState`, and it is held
  * apart from it because it answers a different question. A fold says how much
@@ -27,7 +27,6 @@ import { MemoryRegion } from './model';
  */
 export class ViewOptions {
   private readonly chosen = new Map<MemoryRegion, boolean>();
-  private expression = true;
 
   /**
    * Whether the memory map draws this region at all. `whenUntouched` is the
@@ -48,18 +47,8 @@ export class ViewOptions {
     this.showRegion(region, !this.isRegionShown(region, shownNow));
   }
 
-  /** Whether the expansion of the current statement is drawn under the map. */
-  public isExpressionShown(): boolean {
-    return this.expression;
-  }
-
-  public showExpression(shown: boolean): void {
-    this.expression = shown;
-  }
-
   /** Back to what the canvas decides for itself. */
   public clear(): void {
     this.chosen.clear();
-    this.expression = true;
   }
 }

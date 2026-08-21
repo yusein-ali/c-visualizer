@@ -3,6 +3,10 @@ import { Stack } from 'unicoen.ts/dist/interpreter/Engine/Stack';
 import { Variable } from 'unicoen.ts/dist/interpreter/Engine/Variable';
 import { RuntimeDeclarationInfo } from '../interpreter/DeclarationSpecifiers';
 import type { RuntimeStringLiteral } from '../interpreter/RuntimeTypeInfo';
+import {
+  constructStatesOf,
+  evaluationsOf,
+} from '../interpreter/ConstructTrace';
 import { expressionTraceOf } from '../interpreter/ExpressionTrace';
 import { statementNames } from '../interpreter/StatementNames';
 import {
@@ -677,6 +681,8 @@ export function extractModel(execState?: ExecState | null): StepModel {
     expression: withOperandValues(expressionTraceOf(execState), variables),
     variables,
     inlineValues: inlineValuesFor(execState, variables),
+    constructStates: constructStatesOf(execState),
+    evaluations: evaluationsOf(execState),
     codeRange: codeRangeOf(execState),
   };
 }

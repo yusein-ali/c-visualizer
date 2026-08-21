@@ -488,6 +488,8 @@ int main(){ return 0; }`;
         // the places they were written.
         { identifier: 'values', type: 'const int * const' },
       ],
+      isDefinition: true,
+      storageClasses: ['static'],
     });
   });
 
@@ -497,7 +499,13 @@ int main(){ return 0; }`;
     expect(
       found.find((construct) => construct.kind === 'functionDec')!
         .declaredFunction
-    ).toEqual({ returnType: 'int', identifier: 'main', parameters: [] });
+    ).toEqual({
+      returnType: 'int',
+      identifier: 'main',
+      parameters: [],
+      isDefinition: true,
+      storageClasses: [],
+    });
   });
 
   it('answers for the function on the line its definition opens', () => {

@@ -962,7 +962,8 @@ and 10.
 
 ## Phase 12: teaching features
 
-**Status: not started**, by design — see the paragraph below.
+**Status: items 1 to 4 done** — the phase proper. Items 5 to 19 are
+independent of it and of each other, and can be taken in any order or dropped.
 
 Everything before this phase is parity work: the same application on a stack
 that is still supported. This phase is what the new stack was worth changing
@@ -1035,6 +1036,7 @@ it, and can be taken in any order or dropped.
    columns. `lintGutter()` is in the debug array, and the library entry a
    message points at is looked up by the application and formatted by the
    editor - `libraryHelp` stays the one place that knows what `scanf` is.
+
 3. **Runtime diagnostics.** **Done.** The same lint API, raised at the step that goes
    wrong rather than after the run: division by zero, an index past the end of
    an array, a dereference of a pointer with no target, a read of uninitialised
@@ -1063,7 +1065,8 @@ it, and can be taken in any order or dropped.
    own coordinates - the end column names the last character - and the
    application makes it exclusive on the way into the linter, the same
    conversion the step highlight makes.
-4. **A tooltip for every construct, not only for declarations.**
+
+4. **A tooltip for every construct, not only for declarations.** **Done.**
    `constructText` in `src/components/hoverText.ts` formats five kinds richly -
    `variableDec`, `typeDec`, `enumerator`, `recordField`, `functionDec` - and
    every other kind falls through to its label and a detail string that
@@ -1121,6 +1124,49 @@ it, and can be taken in any order or dropped.
    the step it belongs to is the current one; the static description always
    stands on its own, and a stopped session shows no values rather than the last
    run's.
+
+   The static half is in `outline.ts`: `Construct` grew `clauses`, taken from
+   the source the reader wrote rather than the tree printed back; `enclosing`,
+   which is the loop a `continue` restarts and the `switch` a `break` leaves
+   even when a loop is nearer; `notes`, for what is true however the construct
+   runs, such as a `do`-`while` body running before its first test; and, on
+   `FunctionDeclarationDetail`, whether the declaration has a body and which
+   specifiers stand in front of the return type without being part of it. A
+   call's arguments are written beside the parameters they initialise, which is
+   the shortest way to say that C passes by value.
+
+   The runtime half is `src/interpreter/ConstructTrace.ts`, driven by the
+   engine the way `ExpressionTrace.ts` is, and it leaves plain data on the
+   `ExecState`. The engine wraps `execIf`, `execFor`, `execWhile` and
+   `execSwitch` to say what has been entered, and reports every evaluation
+   through `execExpr`; an index built once from the tree turns a node into the
+   construct that was interested in it, so nothing has to know the shape of the
+   forty-odd node classes twice. Two decisions carry the item. A value is
+   spelled the way C leaves it - the engine compares with JavaScript's
+   operators and hands back a boolean, and a reader told that `i < 3` is `true`
+   has learned the wrong language - and the zero/nonzero reading is offered
+   only where the value decides something, never for a `switch`, which selects
+   on a value rather than on whether it is zero. And a fact belongs to a step
+   in one of two ways: a construct the step is _inside_ is live and its
+   counters go on climbing, while a construct that _just finished_ - the call
+   that returned, the assignment that landed - is kept for exactly the one stop
+   that follows, because there is no stop at which a `return` has produced its
+   value and the statement is still the current one. Both are cleared at every
+   stop, so a stopped session says nothing.
+
+   Two things came out differently from the sketch above. Subexpressions do not
+   read the tree Phase 8 renders: that tree carries the statement _about to_
+   run, so its operators have no values yet and never do in a snapshot the
+   reader sees. `StepModel.evaluations` records what the operators of the
+   statement just finished came to, by range, and the tooltip takes the
+   smallest range covering the pointer - the same rule `constructAt` uses one
+   level up. It reports the subexpression and its value, and not its type:
+   `Engine.getType` answers for names, `*`, `[]` and `.` and nothing else, and
+   a type invented for `a * b` would be a lesson a reader could see was wrong.
+   The other is the preprocessor: `Expansion.text` was already the full
+   expansion rather than one step, so what was missing was the middle -
+   `replacement` records the macro's own replacement list where it differs, and
+   the tooltip reads `NEXT → STEP → 3`.
 
 5. **Completion from the program's own symbols.** `completeAnyWord` in
    `PlivetEditor.ts` is a placeholder that completes any word in the buffer,

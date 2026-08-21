@@ -207,12 +207,6 @@
   border-top: 1px solid var(--plivet-graph-grid);
 }
 
-/* The expression is not one of the regions, and the map's own rule for that
-   is a heavier line than the one between two rows of a table. */
-.plivet-graph__config-option--apart {
-  border-top: 1px solid var(--plivet-graph-title);
-}
-
 .plivet-graph__config-option:hover {
   background: var(--plivet-graph-hover);
 }

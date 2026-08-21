@@ -43,7 +43,11 @@ const strings = {
   memoryColumnName: 'Name',
   memoryColumnValue: 'Value',
   memoryEmptySegment: 'empty at this step',
-  expressionEvaluation: 'Expression evaluation',
+  // The two sections of the canvas, in the order they are read: what the
+  // program holds, and what the statement under the marker is doing with it.
+  graphMemoryHeading: 'Memory',
+  graphStatementHeading: 'Statement',
+  statementNotRunning: 'no statement is running',
   howToText: [
     'PVC.js has five GUI components:',
     '(1) editor, (2) execution controller, buttons, (3) I/O window, (4) canvas for visualization, and (5) file upload form.',
@@ -91,6 +95,48 @@ const strings = {
   constructCall: 'function call',
   constructTernary: 'conditional expression',
   constructCast: 'type cast',
+  // The clauses a construct is made of, named as the standard names them.
+  // The key is what the interpreter records; the phrase is what is shown.
+  clauseCondition: 'controlling expression',
+  clauseInitialization: 'initialization',
+  clauseIteration: 'iteration expression',
+  clauseExpression: 'expression',
+  clauseTarget: 'object assigned',
+  clauseTargetType: 'converted to',
+  clauseWhenTrue: 'when nonzero',
+  clauseWhenFalse: 'when zero',
+  clauseArgument: 'argument',
+  // Where a jump goes. A `continue` restarts its loop; everything else leaves
+  // the construct it names.
+  jumpLeaves: 'leaves',
+  jumpRestarts: 'restarts',
+  onLine: 'on line',
+  // What a construct is, beyond what the source spells. A function
+  // declaration and a function definition are different things (6.9.1), and
+  // the difference is a brace the reader has to scroll to see.
+  functionKind: 'declares',
+  functionDefinition: 'a definition, with a body',
+  functionPrototype: 'a declaration, with no body',
+  noteBodyBeforeTest: 'the body runs once before the first test',
+  // What a construct is doing at this step. A fact with no value is a
+  // sentence on its own; one with a value reads as `phrase: value`.
+  factConditionValue: 'evaluates to',
+  factNonzero: 'which C reads as true, because it is not zero',
+  factZero: 'which C reads as false, because it is zero',
+  factBranchThen: 'the branch after `if` is the one running',
+  factBranchElse: 'the `else` branch is the one running',
+  factIterations: 'iterations begun so far',
+  factLabel: 'label selected',
+  factFallsThrough: 'control fell through from an earlier label',
+  factArgument: 'argument',
+  factReturns: 'returns',
+  factWas: 'was',
+  factNow: 'now',
+  factConverted: 'converted',
+  factLoses: 'the conversion did not keep the value',
+  factTimesEntered: 'times entered',
+  factArmNonzero: 'the arm taken when the condition is nonzero',
+  factArmZero: 'the arm taken when the condition is zero',
   branchCompiled: 'this branch is compiled',
   branchSkipped: 'this branch is skipped',
   definedOnLine: 'defined on line',

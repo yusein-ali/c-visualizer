@@ -1,17 +1,20 @@
 import { dia, shapes } from '@joint/core';
 import {
   ArrowGeometry,
+  Geometry,
   MemoryGeometry,
   MemoryRegion,
+  ExpressionModel,
   ExpressionNodeModel,
   FoldState,
+  Point,
   StepModel,
   ViewOptions,
   emptyStepModel,
 } from '../../core';
 import strings from '../../strings';
 import { IconName, iconFor } from '../controls/icons';
-import { graphGeometry, memoryGeometry } from './geometry';
+import { graphGeometry, memoryGeometry, statementSummary } from './geometry';
 import { ViewPanelHandle, viewPanel } from './ViewPanel';
 import { MemoryNode, memoryNodeOf } from './MemoryNode';
 import { StackTable, stackTableOf } from './StackTable';
@@ -24,6 +27,61 @@ export interface PlivetGraphOptions {
 /** How many levels of operands and operators the expression expands into. */
 const depthOf = (node: ExpressionNodeModel): number =>
   node.children.length === 0 ? 0 : 1 + Math.max(...node.children.map(depthOf));
+
+/**
+ * The canvas is two sections read one after the other, each under its own
+ * heading: what the program holds, and what the statement under the step
+ * marker is doing with it. A heading is the same size wherever it appears and
+ * whatever stands under it - it is the name of a section, and a band that grew
+ * and shrank with its contents would read as part of them.
+ */
+const HEADING_WIDTH = 320;
+const HEADING_HEIGHT = 26;
+/** The room between a heading and the section it names. */
+const HEADING_GAP = 10;
+/** The room between the memory map and the statement section under it. */
+const SECTION_GAP = 36;
+/** Where the drawing starts, which is where `layoutMemory` puts the map. */
+const ORIGIN_X = 24;
+const ORIGIN_Y = 24;
+/** What the map has to come down by to leave its own heading room. */
+const MEMORY_DROP = HEADING_HEIGHT + HEADING_GAP;
+
+const lowered = (point: Point, dy: number): Point => ({
+  x: point.x,
+  y: point.y + dy,
+});
+
+/**
+ * The same drawing, further down the page.
+ *
+ * `layoutMemory` starts the map at a fixed origin and knows nothing about
+ * headings, which is right: where a section's name goes is the canvas's
+ * business. Rows and cells are placed against their own node, so only the
+ * nodes and the arrows between them have to move.
+ */
+const loweredArrow = (arrow: ArrowGeometry, dy: number): ArrowGeometry => ({
+  ...arrow,
+  from: lowered(arrow.from, dy),
+  mid: lowered(arrow.mid, dy),
+  to: lowered(arrow.to, dy),
+  vertices: arrow.vertices?.map((vertex) => lowered(vertex, dy)),
+});
+
+const loweredMemory = (memory: MemoryGeometry, dy: number): MemoryGeometry => ({
+  ...memory,
+  height: memory.height + dy,
+  segments: memory.segments.map((segment) => ({
+    ...segment,
+    y: segment.y + dy,
+  })),
+  arrows: memory.arrows.map((arrow) => loweredArrow(arrow, dy)),
+});
+
+const loweredFrames = (frames: Geometry, dy: number): Geometry => ({
+  stacks: frames.stacks.map((stack) => ({ ...stack, y: stack.y + dy })),
+  arrows: frames.arrows.map((arrow) => loweredArrow(arrow, dy)),
+});
 
 const cellNamespace = {
   ...shapes,
@@ -145,14 +203,19 @@ export class PlivetGraph {
     this.model = model;
     // A step that knows its memory is drawn as a memory map; a step that only
     // has call frames - the empty model this starts on - keeps the tables.
-    const memory = memoryGeometry(model, this.folds, this.view);
+    // Both sections come down by the height of the memory heading: the map
+    // now stands under its own name rather than at the top of the paper.
+    const memory = loweredMemory(
+      memoryGeometry(model, this.folds, this.view),
+      MEMORY_DROP
+    );
     this.memory = memory;
     // Which of the two it is, is a question about the model rather than about
     // the geometry: a reader who switches every region off is looking at an
     // empty memory map, not asking for the tables back.
     const frames =
       model.memory.length === 0
-        ? graphGeometry(model, this.folds)
+        ? loweredFrames(graphGeometry(model, this.folds), MEMORY_DROP)
         : { stacks: [], arrows: [] };
     this.contentWidth = frames.stacks.reduce(
       (maximum, stack) => Math.max(maximum, stack.x + stack.width),
@@ -162,21 +225,24 @@ export class PlivetGraph {
       (maximum, stack) => Math.max(maximum, stack.y + stack.height),
       memory.height
     );
-    // The expression window sits under the memory map, not beside it: the two
-    // are read one after the other, and a step is easier to follow when the
-    // memory does not move sideways as the expression grows.
-    const expressionCells = this.view.isExpressionShown()
-      ? this.expressionCells(model, 24, this.contentHeight + 24)
-      : [];
+    // The statement sits under the memory map, not beside it: the two are read
+    // one after the other, and a step is easier to follow when the memory does
+    // not move sideways as the expression under it grows.
+    const statementCells = this.statementCells(
+      model,
+      ORIGIN_X,
+      this.contentHeight + SECTION_GAP
+    );
     this.panel.refresh();
     this.paper.freeze();
     this.graph.resetCells([
+      this.sectionHeading(strings.graphMemoryHeading, ORIGIN_X, ORIGIN_Y),
       ...memory.segments.map(memoryNodeOf),
       ...frames.stacks.map(stackTableOf),
       ...[...memory.arrows, ...frames.arrows].map((arrow) =>
         this.pointerLink(arrow)
       ),
-      ...expressionCells,
+      ...statementCells,
     ]);
     this.resize();
     this.paper.unfreeze();
@@ -227,20 +293,100 @@ export class PlivetGraph {
     return link;
   }
 
-  private expressionCells(
+  /**
+   * A section's name, in a band the same size wherever it stands.
+   *
+   * The heading used to be as wide as the tree under it, so it changed size at
+   * every step and read as the top of the drawing rather than as the name of a
+   * section. A name is not a measurement of what it names.
+   */
+  private sectionHeading(text: string, x: number, y: number): dia.Element {
+    const heading = new shapes.standard.Rectangle({ z: 4 });
+    heading.position(x, y);
+    heading.resize(HEADING_WIDTH, HEADING_HEIGHT);
+    heading.attr({
+      body: { fill: '#26384a', stroke: '#26384a', rx: 4, ry: 4 },
+      label: {
+        text,
+        fill: '#ffffff',
+        fontFamily: 'system-ui, sans-serif',
+        fontSize: 14,
+        fontWeight: 'bold',
+      },
+    });
+    return heading;
+  }
+
+  /**
+   * The second section: what the statement under the step marker is doing.
+   *
+   * Its heading is always drawn, whatever the step is. A section that appeared
+   * and vanished as the program moved from one kind of statement to the next
+   * moved the memory map up and down with it, and a reader following a run
+   * cannot read a page that will not hold still.
+   *
+   * What goes under the heading is the expansion where the statement has one,
+   * and otherwise a line naming the construct the step is inside and what it
+   * is doing - the same records the tooltip reads, so the two never disagree.
+   */
+  private statementCells(
     model: StepModel,
     originX: number,
     originY: number
   ): dia.Cell[] {
-    if (model.expression === null) {
-      return [];
+    const cells: dia.Cell[] = [
+      this.sectionHeading(strings.graphStatementHeading, originX, originY),
+    ];
+    const bodyY = originY + HEADING_HEIGHT + HEADING_GAP;
+    this.contentWidth = Math.max(
+      this.contentWidth,
+      originX + HEADING_WIDTH + ORIGIN_X
+    );
+    this.contentHeight = Math.max(this.contentHeight, bodyY);
+    if (model.expression !== null) {
+      return cells.concat(
+        this.expressionCells(model.expression, originX, bodyY)
+      );
     }
+    return cells.concat(
+      this.statementLine(statementSummary(model), originX, bodyY)
+    );
+  }
+
+  /** One line of prose where there is no tree to draw. */
+  private statementLine(text: string, x: number, y: number): dia.Element {
+    const height = 32;
+    const width = Math.max(HEADING_WIDTH, text.length * 7.4 + 24);
+    const line = new shapes.standard.Rectangle({ z: 4 });
+    line.position(x, y);
+    line.resize(width, height);
+    line.attr({
+      body: { fill: 'none', stroke: 'none' },
+      label: {
+        text,
+        fill: '#3c4a58',
+        fontFamily: 'system-ui, sans-serif',
+        fontSize: 14,
+        textAnchor: 'start',
+        refX: 2,
+        refX2: 0,
+      },
+    });
+    this.contentWidth = Math.max(this.contentWidth, x + width + ORIGIN_X);
+    this.contentHeight = Math.max(this.contentHeight, y + height + ORIGIN_X);
+    return line;
+  }
+
+  private expressionCells(
+    expression: ExpressionModel,
+    originX: number,
+    originY: number
+  ): dia.Cell[] {
     const nodeWidth = 138;
     const nodeHeight = 54;
     const gapX = 18;
     const gapY = 30;
-    const titleHeight = 30;
-    const treeTop = originY + titleHeight + 16;
+    const treeTop = originY;
     const widths = new Map<string, number>();
     const measure = (node: ExpressionNodeModel): number => {
       const width =
@@ -250,7 +396,7 @@ export class PlivetGraph {
       widths.set(node.key, width);
       return width;
     };
-    const totalLeaves = measure(model.expression.root);
+    const totalLeaves = measure(expression.root);
     const cells: dia.Cell[] = [];
     const nodes = new Map<string, shapes.standard.Rectangle>();
 
@@ -301,7 +447,7 @@ export class PlivetGraph {
         childLeft += widths.get(child.key) || 1;
       }
     };
-    place(model.expression.root, 0, 0);
+    place(expression.root, 0, 0);
 
     const connect = (node: ExpressionNodeModel): void => {
       const parent = nodes.get(node.key);
@@ -328,30 +474,19 @@ export class PlivetGraph {
         connect(child);
       }
     };
-    connect(model.expression.root);
+    connect(expression.root);
 
     const treeWidth = Math.max(
       nodeWidth,
       totalLeaves * (nodeWidth + gapX) - gapX
     );
-    const title = new shapes.standard.Rectangle({ z: 4 });
-    title.position(originX, originY);
-    title.resize(treeWidth, titleHeight);
-    title.attr({
-      body: { fill: '#26384a', stroke: '#26384a', rx: 4, ry: 4 },
-      label: {
-        text: strings.expressionEvaluation,
-        fill: '#ffffff',
-        fontFamily: 'system-ui, sans-serif',
-        fontSize: 14,
-        fontWeight: 'bold',
-      },
-    });
-    cells.push(title);
-    this.contentWidth = Math.max(this.contentWidth, originX + treeWidth + 24);
+    this.contentWidth = Math.max(
+      this.contentWidth,
+      originX + treeWidth + ORIGIN_X
+    );
     this.contentHeight = Math.max(
       this.contentHeight,
-      treeTop + (depthOf(model.expression.root) + 1) * (nodeHeight + gapY) + 24
+      treeTop + (depthOf(expression.root) + 1) * (nodeHeight + gapY) + ORIGIN_X
     );
     return cells;
   }

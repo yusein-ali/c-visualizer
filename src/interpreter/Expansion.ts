@@ -28,6 +28,13 @@ export interface Expansion {
   name: string;
   /** What the span became. Empty when the span was dropped. */
   text: string;
+  /**
+   * What the macro's own replacement list put there, before any macro inside
+   * it was expanded in turn. `text` is the end of that chain; this is the step
+   * that leads to it, and it is only recorded when the two differ - a macro
+   * defined in terms of another otherwise has to be unfolded by hand.
+   */
+  replacement?: string;
   /** Line of the directive that defined the macro, when there is one. */
   definedAt?: number;
   /**
