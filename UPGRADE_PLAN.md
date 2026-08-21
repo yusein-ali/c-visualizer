@@ -1384,9 +1384,18 @@ it, and can be taken in any order or dropped.
     works out on its own, so the heading always has something under it.
 
     The canvas reads those records as a teaching card: the construct name and
-    current line lead, then its clauses, runtime result and meaning in C form one
-    full-width prose explanation rather than a stack of table cells. Produced
-    values form a named subsection when the separate expression tree is hidden.
+    current line lead, then its clauses, runtime result and meaning in C stay in
+    one full-width explanation cell rather than a stack of table cells. Every
+    `if`/`else`, `switch` and `for` clause, function-call fact and
+    declaration fact preserves the tooltip's separate line. Produced values
+    form a named subsection when the separate expression tree is hidden. The
+    transition step on which a loop's controlling expression becomes false
+    stays with that loop long enough to show the `0` that made control leave;
+    the following step then names the following statement.
+    Assignment explanations put the source target, assigned expression,
+    resolved target, previous value and stored value on separate lines. A
+    computed target such as `arr[i]` is also shown as `arr[2]` whenever `i` is
+    known to be 2 at that step.
 
 14. **A view of the call stack.** **Done.** The call stack is drawn beside the
     statement with the same slate disclosure heading and an independent fold,
@@ -1413,6 +1422,9 @@ it, and can be taken in any order or dropped.
     writes, and rides every state by reference with the length it had at that
     step beside it - so attaching it costs a step nothing, and stepping back
     shows the log as it stood rather than a future the reader has not reached.
+    Assignment operators and unary `++`/`--` updates both enter the log;
+    postfix updates use the value stored in the object, not the older value the
+    expression itself produces.
 16. **A control panel for the views.** **Done.** One View disclosure in the
     canvas toolbar controls Statement, Call stack, Expression expansion,
     Memory and Variables over time together with the individual memory regions.

@@ -624,7 +624,47 @@ export class HoverTextSource {
           ? []
           : [jumpFact(construct.kind, enclosing)]
       );
-    return said.concat(this.runtimeFacts(construct));
+    const runtime = this.runtimeFacts(construct);
+    return said
+      .concat(this.resolvedAssignmentFacts(construct, runtime))
+      .concat(runtime);
+  }
+
+  /**
+   * Make an indexed target concrete from the values visible before it runs.
+   * The source spelling remains first (`arr[i]`); this adds `arr[2]` when `i`
+   * is a scalar integer in the current frame. Runtime tracing supplies the
+   * same fact after execution, so it is not repeated when already present.
+   */
+  private resolvedAssignmentFacts(
+    construct: Construct,
+    runtime: HoverFact[]
+  ): HoverFact[] {
+    if (
+      construct.kind !== 'assignment' ||
+      runtime.some((item) => item.label === strings.factResolvedTarget)
+    ) {
+      return [];
+    }
+    const target = (construct.clauses ?? []).find(
+      (clause) => clause.label === 'clauseTarget'
+    )?.text;
+    if (typeof target === 'undefined') {
+      return [];
+    }
+    let changed = false;
+    const resolved = target.replace(
+      /\[\s*([A-Za-z_]\w*)\s*\]/g,
+      (whole, name) => {
+        const variable = this.variableNamed(String(name));
+        if (variable === null || !/^-?\d+$/.test(variable.value)) {
+          return whole;
+        }
+        changed = true;
+        return `[${variable.value}]`;
+      }
+    );
+    return changed ? [fact(strings.factResolvedTarget, resolved, true)] : [];
   }
 
   /** What this construct is doing at this step, if it is doing anything. */

@@ -107,11 +107,14 @@ interface Marker {
     | 'returned'
     | 'trueArm'
     | 'falseArm'
+    | 'targetPart'
     | 'assigned';
   /** Which argument this is, for `argument`. */
   index?: number;
   /** Which label this statement belongs to, for `case`. */
   label?: string;
+  /** Which computed part of an assignment target this value resolves. */
+  part?: object;
 }
 
 /**
@@ -130,9 +133,13 @@ const MUTATION_LIMIT = 500;
  * program is written against. Anything it cannot spell says nothing, because
  * a wrong name in a log of writes is worse than a missing one.
  */
-const targetText = (node: unknown): string => {
+const targetText = (node: unknown, values?: Map<object, string>): string => {
   if (node === null || typeof node !== 'object') {
     return '';
+  }
+  const evaluated = values?.get(node);
+  if (typeof evaluated !== 'undefined') {
+    return evaluated;
   }
   if (node instanceof UniIdent) {
     return node.name;
@@ -142,12 +149,12 @@ const targetText = (node: unknown): string => {
     return typeof first === 'undefined' ? '' : String(first.name ?? '');
   }
   if (node instanceof UniUnaryOp) {
-    const inner = targetText(node.expr);
+    const inner = targetText(node.expr, values);
     return inner === '' ? '' : `${node.operator}${inner}`;
   }
   if (node instanceof UniBinOp) {
-    const left = targetText(node.left);
-    const right = targetText(node.right);
+    const left = targetText(node.left, values);
+    const right = targetText(node.right, values);
     if (left === '') {
       return '';
     }
@@ -157,7 +164,15 @@ const targetText = (node: unknown): string => {
     if (node.operator === '.' || node.operator === '->') {
       return `${left}${node.operator}${right}`;
     }
-    return '';
+    return right === '' ? '' : `${left} ${node.operator} ${right}`;
+  }
+  const literal = (node as { value?: unknown }).value;
+  if (
+    typeof literal === 'string' ||
+    typeof literal === 'number' ||
+    typeof literal === 'boolean'
+  ) {
+    return String(literal);
   }
   return '';
 };
@@ -182,6 +197,12 @@ interface Activation {
   source?: string;
   /** For an assignment: the object it writes, as the source names it. */
   target?: string;
+  /** The assignment target's AST while its computed parts are evaluated. */
+  targetNode?: object;
+  /** Values such as `i = 2` that make `arr[i]` a concrete object. */
+  targetValues: Map<object, string>;
+  /** The target after substituting values known during this execution. */
+  resolvedTarget?: string;
   /** For a `functionDec`: the function's own name. */
   name?: string;
   /** What an assignment's target held before the assignment. */
@@ -215,6 +236,9 @@ const BEFORE: Marker['role'][] = [
   'case',
   'assigned',
 ];
+
+/** Unary operators that write a new value back to their operand. */
+const UPDATE_OPERATORS = ['++', '--', '_++', '++_', '_--', '--_'];
 
 const rangeOf = (node: any): CodeRangeModel | null => {
   const range = node === null ? null : node.codeRange;
@@ -360,6 +384,12 @@ function factsOf(activation: Activation): ConstructFactModel[] {
     });
   }
   if (typeof activation.before !== 'undefined') {
+    if (typeof activation.resolvedTarget !== 'undefined') {
+      facts.push({
+        label: 'factResolvedTarget',
+        value: activation.resolvedTarget,
+      });
+    }
     facts.push({ label: 'factWas', value: activation.before });
   }
   if (typeof activation.result === 'undefined') {
@@ -555,14 +585,18 @@ export class ConstructRecorder {
       } else if (marker.role === 'source') {
         activation.source = spelled;
       } else if (
-        marker.role === 'result' ||
-        marker.role === 'returned' ||
-        marker.role === 'assigned'
+        marker.role === 'targetPart' &&
+        typeof marker.part !== 'undefined'
       ) {
+        activation.targetValues.set(marker.part, spelled);
+      } else if (marker.role === 'result' || marker.role === 'returned') {
         activation.result = spelled;
-        if (marker.role === 'assigned') {
-          this.wrote(activation);
-        }
+      } else if (marker.role === 'assigned') {
+        // `i++` evaluates to the old value but stores the new one. The engine's
+        // assignment hook records the value read back from storage first; a
+        // plain assignment falls back to its expression result here.
+        activation.result ??= spelled;
+        this.wrote(activation);
       } else if (marker.role === 'argument') {
         const index = marker.index ?? 0;
         activation.args[index] = spelled;
@@ -578,10 +612,35 @@ export class ConstructRecorder {
    * assignment itself never evaluates its target - the engine takes its
    * address instead - so this is the one place the previous value is in hand.
    */
-  assigns(previous: unknown): void {
+  assigns(previous: unknown, uninitialized = false): void {
     const activation = this.assigning[this.assigning.length - 1];
-    if (typeof activation !== 'undefined' && typeof previous !== 'undefined') {
+    if (typeof activation === 'undefined') {
+      return;
+    }
+    if (uninitialized || typeof previous === 'undefined') {
+      activation.before = 'uninitialized';
+    } else {
       activation.before = spell(previous);
+    }
+  }
+
+  /** What a successful write left in its target. */
+  assigned(value: unknown): void {
+    const activation = this.assigning[this.assigning.length - 1];
+    if (typeof activation !== 'undefined') {
+      activation.result = spell(value);
+      if (
+        typeof activation.targetNode !== 'undefined' &&
+        0 < activation.targetValues.size
+      ) {
+        const resolved = targetText(
+          activation.targetNode,
+          activation.targetValues
+        );
+        if (resolved !== '' && resolved !== activation.target) {
+          activation.resolvedTarget = resolved;
+        }
+      }
     }
   }
 
@@ -667,12 +726,21 @@ export class ConstructRecorder {
       labels: [],
       args: [],
       parameters: [],
+      targetValues: new Map<object, string>(),
     };
     if (kind === 'functionDec') {
       activation.name = String((node as { name?: unknown }).name ?? '');
     }
     if (kind === 'assignment') {
-      activation.target = targetText((node as { left?: unknown }).left ?? node);
+      const target =
+        node instanceof UniUnaryOp &&
+        UPDATE_OPERATORS.indexOf(node.operator) !== -1
+          ? node.expr
+          : ((node as { left?: unknown }).left ?? node);
+      activation.target = targetText(target);
+      if (target !== null && typeof target === 'object') {
+        activation.targetNode = target;
+      }
     }
     return activation;
   }
@@ -686,7 +754,7 @@ export class ConstructRecorder {
    * by-value passing said as a fact rather than as a warning.
    */
   private wrote(activation: Activation): void {
-    const target = activation.target ?? '';
+    const target = activation.resolvedTarget ?? activation.target ?? '';
     if (target === '' || typeof activation.result === 'undefined') {
       return;
     }
@@ -870,13 +938,45 @@ export class ConstructRecorder {
       });
       return;
     }
-    if (node instanceof UniBinOp && ASSIGNMENT.test(node.operator)) {
+    if (
+      node instanceof UniBinOp &&
+      (ASSIGNMENT.test(node.operator) ||
+        UPDATE_OPERATORS.indexOf(node.operator) !== -1)
+    ) {
+      this.indexTargetParts(node, node.left);
+      this.mark(node, {
+        owner: node,
+        kind: 'assignment',
+        role: 'assigned',
+      });
+      return;
+    }
+    if (
+      node instanceof UniUnaryOp &&
+      UPDATE_OPERATORS.indexOf(node.operator) !== -1
+    ) {
       this.mark(node, {
         owner: node,
         kind: 'assignment',
         role: 'assigned',
       });
     }
+  }
+
+  /** Record the values that make a computed lvalue concrete at runtime. */
+  private indexTargetParts(owner: object, target: unknown): void {
+    if (!(target instanceof UniBinOp)) {
+      return;
+    }
+    if (target.operator === '[]') {
+      this.mark(target.right, {
+        owner,
+        kind: 'assignment',
+        role: 'targetPart',
+        part: target.right,
+      });
+    }
+    this.indexTargetParts(owner, target.left);
   }
 }
 

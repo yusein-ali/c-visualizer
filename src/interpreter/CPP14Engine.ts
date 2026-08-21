@@ -1092,17 +1092,22 @@ export class PlivetCPP14Engine extends CPP14Engine {
   }
 
   protected execAssign(address: number, value: any, scope: Scope): any {
-    this.constructs.assigns(this.valueAt(address, scope));
+    this.constructs.assigns(
+      this.valueAt(address, scope),
+      this.unwritten.has(address)
+    );
     this.noteWrite(address);
     const info = this.declarationInfoByAddress.get(address);
     const type = scope.getRawType(address);
     if (info !== undefined && this.constBindsObject(info, type)) {
       this.refuse('read-only-assignment', 'assignment of a read-only variable');
     }
-    if (type.indexOf('*') === -1 && this.tableFor(type) !== null) {
-      return this.copyRecord(type, address, value, scope);
-    }
-    return super.execAssign(address, value, scope);
+    const result =
+      type.indexOf('*') === -1 && this.tableFor(type) !== null
+        ? this.copyRecord(type, address, value, scope)
+        : super.execAssign(address, value, scope);
+    this.constructs.assigned(this.valueAt(address, scope));
+    return result;
   }
 
   protected includeStdio(global: Scope): void {
@@ -1519,10 +1524,30 @@ export class PlivetCPP14Engine extends CPP14Engine {
     );
   }
 
+  /** The scalar cells belonging to an uninitialized record object. */
+  private noteUnwrittenRecord(type: string, address: number): void {
+    const table = this.tableFor(type);
+    const layout = table?.layoutOf(type) ?? null;
+    const members = table?.membersOf(type) ?? null;
+    if (layout === null || members === null) {
+      return;
+    }
+    for (const member of members) {
+      const field = layout.get(member.name);
+      if (typeof field === 'undefined') {
+        continue;
+      }
+      const memberAddress = address + Engine.structInfoSize + field[0];
+      this.unwritten.add(memberAddress);
+      this.noteUnwrittenRecord(member.type, memberAddress);
+    }
+  }
+
   /**
-   * The locals a declaration leaves empty. An array is left out - a partly
-   * filled one is ordinary C - and so is anything with static storage, which
-   * the standard fills with zero before the program starts.
+   * The local objects a declaration leaves empty. Each array element and
+   * record member is tracked separately: writing `values[1]` initializes that
+   * object, not its neighbours. Static storage is omitted because C fills it
+   * with zero before the program starts.
    */
   private noteDeclaration(decVar: UniVariableDec, scope: Scope): void {
     if (
@@ -1533,18 +1558,37 @@ export class PlivetCPP14Engine extends CPP14Engine {
     ) {
       return;
     }
-    if (this.tableFor(decVar.type) !== null) {
-      return;
-    }
     for (const def of decVar.variables) {
-      if (def.value !== null || def.typeSuffix !== null) {
+      if (def.value !== null) {
         continue;
       }
       const name = def.name.replace(/^[*&]+/, '');
-      try {
-        this.unwritten.add(scope.getAddress(name));
-      } catch {
-        // A declaration the scope did not take is not one to watch.
+      const address = scope.variableAddress.get(name);
+      if (typeof address === 'undefined') {
+        continue;
+      }
+      if (def.typeSuffix === null || def.typeSuffix === '') {
+        this.unwritten.add(address);
+        this.noteUnwrittenRecord(decVar.type, address);
+        continue;
+      }
+      const recordArray = this.recordArrays.get(address);
+      if (typeof recordArray !== 'undefined') {
+        for (const descriptor of recordArray.descriptors) {
+          this.unwritten.add(descriptor);
+          this.noteUnwrittenRecord(decVar.type, descriptor);
+        }
+        continue;
+      }
+      const first = scope.objectOnMemory.get(address);
+      if (typeof first !== 'number') {
+        continue;
+      }
+      const dimensions = scope.getArrayDims(def.typeSuffix);
+      const count = dimensions.reduce((total, length) => total * length, 1);
+      const elementSize = Engine.sizeof(decVar.type);
+      for (let element = 0; element < count; element += 1) {
+        this.unwritten.add(first + element * elementSize);
       }
     }
   }

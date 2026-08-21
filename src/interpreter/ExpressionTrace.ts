@@ -25,6 +25,9 @@ interface StateWithExpression extends ExecState {
 /** C's assignment operators (6.5.16), which `ConstructTrace` reads too. */
 export const ASSIGNMENT = /^(?:=|\+=|-=|\*=|\/=|%=|<<=|>>=|&=|\|=|\^=)$/;
 
+/** The mapper represents postfix updates as binary nodes with no right side. */
+const POSTFIX_UPDATE = /^(?:\+\+|--)$/;
+
 /**
  * Leaves a plain tree of the statement about to run on each execution
  * snapshot.
@@ -147,7 +150,9 @@ function nodeOf(
 
 function childrenOf(expression: UniExpr): UniExpr[] {
   if (expression instanceof UniBinOp) {
-    return [expression.left, expression.right];
+    return POSTFIX_UPDATE.test(expression.operator)
+      ? [expression.left]
+      : [expression.left, expression.right];
   }
   if (expression instanceof UniTernaryOp) {
     return [expression.cond, expression.trueExpr, expression.falseExpr];

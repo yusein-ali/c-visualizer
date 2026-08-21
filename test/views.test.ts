@@ -87,6 +87,49 @@ describe('variables over time under the canvas', () => {
     expect(outside[outside.length - 1].after).toBe('2');
   });
 
+  it('records every increment made by a preprocessed for loop', () => {
+    // S5 hands the visualizer ordinary preprocessed C; this is the loop shape
+    // used by those exercises after preprocessing.
+    const loop = stepsOf(`int main(void) {
+  for (int i = 0; i < 4; i++) {
+  }
+  return 0;
+}`);
+    const updates = loop[loop.length - 1].mutations.filter(
+      (mutation) => mutation.target === 'i'
+    );
+
+    expect(updates.map(({ before, after }) => ({ before, after }))).toEqual([
+      { before: '0', after: '1' },
+      { before: '1', after: '2' },
+      { before: '2', after: '3' },
+      { before: '3', after: '4' },
+    ]);
+    expect(updates.every((mutation) => mutation.frame === 'main')).toBe(true);
+  });
+
+  it('records the stored value of prefix and postfix updates', () => {
+    const updated = stepsOf(`int main(void) {
+  int i = 1;
+  i++;
+  ++i;
+  i--;
+  --i;
+  return i;
+}`);
+
+    expect(
+      updated[updated.length - 1].mutations
+        .filter((mutation) => mutation.target === 'i')
+        .map(({ before, after }) => ({ before, after }))
+    ).toEqual([
+      { before: '1', after: '2' },
+      { before: '2', after: '3' },
+      { before: '3', after: '2' },
+      { before: '2', after: '1' },
+    ]);
+  });
+
   it('never shows writes from a future step', () => {
     expect(stepOn(6).mutations.length).toBeLessThan(
       steps[steps.length - 1].mutations.length

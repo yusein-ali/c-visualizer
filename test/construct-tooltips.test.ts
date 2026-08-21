@@ -225,6 +225,69 @@ describe('what a construct is doing', () => {
     ]);
   });
 
+  it('calls an unwritten assignment target uninitialized, not its raw bytes', () => {
+    const code = `#define STORE(object, value) object = value
+struct Pair { int first; };
+int main(void) {
+  int scalar;
+  int values[2];
+  struct Pair pair;
+  STORE(scalar, 7);
+  STORE(values[1], 9);
+  STORE(pair.first, 11);
+  STORE(scalar, 8);
+  return scalar + values[1] + pair.first;
+}`;
+    const writes = stepsOf(code)
+      .flatMap((step) => step.constructStates)
+      .filter((state) => state.kind === 'assignment')
+      .map((state) => state.facts.map((fact) => `${fact.label}=${fact.value}`));
+
+    expect(writes).toContainEqual(['factWas=uninitialized', 'factNow=7']);
+    expect(writes).toContainEqual(['factWas=uninitialized', 'factNow=9']);
+    expect(writes).toContainEqual(['factWas=uninitialized', 'factNow=11']);
+    expect(writes).toContainEqual(['factWas=7', 'factNow=8']);
+  });
+
+  it('resolves an indexed object with the index value used for the write', () => {
+    const code = `int main(void) {
+  int arr[4] = {0};
+  int i = 2;
+  arr[i] = 7;
+  return arr[2];
+}`;
+    const run = stepsOf(code);
+    const after = run.find((step) =>
+      step.constructStates.some(
+        (state) =>
+          state.kind === 'assignment' &&
+          state.facts.some(
+            (item) =>
+              item.label === 'factResolvedTarget' && item.value === 'arr[2]'
+          )
+      )
+    )!;
+
+    expect(factsFor(after, 'assignment', 4)).toEqual([
+      'factResolvedTarget=arr[2]',
+      'factWas=0',
+      'factNow=7',
+    ]);
+    const before = stepOn(run, 4);
+    const source = new HoverTextSource();
+    source.setConstructs(constructsOf(code));
+    source.setStep(before);
+    expect(linesOf(source.explainStatement(code).statement)).toBe(
+      [
+        'assignment statement',
+        'assigned object: arr[i]',
+        'assigned value: 7',
+        'assigned object at this step: arr[2]',
+      ].join('\n')
+    );
+    expect(after.mutations.at(-1)?.target).toBe('arr[2]');
+  });
+
   it('names the label a switch selected, and when control fell into it', () => {
     expect(factsFor(stepOn(steps, 14), 'switch', 11)).toEqual([
       'factConditionValue=6',
