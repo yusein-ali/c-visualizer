@@ -91,6 +91,73 @@ describe('what the statement section says', () => {
     );
   });
 
+  it('keeps every phase of the for header attached to the for statement', () => {
+    const headerSteps = steps.filter(
+      (step) =>
+        step.expression?.range.begin.y === 6 || step.codeRange?.begin.y === 6
+    );
+
+    expect(headerSteps.length).toBeGreaterThan(1);
+    expect(
+      headerSteps.map(
+        (step) => explaining(PROGRAM, step).statement?.title ?? null
+      )
+    ).toEqual(headerSteps.map(() => 'for loop'));
+  });
+
+  it('does not call an assignment in a for header an assignment statement', () => {
+    const code = `int main(void) {
+  int i = 0;
+  for (i = 0; i < 3; i = i + 1) {
+  }
+  return i;
+}`;
+    const loopSteps = stepsOf(code).filter(
+      (step) =>
+        step.expression?.range.begin.y === 3 || step.codeRange?.begin.y === 3
+    );
+
+    expect(loopSteps.length).toBeGreaterThan(1);
+    expect(
+      loopSteps.map((step) => explaining(code, step).statement?.title ?? null)
+    ).toEqual(loopSteps.map(() => 'for loop'));
+  });
+
+  it('shows the false condition on the step where a for loop exits', () => {
+    const code = `int main(void) {
+  int i = 0;
+  for (i = 0; i < 4; i = i + 1) {
+  }
+  return i;
+}`;
+    const run = stepsOf(code);
+    const exited = run.find(
+      (step) =>
+        step.variables.some(
+          (variable) => variable.name === 'i' && variable.value === '4'
+        ) &&
+        step.constructStates.some(
+          (state) =>
+            state.kind === 'for' &&
+            state.facts.some(
+              (fact) =>
+                fact.label === 'factConditionValue' && fact.value === '0'
+            )
+        )
+    )!;
+    const explanation = explaining(code, exited);
+    const card = statementCard(exited, explanation, false);
+
+    expect(explanation.statement?.title).toBe('for loop');
+    expect(card.context).toBe(
+      'Loop exited after evaluating its controlling expression on line 3'
+    );
+    expect(card.description).toContain('Evaluates to: 0');
+    expect(card.description).toContain(
+      'C reads the evaluated expression as false because it is zero.'
+    );
+  });
+
   it('reads the same records the tooltip reads', () => {
     // Not a second description of the construct: the same one, gathered.
     const step = stepOn(steps, 6);

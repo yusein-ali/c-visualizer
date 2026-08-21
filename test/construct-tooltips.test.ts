@@ -124,7 +124,9 @@ describe('what a construct is', () => {
     )!;
 
   it('names the three clauses of a for loop as the standard names them', () => {
-    expect(at('for', 5).clauses).toEqual([
+    expect(
+      at('for', 5).clauses?.map(({ label, text }) => ({ label, text }))
+    ).toEqual([
       { label: 'clauseInitialization', text: 'int i = 0' },
       { label: 'clauseCondition', text: 'i < 3' },
       { label: 'clauseIteration', text: 'i++' },

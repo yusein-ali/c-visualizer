@@ -53,6 +53,11 @@ export interface ConstructClause {
   label: string;
   /** The clause as the source spells it. */
   text: string;
+  /** Where the clause is written, so a statement view can name its owner. */
+  range?: {
+    begin: { x: number; y: number };
+    end: { x: number; y: number };
+  };
 }
 
 /**

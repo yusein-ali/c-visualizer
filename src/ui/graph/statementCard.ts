@@ -180,7 +180,9 @@ export function statementCard(
   const title = sentenceCase(explanation.statement.title);
   return {
     title,
-    context: line === null ? '' : `${strings.statementOnLine} ${line}`,
+    context:
+      explanation.context ??
+      (line === null ? '' : `${strings.statementOnLine} ${line}`),
     description: descriptionOf(title, explanation.statement.facts),
     values: includeValues
       ? explanation.parts.map((part) => ({

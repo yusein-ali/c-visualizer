@@ -810,7 +810,20 @@ function clausesOf(
       : '';
   const clause = (label: string, child: any): ConstructClause[] => {
     const text = written(child);
-    return text === '' ? [] : [{ label, text }];
+    if (text === '') {
+      return [];
+    }
+    const range = child.codeRange;
+    return [
+      {
+        label,
+        text,
+        range: {
+          begin: { x: range.begin.x, y: range.begin.y },
+          end: { x: range.end.x, y: range.end.y },
+        },
+      },
+    ];
   };
   switch (kind) {
     case 'if':

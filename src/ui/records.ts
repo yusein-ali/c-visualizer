@@ -52,6 +52,8 @@ export interface Explanation {
  */
 export interface StatementExplanation {
   statement: Explanation | null;
+  /** A transition-specific context that replaces "currently executing". */
+  context?: string;
   /** The subexpressions that have a value, in the order they are written. */
   parts: Explanation[];
 }

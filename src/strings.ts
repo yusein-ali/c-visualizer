@@ -80,6 +80,8 @@ const strings = {
   statementCurrent: 'Current statement',
   statementNoActive: 'No active statement',
   statementOnLine: 'Currently executing on line',
+  statementLoopExitedOnLine:
+    'Loop exited after evaluating its controlling expression on line',
   statementStartHint:
     'Start or step through the program to see what the current statement does.',
   statementWith: 'with',

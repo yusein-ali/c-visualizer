@@ -221,6 +221,38 @@ const jumpFact = (kind: string, enclosing: EnclosingConstruct): HoverFact => {
 const nameOfKind = (kind: string): string =>
   stringFor(`construct${kind.charAt(0).toUpperCase()}${kind.slice(1)}`);
 
+/**
+ * The construct the canvas should name for the current statement.
+ *
+ * A hover asks for the smallest construct under the pointer, but a stop in a
+ * `for` initializer, condition or iteration expression is a stop in the loop
+ * header as a whole. Prefer that owning loop only while the marker is inside
+ * one of its recorded clause ranges; an assignment in a one-line loop body
+ * therefore remains an assignment.
+ */
+const statementConstructAt = (
+  constructs: Construct[],
+  range: CodeRangeModel
+): Construct | null => {
+  let found: Construct | null = null;
+  const size = (construct: Construct): number =>
+    (construct.endLine - construct.line) * 1000 +
+    (construct.endColumn - construct.column);
+  for (const construct of constructs) {
+    const ownsHeader =
+      construct.kind === 'for' &&
+      (construct.clauses ?? []).some(
+        (clause) =>
+          typeof clause.range !== 'undefined' &&
+          rangeCovers(clause.range, range.begin.y, range.begin.x)
+      );
+    if (ownsHeader && (found === null || size(construct) < size(found))) {
+      found = construct;
+    }
+  }
+  return found ?? constructAt(constructs, range.begin.y, range.begin.x);
+};
+
 export class HoverTextSource {
   private expansions: Expansion[] = [];
   private constructs: Construct[] = [];
@@ -315,20 +347,74 @@ export class HoverTextSource {
     // interpreter's yield hook, so it is the strongest statement identity we
     // have. Falling back to the marker keeps simple, unexpanded statements.
     const range = this.expression?.range ?? this.codeRange;
+    const exited = this.exitedLoopRecord();
+    if (exited !== null) {
+      return {
+        statement: this.constructRecord(exited.construct),
+        context: `${strings.statementLoopExitedOnLine} ${exited.conditionLine}`,
+        parts: [],
+      };
+    }
     if (range === null) {
       return emptyStatementExplanation();
     }
-    const construct = constructAt(
-      this.constructs,
-      range.begin.y,
-      range.begin.x
-    );
+    const construct = statementConstructAt(this.constructs, range);
     return {
       statement:
         construct === null
           ? this.constructStateRecord(range)
           : this.constructRecord(construct),
       parts: this.expressionParts(source),
+    };
+  }
+
+  /**
+   * A false loop test finishes between two visible stops. At the first stop on
+   * the following statement its activation is still attached, specifically so
+   * the reader can see why control left the loop; on the next stop it is gone.
+   */
+  private exitedLoopRecord(): {
+    construct: Construct;
+    conditionLine: number;
+  } | null {
+    if (this.expression !== null) {
+      return null;
+    }
+    let found: Construct | null = null;
+    const size = (construct: Construct): number =>
+      (construct.endLine - construct.line) * 1000 +
+      (construct.endColumn - construct.column);
+    for (const state of this.constructStates) {
+      const isExitedLoop =
+        (state.kind === 'for' ||
+          state.kind === 'while' ||
+          state.kind === 'doWhile') &&
+        state.facts.some((fact) => fact.label === 'factZero');
+      if (!isExitedLoop) {
+        continue;
+      }
+      const construct = this.constructs.find(
+        (one) =>
+          one.kind === state.kind &&
+          one.line === state.range.begin.y &&
+          one.column === state.range.begin.x
+      );
+      if (
+        typeof construct !== 'undefined' &&
+        (found === null || size(construct) < size(found))
+      ) {
+        found = construct;
+      }
+    }
+    if (found === null) {
+      return null;
+    }
+    const condition = (found.clauses ?? []).find(
+      (clause) => clause.label === 'clauseCondition'
+    );
+    return {
+      construct: found,
+      conditionLine: condition?.range?.begin.y ?? found.line,
     };
   }
 
