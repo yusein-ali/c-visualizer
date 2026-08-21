@@ -1,4 +1,7 @@
-import { leftAlignedLabel } from '../src/ui/graph/PlivetGraph';
+import {
+  leftAlignedLabel,
+  wrappedTextHeight,
+} from '../src/ui/graph/PlivetGraph';
 
 describe('the textual canvas sections', () => {
   it('overrides both centered JointJS coordinates', () => {
@@ -8,5 +11,9 @@ describe('the textual canvas sections', () => {
       textAnchor: 'start',
       textVerticalAnchor: 'middle',
     });
+  });
+
+  it('gives every explicit fact line its own vertical space', () => {
+    expect(wrappedTextHeight('one\ntwo\nthree\nfour\nfive', 480, 58)).toBe(102);
   });
 });

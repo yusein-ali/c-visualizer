@@ -93,6 +93,22 @@ export const leftAlignedLabel = (x: number, height: number) => ({
   textVerticalAnchor: 'middle' as const,
 });
 
+/** Height for wrapped text, respecting lines that carry separate facts. */
+export const wrappedTextHeight = (
+  text: string,
+  width: number,
+  minimum: number
+): number => {
+  const characters = Math.max(1, Math.floor((width - 20) / 7.2));
+  const renderedLines = text
+    .split('\n')
+    .reduce(
+      (count, line) => count + Math.max(1, Math.ceil(line.length / characters)),
+      0
+    );
+  return Math.max(minimum, renderedLines * 18 + 12);
+};
+
 type CanvasSection = 'statement' | 'callStack' | 'expression' | 'memory';
 
 const lowered = (point: Point, dy: number): Point => ({
@@ -868,8 +884,7 @@ export class PlivetGraph {
   }
 
   private cardTextHeight(text: string, width: number, minimum: number): number {
-    const characters = Math.max(1, Math.floor((width - 20) / 7.2));
-    return Math.max(minimum, Math.ceil(text.length / characters) * 18 + 12);
+    return wrappedTextHeight(text, width, minimum);
   }
 
   private cardCell(

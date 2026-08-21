@@ -13,7 +13,7 @@ export interface StatementCardRow {
 export interface StatementCardModel {
   title: string;
   context: string;
-  /** The construct and all of its facts, read as one continuous explanation. */
+  /** The construct and all of its facts, kept inside one explanation cell. */
   description: string;
   values: StatementCardRow[];
 }
@@ -24,7 +24,22 @@ const sentenceCase = (text: string): string =>
 const finishSentence = (text: string): string =>
   /[.!?]$/.test(text) ? text : `${text}.`;
 
-const code = (text: string): string => `\`${text}\``;
+/** Tooltip records mark code with backticks; the canvas has no Markdown pass. */
+const plainText = (text: string): string => text.replace(/`/g, '');
+
+const sentenceLabel = (label: string): string =>
+  label === strings.factNonzero
+    ? strings.statementReadsNonzero
+    : label === strings.factZero
+      ? strings.statementReadsZero
+      : sentenceCase(plainText(label));
+
+const factLine = (
+  fact: NonNullable<StatementExplanation['statement']>['facts'][number]
+): string =>
+  fact.value === ''
+    ? finishSentence(sentenceLabel(fact.label))
+    : `${sentenceLabel(fact.label)}: ${plainText(fact.value)}`;
 
 /** A list that reads as prose rather than as columns in a data table. */
 const list = (parts: string[]): string => {
@@ -38,12 +53,11 @@ const list = (parts: string[]): string => {
 };
 
 /**
- * Reads a structured tooltip record as a short paragraph for the canvas.
+ * Reads a structured tooltip record inside one cell on the canvas.
  *
- * The tooltip keeps its rows because it answers one precise hover. Here the
- * reader is following a whole statement, so borders between the clause, its
- * result and the meaning C gives that result only break one explanation into
- * unrelated-looking pieces.
+ * Every part of a control-flow statement, function call, assignment and
+ * declaration stays on the separate line the tooltip gives it, even though
+ * those lines share one outer cell.
  */
 const descriptionOf = (
   title: string,
@@ -55,6 +69,7 @@ const descriptionOf = (
     strings.clauseIteration,
     strings.clauseExpression,
     strings.clauseTarget,
+    strings.clauseAssignedValue,
     strings.clauseTargetType,
     strings.clauseWhenTrue,
     strings.clauseWhenFalse,
@@ -71,51 +86,63 @@ const descriptionOf = (
   );
   const consumed = new Set([...clauseFacts, evaluated].filter(Boolean));
   const sentences: string[] = [];
+  const functionCall = sentenceCase(strings.constructCall);
+  const assignment = sentenceCase(strings.constructAssignment);
+  const multilineConstructs = new Set([
+    sentenceCase(strings.constructIf),
+    sentenceCase(strings.constructFor),
+    sentenceCase(strings.constructSwitch),
+  ]);
+
+  if (
+    multilineConstructs.has(title) ||
+    title === functionCall ||
+    title.startsWith(`${functionCall} —`) ||
+    title === assignment ||
+    clauseFacts.length === 0
+  ) {
+    return facts.map(factLine).join('\n');
+  }
 
   if (clauseFacts.length === 1 && condition !== undefined) {
     const result =
       typeof evaluated === 'undefined'
         ? ''
-        : `, ${strings.statementWhich} ${evaluated.label} ${code(evaluated.value)}`;
+        : `, ${strings.statementWhich} ${evaluated.label} ${plainText(evaluated.value)}`;
     sentences.push(
       finishSentence(
-        `${title} ${strings.statementWith} ${condition.label} ${code(condition.value)}${result}`
+        `${plainText(title)} ${strings.statementWith} ${condition.label} ${plainText(condition.value)}${result}`
       )
     );
   } else if (clauseFacts.length !== 0) {
     sentences.push(
       finishSentence(
         `${title} ${strings.statementWith} ${list(
-          clauseFacts.map((fact) => `${fact.label} ${code(fact.value)}`)
+          clauseFacts.map(
+            (fact) => `${plainText(fact.label)} ${plainText(fact.value)}`
+          )
         )}`
       )
     );
     if (typeof evaluated !== 'undefined') {
       sentences.push(
         finishSentence(
-          `${strings.statementControllingExpression} ${evaluated.label} ${code(evaluated.value)}`
+          `${strings.statementControllingExpression} ${evaluated.label} ${plainText(evaluated.value)}`
         )
       );
     }
-  } else {
-    sentences.push(finishSentence(title));
   }
 
   for (const fact of facts) {
     if (consumed.has(fact)) {
       continue;
     }
-    const narrativeLabel =
-      fact.label === strings.factNonzero
-        ? strings.statementReadsNonzero
-        : fact.label === strings.factZero
-          ? strings.statementReadsZero
-          : sentenceCase(fact.label);
+    const narrativeLabel = sentenceLabel(fact.label);
     sentences.push(
       finishSentence(
         fact.value === ''
           ? narrativeLabel
-          : `${narrativeLabel} ${code(fact.value)}`
+          : `${narrativeLabel} ${plainText(fact.value)}`
       )
     );
   }

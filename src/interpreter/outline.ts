@@ -842,7 +842,7 @@ function clausesOf(
     case 'assignment':
       return [
         ...clause('clauseTarget', node.left),
-        ...clause('clauseExpression', node.right),
+        ...clause('clauseAssignedValue', node.right),
       ];
     case 'call':
       return callClauses(node, written, functions);
