@@ -3,6 +3,7 @@ import {
   Decoration,
   DecorationSet,
   EditorView,
+  ViewPlugin,
   keymap,
 } from '@codemirror/view';
 import { SourceRange } from './positions';
@@ -10,7 +11,8 @@ import { setFocusRange } from './focus';
 import { rowAt } from './positions';
 
 /**
- * Hover a declared name and it becomes a link; follow it to the declaration.
+ * Hold Ctrl/Command while hovering a declared name and it becomes a link;
+ * follow it to the declaration.
  *
  * It is the one navigation a reader of an unfamiliar program asks for
  * constantly - what is this, where did it come from, what does this function
@@ -89,7 +91,11 @@ const onMac = (): boolean =>
  *
  * Alt is excluded on both: alt-click pins a watch.
  */
-const modifierHeld = (event: MouseEvent): boolean => {
+const modifierHeld = (event: {
+  altKey: boolean;
+  ctrlKey: boolean;
+  metaKey: boolean;
+}): boolean => {
   if (event.altKey) {
     return false;
   }
@@ -149,11 +155,16 @@ const showLink = (view: EditorView, range: SourceRange | null): void => {
 
 /** Resolve the identifier under a pointer and show only resolvable names. */
 const updateLink = (
-  event: MouseEvent,
+  pointer: { x: number; y: number } | null,
+  held: boolean,
   view: EditorView,
   find: DeclarationSource
 ): void => {
-  const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
+  if (pointer === null || !held) {
+    showLink(view, null);
+    return;
+  }
+  const pos = view.posAtCoords(pointer);
   if (pos === null) {
     showLink(view, null);
     return;
@@ -194,75 +205,100 @@ export const goTo = (view: EditorView, range: SourceRange): void => {
 };
 
 /**
- * A resolvable identifier becomes a link while the pointer is over it. A
- * primary click follows that link. Ctrl/Command-click remains available for
- * readers accustomed to editors, and F12 does the same from the keyboard.
+ * A resolvable identifier becomes a link while Ctrl/Command and the pointer
+ * are both over it. The modifier-click follows that link, and F12 does the
+ * same from the keyboard.
  */
-export const gotoDeclaration = (find: DeclarationSource): Extension => [
-  declarationLinkField,
-  EditorView.domEventHandlers({
-    mousemove(event: MouseEvent, view: EditorView) {
-      updateLink(event, view, find);
-      return false;
-    },
-    mousedown(event: MouseEvent, view: EditorView) {
-      // The primary button only. A secondary click is the reader asking for a
-      // menu, and on a Mac that is exactly what a ctrl-click is.
-      if (event.button !== 0 || event.altKey) {
-        return false;
+export const gotoDeclaration = (find: DeclarationSource): Extension => {
+  // Kept per extension instance, never at module scope: each editor has its
+  // own pointer, and pressing the modifier while that pointer is stationary
+  // must still turn the identifier beneath it into a link.
+  let pointer: { x: number; y: number } | null = null;
+  const modifierTracker = ViewPlugin.fromClass(
+    class {
+      private readonly document: Document;
+      private readonly window: Window | null;
+
+      constructor(private readonly view: EditorView) {
+        this.document = view.dom.ownerDocument;
+        this.window = this.document.defaultView;
+        this.document.addEventListener('keydown', this.modifierChanged);
+        this.document.addEventListener('keyup', this.modifierChanged);
+        this.window?.addEventListener('blur', this.blurred);
       }
-      const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
-      if (pos === null) {
-        return false;
+
+      destroy(): void {
+        this.document.removeEventListener('keydown', this.modifierChanged);
+        this.document.removeEventListener('keyup', this.modifierChanged);
+        this.window?.removeEventListener('blur', this.blurred);
       }
-      const request = requestAt(view, pos);
-      if (request === null) {
+
+      private readonly modifierChanged = (event: KeyboardEvent): void => {
+        updateLink(pointer, modifierHeld(event), this.view, find);
+      };
+
+      private readonly blurred = (): void => {
+        showLink(this.view, null);
+      };
+    }
+  );
+
+  return [
+    declarationLinkField,
+    modifierTracker,
+    EditorView.domEventHandlers({
+      mousemove(event: MouseEvent, view: EditorView) {
+        pointer = { x: event.clientX, y: event.clientY };
+        updateLink(pointer, modifierHeld(event), view, find);
         return false;
-      }
-      const word = view.state.wordAt(pos);
-      const shown = linkedRange(view);
-      const followsHoverLink =
-        !event.ctrlKey &&
-        !event.metaKey &&
-        !event.shiftKey &&
-        word !== null &&
-        shown !== null &&
-        shown.from === word.from &&
-        shown.to === word.to;
-      if (!followsHoverLink && !modifierHeld(event)) {
-        return false;
-      }
-      const found = find(request);
-      if (found === null) {
-        // Not handled: a name nothing declares should still behave like the
-        // click it is, rather than swallowing itself.
-        return false;
-      }
-      event.preventDefault();
-      goTo(view, found);
-      showLink(view, null);
-      return true;
-    },
-    mouseleave(_event: MouseEvent, view: EditorView) {
-      showLink(view, null);
-      return false;
-    },
-  }),
-  keymap.of([
-    {
-      key: 'F12',
-      run: (view: EditorView) => {
-        const request = requestAt(view, view.state.selection.main.head);
+      },
+      mousedown(event: MouseEvent, view: EditorView) {
+        // The primary button only. A secondary click is the reader asking for a
+        // menu, and on a Mac that is exactly what a ctrl-click is.
+        if (event.button !== 0 || !modifierHeld(event)) {
+          return false;
+        }
+        const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
+        if (pos === null) {
+          return false;
+        }
+        const request = requestAt(view, pos);
         if (request === null) {
           return false;
         }
         const found = find(request);
         if (found === null) {
+          // Not handled: a name nothing declares should still behave like the
+          // click it is, rather than swallowing itself.
           return false;
         }
+        event.preventDefault();
         goTo(view, found);
+        showLink(view, null);
         return true;
       },
-    },
-  ]),
-];
+      mouseleave(_event: MouseEvent, view: EditorView) {
+        pointer = null;
+        showLink(view, null);
+        return false;
+      },
+    }),
+    keymap.of([
+      {
+        key: 'F12',
+        run: (view: EditorView) => {
+          const request = requestAt(view, view.state.selection.main.head);
+          if (request === null) {
+            return false;
+          }
+          const found = find(request);
+          if (found === null) {
+            return false;
+          }
+          goTo(view, found);
+          return true;
+        },
+      },
+    ]),
+  ];
+};

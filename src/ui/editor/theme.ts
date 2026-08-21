@@ -360,8 +360,9 @@ export const debugTheme = EditorView.baseTheme({
     color: 'var(--plivet-tooltip-color, #f8f8f2)',
     border: '1px solid rgba(255, 255, 255, 0.25)',
   },
-  // Only a name with a declaration to follow becomes a link. Syntax colours
-  // remain legible; the underline and pointer carry the link affordance.
+  // Only a name with a declaration to follow becomes a link while the
+  // platform's navigation modifier is held. Syntax colours remain legible;
+  // the underline and pointer carry the link affordance.
   '.plivet-declaration-link': {
     cursor: 'pointer',
     textDecoration: 'underline',

@@ -170,16 +170,33 @@ describe('the modifier the platform uses', () => {
 
 describe('the identifier under the pointer', () => {
   const at = PROGRAM.indexOf('+ total') + 2;
+  const platform = (value: string) => {
+    Object.defineProperty(navigator, 'platform', {
+      value,
+      configurable: true,
+    });
+  };
+  const originalPlatform = navigator.platform;
+  afterEach(() => platform(originalPlatform));
 
-  const moveTo = (view: EditorView, pos: number): void => {
+  const moveTo = (
+    view: EditorView,
+    pos: number,
+    init: MouseEventInit = {}
+  ): void => {
     view.posAtCoords = () => pos;
     view.contentDOM.dispatchEvent(
-      new MouseEvent('mousemove', { bubbles: true, clientX: 10, clientY: 10 })
+      new MouseEvent('mousemove', {
+        bubbles: true,
+        clientX: 10,
+        clientY: 10,
+        ...init,
+      })
     );
   };
 
-  it('becomes a link only when it has a declaration to follow', () => {
-    const view = new EditorView({
+  const viewWithLink = () =>
+    new EditorView({
       state: EditorState.create({
         doc: PROGRAM,
         extensions: [
@@ -191,19 +208,70 @@ describe('the identifier under the pointer', () => {
       }),
     });
 
+  it('becomes a link only while Ctrl is held on Windows or Linux', () => {
+    platform('Win32');
+    const view = viewWithLink();
+
     moveTo(view, at);
+    expect(
+      view.contentDOM.querySelector('.plivet-declaration-link')
+    ).toBeNull();
+
+    moveTo(view, at, { ctrlKey: true });
     expect(
       view.contentDOM.querySelector('.plivet-declaration-link')!.textContent
     ).toBe('total');
 
-    moveTo(view, PROGRAM.indexOf('return n'));
+    moveTo(view, PROGRAM.indexOf('return n'), { ctrlKey: true });
     expect(
       view.contentDOM.querySelector('.plivet-declaration-link')
     ).toBeNull();
     view.destroy();
   });
 
-  it('follows the hovered link with a normal primary click', () => {
+  it('becomes a link only while Command is held on a Mac', () => {
+    platform('MacIntel');
+    const view = viewWithLink();
+
+    moveTo(view, at, { ctrlKey: true });
+    expect(
+      view.contentDOM.querySelector('.plivet-declaration-link')
+    ).toBeNull();
+
+    moveTo(view, at, { metaKey: true });
+    expect(
+      view.contentDOM.querySelector('.plivet-declaration-link')!.textContent
+    ).toBe('total');
+    view.destroy();
+  });
+
+  it('updates when the modifier is pressed or released over a stationary name', () => {
+    platform('Win32');
+    const view = viewWithLink();
+    moveTo(view, at);
+
+    view.dom.ownerDocument.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        bubbles: true,
+        key: 'Control',
+        ctrlKey: true,
+      })
+    );
+    expect(
+      view.contentDOM.querySelector('.plivet-declaration-link')!.textContent
+    ).toBe('total');
+
+    view.dom.ownerDocument.dispatchEvent(
+      new KeyboardEvent('keyup', { bubbles: true, key: 'Control' })
+    );
+    expect(
+      view.contentDOM.querySelector('.plivet-declaration-link')
+    ).toBeNull();
+    view.destroy();
+  });
+
+  it('follows the modifier-hovered link', () => {
+    platform('Win32');
     const view = new EditorView({
       state: EditorState.create({
         doc: PROGRAM,
@@ -211,9 +279,13 @@ describe('the identifier under the pointer', () => {
       }),
     });
     view.dispatch({ selection: { anchor: at } });
-    moveTo(view, at);
+    moveTo(view, at, { ctrlKey: true });
     view.contentDOM.dispatchEvent(
-      new MouseEvent('mousedown', { bubbles: true, button: 0 })
+      new MouseEvent('mousedown', {
+        bubbles: true,
+        button: 0,
+        ctrlKey: true,
+      })
     );
 
     expect(view.state.selection.main.anchor).toBe(0);
@@ -223,7 +295,8 @@ describe('the identifier under the pointer', () => {
     view.destroy();
   });
 
-  it('leaves a normal click alone until a resolvable name is hovered', () => {
+  it('leaves ordinary hover and click alone', () => {
+    platform('Win32');
     const asked: string[] = [];
     const view = new EditorView({
       state: EditorState.create({
@@ -238,7 +311,7 @@ describe('the identifier under the pointer', () => {
       }),
     });
     view.dispatch({ selection: { anchor: at } });
-    view.posAtCoords = () => at;
+    moveTo(view, at);
     view.contentDOM.dispatchEvent(
       new MouseEvent('mousedown', { bubbles: true, button: 0 })
     );
