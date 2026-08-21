@@ -962,7 +962,7 @@ and 10.
 
 ## Phase 12: teaching features
 
-**Status: items 1 to 6 done.** Items 1 to 4 are the phase proper; the rest are
+**Status: items 1 to 7 done.** Items 1 to 4 are the phase proper; the rest are
 independent of it and of each other, and can be taken in any order or dropped.
 
 Everything before this phase is parity work: the same application on a stack
@@ -1211,16 +1211,36 @@ it, and can be taken in any order or dropped.
    matches the file it lands in. Where a snippet and a library function are
    the same word, one entry is offered rather than two, and it is the template
    carrying `libraryHelp`'s own signature and sentence.
-7. **Structured hover, and cross-highlighting with the graph.**
-   `src/ui/editor/tooltip.ts` sets `textContent`; `create()` may return any DOM.
-   Render type, address and current value as a small table, and select the
-   matching node in the JointJS paper while the tooltip is open. Then the
-   reverse: hovering a node in the graph marks the declaration in the editor.
-   This is the point at which the two panes stop being separate pictures of the
-   same program. `src/components/hoverText.ts` should return records rather
-   than assembled lines for this; it is already the only place that knows the
-   facts, and formatting is the tooltip's business. Item 13 reads those same
-   records, so the record is the interface both surfaces are written against.
+7. **Structured hover, and cross-highlighting with the graph.** **Done.**
+   `src/ui/editor/tooltip.ts` set `textContent`; `create()` may return any DOM.
+   It now renders type, address and current value as a small table, and the
+   matching row is selected in the JointJS paper while the tooltip is open.
+   Then the reverse: hovering a row in the graph marks the declaration in the
+   editor. This is the point at which the two panes stop being separate
+   pictures of the same program. `hoverText.ts` returns records rather than
+   assembled lines; it is already the only place that knows the facts, and
+   formatting is the tooltip's business. Item 13 reads those same records, so
+   the record is the interface both surfaces are written against.
+
+   What makes the link is one key. A cell key names a cell, and an object is a
+   row of them, so `CellModel.object` carries the key every cell of one
+   variable's row shares and `VariableModel.key` carries the same one - two
+   passes over the same stacks that have to agree about exactly one thing.
+   From there it is only carriage: `layoutMemory` puts the key on the row,
+   `MemoryNode` writes it onto the boxes as `data-object-key`, and the paper's
+   own hover reads it back off the DOM, because what a reader points at is one
+   row of a segment and the paper would report the node. The mark itself is a
+   class rather than an attribute - JointJS writes fill and stroke as
+   presentation attributes, which a stylesheet outranks - and it is put back
+   after every render, since a reader holding the pointer over a row while the
+   program steps is still pointing at it. Across the bus it is one event
+   carrying the object and which panel it came from, so a side ignores what it
+   said itself. The editor's end is a second decoration rather than a reuse of
+   the step marker: one says where execution stands and one says where the
+   reader is looking, and neither can take the other's place. And it does not
+   scroll - the reader is looking at the canvas, and a page that moved under a
+   pointer they are not pointing with would be the editor answering a question
+   nobody asked.
 8. **Pinned watches.** A `showTooltip` `StateField` holding tooltips the reader
    pinned by clicking a variable, updated on every step. A watch window with no
    new user interface.

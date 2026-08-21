@@ -8,7 +8,8 @@ export type event =
   | 'changeState'
   | 'changeOutput'
   | 'zoom'
-  | 'draw';
+  | 'draw'
+  | 'focusObject';
 
 /**
  * What each event carries. The signatures were `any[]` while React components
@@ -23,6 +24,12 @@ export interface EventPayloads {
   /** The editor's text size, not the visualization's scale. */
   zoom: [command: ZOOM_COMMAND];
   draw: [model: StepModel];
+  /**
+   * The object the reader is pointing at, and which panel they are pointing
+   * from. The origin is what stops the two panels answering each other: a
+   * side ignores what it said itself, and marks what the other one says.
+   */
+  focusObject: [object: string | null, origin: 'editor' | 'graph'];
 }
 
 type Listener = (...args: any[]) => void;

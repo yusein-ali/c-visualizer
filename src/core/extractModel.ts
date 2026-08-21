@@ -166,6 +166,9 @@ const cell = (
     text,
     kind,
     width: cellWidth(text),
+    // The parent key names the object rather than the cell: every cell of one
+    // variable's row carries it, which is how a row is recognised as a whole.
+    object: parentKey,
   };
   if (foldGroup !== undefined) {
     model.foldGroup = foldGroup;
@@ -313,6 +316,7 @@ function aggregateRows(
     text: '',
     kind: 'fold',
     width: cellWidth(' '),
+    object: key,
     foldTarget: group,
   };
   if (foldGroup !== undefined) {

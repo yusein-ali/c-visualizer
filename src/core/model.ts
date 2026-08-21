@@ -58,6 +58,14 @@ export interface CellModel {
   address?: number;
   /** For a `type` cell: how many bytes the object occupies. */
   size?: number;
+  /**
+   * The object this cell is part of - every cell of one variable's row
+   * carries the same one. It is what lets a tooltip in the editor and a row
+   * on the canvas be recognised as two pictures of the same object, which is
+   * a question neither side can answer from a cell key alone: a key names one
+   * cell, and an object is a row of them.
+   */
+  object?: string;
   /** The innermost fold group this cell belongs to, if any. */
   foldGroup?: string;
   /** For a `fold` cell: the group it shows and hides. */
@@ -281,6 +289,12 @@ export interface ConstructStateModel {
  */
 export interface VariableModel {
   name: string;
+  /**
+   * The object key its cells carry, so the canvas can be asked to select the
+   * row this tooltip is describing. Built the same way `extractModel` builds
+   * it, out of the frame and the name.
+   */
+  key: string;
   type: string;
   value: string;
   address: number;

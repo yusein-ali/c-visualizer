@@ -87,7 +87,11 @@ export class Plivet {
       onInput: (text: string) => bus.signal('debug', 'StepAll', text),
     });
 
-    this.graph = new PlivetGraph(this.shell.main, { model: emptyStepModel() });
+    this.graph = new PlivetGraph(this.shell.main, {
+      model: emptyStepModel(),
+      onFocus: (object: string | null) =>
+        bus.signal('focusObject', object, 'graph'),
+    });
 
     this.files = new FilePanel(this.shell.files, {
       onUpload: (files: FileList) => this.upload(files),
@@ -109,6 +113,16 @@ export class Plivet {
       this.console.setAccepting(debugState === 'stdin')
     );
     bus.slot('draw', (model: StepModel) => this.graph.render(model));
+    // The editor's tooltip lights up the row the canvas draws for the same
+    // object. What the canvas said itself comes back here and is ignored.
+    bus.slot(
+      'focusObject',
+      (object: string | null, origin: 'editor' | 'graph') => {
+        if (origin !== 'graph') {
+          this.graph.setFocus(object);
+        }
+      }
+    );
   }
 
   destroy(): void {

@@ -286,9 +286,49 @@ export const debugTheme = EditorView.baseTheme({
   '.cm-tooltip-hover .plivet-tooltip': {
     maxWidth: '40em',
     padding: '4px 8px',
-    fontFamily: 'monospace',
     fontSize: '12px',
-    whiteSpace: 'pre-wrap',
+  },
+  // The headline: what the reader is pointing at, named. Everything under it
+  // is a fact about it, which is what the table is for.
+  '.plivet-tooltip__title': {
+    fontFamily:
+      'var(--plivet-editor-font, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace)',
+    fontWeight: 'bold',
+    marginBottom: '0.25em',
+  },
+  '.plivet-tooltip__facts': {
+    borderCollapse: 'collapse',
+  },
+  '.plivet-tooltip__facts th': {
+    textAlign: 'left',
+    fontWeight: 'normal',
+    opacity: '0.75',
+    paddingRight: '0.8em',
+    verticalAlign: 'top',
+    whiteSpace: 'nowrap',
+  },
+  '.plivet-tooltip__facts td': {
+    verticalAlign: 'top',
+  },
+  '.plivet-tooltip__code': {
+    fontFamily:
+      'var(--plivet-editor-font, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace)',
+  },
+  // A sentence about the language rather than a fact about this program: it
+  // has no left-hand column to stand in.
+  '.plivet-tooltip__note': {
+    fontStyle: 'italic',
+    opacity: '0.85',
+    whiteSpace: 'normal',
+  },
+  // Where the canvas is pointing. It is deliberately not the step marker's
+  // colour: one says where the program is, the other where the reader is.
+  '.plivet-focus-line': {
+    backgroundColor: 'var(--plivet-focus-line-bg, rgba(217, 164, 0, 0.12))',
+  },
+  '.plivet-focus-range': {
+    backgroundColor: 'var(--plivet-focus-range-bg, rgba(217, 164, 0, 0.3))',
+    borderRadius: '2px',
   },
   '.cm-tooltip.cm-tooltip-hover': {
     backgroundColor: 'var(--plivet-tooltip-bg, #fffbe6)',

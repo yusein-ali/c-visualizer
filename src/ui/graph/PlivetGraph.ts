@@ -22,7 +22,16 @@ import './graph.css';
 
 export interface PlivetGraphOptions {
   model?: StepModel;
+  /**
+   * The object the pointer is over, and null when it leaves. The canvas says
+   * which object rather than which cell: a row is what a reader points at,
+   * and what the editor can mark the declaration of.
+   */
+  onFocus?: (object: string | null) => void;
 }
+
+/** The class the focused object's boxes are painted through. */
+const FOCUS_CLASS = 'plivet-object--focus';
 
 /** How many levels of operands and operators the expression expands into. */
 const depthOf = (node: ExpressionNodeModel): number =>
@@ -112,12 +121,22 @@ export class PlivetGraph {
   private scale = 1;
   private contentWidth = 0;
   private contentHeight = 0;
+  /**
+   * The object lit up at the moment, if any. It is kept rather than only
+   * painted, because every step rebuilds the scene: a reader holding the
+   * pointer over a row while the program steps is still pointing at it.
+   */
+  private focused: string | null = null;
+  /** The last object reported out, so one hover is one call. */
+  private reported: string | null = null;
+  private readonly onFocus?: (object: string | null) => void;
 
   constructor(
     private readonly container: HTMLElement,
     options: PlivetGraphOptions = {}
   ) {
     this.model = options.model || emptyStepModel();
+    this.onFocus = options.onFocus;
     // The switches read the map back, so the panel is built before the toolbar
     // that carries it and refreshed by every render.
     this.panel = viewPanel(
@@ -189,6 +208,14 @@ export class PlivetGraph {
       this.render(this.model);
     });
 
+    // Hover is read off the DOM rather than through the paper's own element
+    // events: what the reader is pointing at is one row of a segment node,
+    // and the paper would report the node.
+    this.paperHost.addEventListener('mouseover', (event: MouseEvent) =>
+      this.pointedAt(event)
+    );
+    this.paperHost.addEventListener('mouseleave', () => this.report(null));
+
     this.resizeObserver =
       typeof ResizeObserver === 'undefined'
         ? null
@@ -246,6 +273,23 @@ export class PlivetGraph {
     ]);
     this.resize();
     this.paper.unfreeze();
+    // The scene was rebuilt under whatever the reader was pointing at, so the
+    // mark goes back on. `async` paper draws after this returns, which is why
+    // it is put back on the next frame rather than now.
+    this.repaintFocus();
+  }
+
+  /**
+   * Light up one object, or none. This is the other half of the editor's
+   * tooltip: the two panels stop being separate pictures of the same program
+   * at the moment that pointing at one of them marks the other.
+   */
+  setFocus(object: string | null): void {
+    if (object === this.focused) {
+      return;
+    }
+    this.focused = object;
+    this.repaintFocus();
   }
 
   setScale(scale: number): void {
@@ -263,6 +307,41 @@ export class PlivetGraph {
     this.graph.clear();
     this.container.replaceChildren();
     this.container.classList.remove('plivet-graph');
+  }
+
+  /** Which object the pointer is over, from the row it is inside. */
+  private pointedAt(event: MouseEvent): void {
+    const target = event.target as Element | null;
+    const hit = target === null ? null : target.closest('[data-object-key]');
+    const object = hit === null ? null : hit.getAttribute('data-object-key');
+    this.report(object === null ? null : decodeURIComponent(object));
+  }
+
+  private report(object: string | null): void {
+    if (object === this.reported) {
+      return;
+    }
+    this.reported = object;
+    if (typeof this.onFocus !== 'undefined') {
+      this.onFocus(object);
+    }
+  }
+
+  /**
+   * Puts the mark on every box of the focused object and takes it off the
+   * rest. The paint is a class rather than an attribute: JointJS writes fill
+   * and stroke as presentation attributes, which a stylesheet outranks, so
+   * the highlight needs no second copy of the palette.
+   */
+  private repaintFocus(): void {
+    const marked = this.paperHost.querySelectorAll(`.${FOCUS_CLASS}`);
+    marked.forEach((element: Element) => element.classList.remove(FOCUS_CLASS));
+    if (this.focused === null) {
+      return;
+    }
+    const key = encodeURIComponent(this.focused);
+    const boxes = this.paperHost.querySelectorAll(`[data-object-key="${key}"]`);
+    boxes.forEach((element: Element) => element.classList.add(FOCUS_CLASS));
   }
 
   private pointerLink(arrow: ArrowGeometry): shapes.standard.Link {

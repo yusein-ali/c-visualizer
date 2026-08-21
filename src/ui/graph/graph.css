@@ -152,6 +152,8 @@
   --plivet-graph-header-text: #4a5b6c;
   --plivet-graph-hover: #f7f9fb;
   --plivet-graph-ink: #111111;
+  --plivet-graph-focus: #fff3bf;
+  --plivet-graph-focus-line: #d9a400;
 }
 
 /* The far end of the bar: the panel hangs from this edge. */
@@ -223,4 +225,20 @@
 .plivet-graph .plivet-fold-cell,
 .plivet-graph .plivet-collapse-cell {
   cursor: pointer;
+}
+
+/*
+ * The object the reader is pointing at, on whichever side of the splitter
+ * they are pointing from. JointJS writes fill and stroke as presentation
+ * attributes, and a stylesheet outranks those, so the mark needs no second
+ * copy of the palette to override.
+ */
+.plivet-graph .plivet-object-cell {
+  cursor: default;
+}
+
+.plivet-graph .plivet-object--focus {
+  fill: var(--plivet-graph-focus, #fff3bf);
+  stroke: var(--plivet-graph-focus-line, #d9a400);
+  stroke-width: 2;
 }

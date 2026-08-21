@@ -125,7 +125,9 @@ export class EditorController {
       doc: this.sourcecode,
       dark,
       fontSize: this.fontSize,
-      hoverText: this.hover.text,
+      hoverText: this.hover.describe,
+      onHoverObject: (object: string | null) =>
+        this.bus.signal('focusObject', object, 'editor'),
       completions: this.completions.source,
       onChange: (code: string) => this.edited(code),
     });
@@ -143,6 +145,17 @@ export class EditorController {
     this.client.onRunEvent = (_event, response: Response) => {
       this.recieve(response);
     };
+    // The other direction: the canvas says which object the pointer is over,
+    // and the declaration of it is marked here. What the editor said itself
+    // comes back through the same event and is ignored.
+    this.bus.slot(
+      'focusObject',
+      (object: string | null, origin: 'editor' | 'graph') => {
+        if (origin !== 'editor') {
+          this.markDeclaration(object);
+        }
+      }
+    );
     this.bus.slot('zoom', (command: ZOOM_COMMAND) => {
       if (command === 'In') {
         this.setFontSize(this.fontSize + 1);
@@ -279,6 +292,35 @@ export class EditorController {
       ),
       values: model.inlineValues,
     });
+  }
+
+  /**
+   * Marks where an object was declared, or takes the mark off.
+   *
+   * Which object the canvas means is a key its cells carry; which variable
+   * that is, and where its declarator is written, are two questions the
+   * application can answer and the canvas cannot.
+   */
+  private markDeclaration(object: string | null) {
+    if (object === null) {
+      this.editor.debug.showFocus(this.editor.view, null);
+      return;
+    }
+    const declaration = this.hover.declarationOf(object);
+    if (declaration === null) {
+      this.editor.debug.showFocus(this.editor.view, null);
+      return;
+    }
+    this.editor.debug.showFocus(
+      this.editor.view,
+      rangeOf(
+        this.editor.view.state.doc,
+        declaration.line,
+        declaration.column,
+        declaration.endLine,
+        declaration.endColumn
+      )
+    );
   }
 
   setExpansions(expansions: Expansion[]) {

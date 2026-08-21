@@ -1,6 +1,7 @@
 import { ExecState } from 'unicoen.ts/dist/interpreter/Engine/ExecState';
 import { extractModel, extractVariables, VariableModel } from '../src/core';
 import { HoverTextSource } from '../src/app/hoverText';
+import { linesOf } from './records';
 import { constructAt } from '../src/interpreter/Construct';
 import { PlivetCPP14Interpreter } from '../src/interpreter/CPP14';
 import { FunctionPointerTable } from '../src/interpreter/FunctionPointerTable';
@@ -65,7 +66,7 @@ const variableNamed = (
 };
 const hoverText = (states: ExecState[], name: string): string => {
   const hover: any = new HoverTextSource();
-  return hover.variableText(variableNamed(states, name));
+  return linesOf(hover.variableRecord(variableNamed(states, name)));
 };
 
 const constructs = (code: string) => {
@@ -358,7 +359,7 @@ describe('function pointers: hovering a variable', () => {
     const { states } = execute(
       `${H}int main(){ int (*op)(int, int) = add; return 0; }`
     );
-    expect(hoverText(states, 'op')).toContain('op : int (*)(int, int) =');
+    expect(hoverText(states, 'op')).toContain('type: int (*)(int, int)');
     expect(hoverText(states, 'op')).not.toContain('_fp');
   });
 
@@ -366,14 +367,14 @@ describe('function pointers: hovering a variable', () => {
     const { states } = execute(
       `${H}int main(){ int (*op)(int, int) = sub; return 0; }`
     );
-    expect(hoverText(states, 'op')).toContain('= sub (0x1004)');
+    expect(hoverText(states, 'op')).toContain('value: sub (0x1004)');
   });
 
   it('shows an address rather than a decimal for a pointer holding none', () => {
     const { states } = execute(
       `${H}int main(){ int (*op)(int, int) = 0; return 0; }`
     );
-    expect(hoverText(states, 'op')).toContain('= 0x0');
+    expect(hoverText(states, 'op')).toContain('value: 0x0');
   });
 
   it('names every function in a table of them', () => {
@@ -381,7 +382,7 @@ describe('function pointers: hovering a variable', () => {
       `${H}int main(){ int (*ops[2])(int, int) = {add, sub}; return 0; }`
     );
     const text = hoverText(states, 'ops');
-    expect(text).toContain('ops : int (*[2])(int, int) =');
+    expect(text).toContain('type: int (*[2])(int, int)');
     expect(text).toContain('[add (0x1000), sub (0x1004)]');
   });
 
@@ -390,7 +391,7 @@ describe('function pointers: hovering a variable', () => {
       `${H}int main(){ int (*op)(int, int) = add; return 0; }`
     );
     const drawn = rowFor(states, 'op')[3];
-    const hovered = hoverText(states, 'op').split('address ')[1];
+    const hovered = hoverText(states, 'op').split('address: ')[1];
     expect(drawn).toContain(hovered);
   });
 });

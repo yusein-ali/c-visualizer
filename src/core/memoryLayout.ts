@@ -157,6 +157,13 @@ export interface MemoryRowGeometry {
   bandHeight: number;
   /** For a `group` row: the frame it names. Entry rows carry cells instead. */
   label?: string;
+  /**
+   * The object the row draws, where it draws one. It is the same key the
+   * editor's tooltip carries, so pointing at a variable on one side can light
+   * up the row on the other without either side knowing how the other builds
+   * its picture.
+   */
+  object?: string;
   /** How far into the name column this row's name is pushed, in pixels. */
   indent: number;
   caption?: MemoryCaptionGeometry;
@@ -610,9 +617,11 @@ export function layoutMemory(
         return cell;
       });
 
+      const object = parts.cells.get('name')?.object;
       const geometry: MemoryRowGeometry = {
         kind: 'entry',
         key: `${segment.key}-row-${index}`,
+        ...(typeof object === 'undefined' ? {} : { object }),
         y: 0,
         height: MEMORY_ENTRY_HEIGHT,
         bandY: MEMORY_CAPTION_HEIGHT,

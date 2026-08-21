@@ -5,6 +5,7 @@ import { Construct } from '../src/interpreter/Construct';
 import { StepModel } from '../src/core';
 import { HoverTextSource } from '../src/app/hoverText';
 import { preprocessSource } from '../src/interpreter/preprocess';
+import { linesOf } from './records';
 
 /**
  * What a tooltip says about a construct, in both halves.
@@ -78,13 +79,15 @@ const hovering = (code: string, step?: StepModel) => {
   }
   const state = EditorState.create({ doc: code });
   return (line: number, column: number, word = '') =>
-    source.text({
-      state,
-      pos: state.doc.line(line).from + column,
-      row: line - 1,
-      column,
-      word,
-    });
+    linesOf(
+      source.describe({
+        state,
+        pos: state.doc.line(line).from + column,
+        row: line - 1,
+        column,
+        word,
+      })
+    );
 };
 
 const PROGRAM = `#include <stdio.h>
@@ -290,7 +293,7 @@ describe('the tooltip that says both halves', () => {
     // return statement that contains it.
     const steps = stepsOf(PROGRAM);
     const after = stepOn(steps, 5, 2);
-    expect(hovering(PROGRAM, after)(24, 11)).toBe('n * 2 = 2');
+    expect(hovering(PROGRAM, after)(24, 11)).toBe('n * 2\nvalue: 2');
   });
 });
 
@@ -302,11 +305,11 @@ int main(void){ return NEXT; }`;
   it('shows the step in the middle rather than only the end', () => {
     // `NEXT → 3` is true and hides that NEXT is defined as STEP.
     expect(hovering(code)(3, 23, 'NEXT')).toBe(
-      'NEXT → STEP → 3\ndefined on line 2'
+      'NEXT → STEP → 3\ndefined on line: 2'
     );
   });
 
   it('says a one-step expansion once', () => {
-    expect(hovering(code)(2, 13, 'STEP')).toBe('STEP → 3\ndefined on line 1');
+    expect(hovering(code)(2, 13, 'STEP')).toBe('STEP → 3\ndefined on line: 1');
   });
 });

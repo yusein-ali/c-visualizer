@@ -19,6 +19,7 @@ import {
   showDiagnostics as markDiagnostics,
 } from './diagnostics';
 import { expansionField, showExpansions as markExpansions } from './expansions';
+import { focusField, showFocus as markFocus } from './focus';
 import { inlineValueField } from './inlineValues';
 import {
   showStep as markStep,
@@ -27,6 +28,7 @@ import {
 } from './stepHighlight';
 import { debugTheme } from './theme';
 import { HoverText, plivetHoverTooltip } from './tooltip';
+import { SourceRange } from './positions';
 
 /**
  * PLIVET's debugger, as an extension array and a handle to drive it.
@@ -41,6 +43,12 @@ import { HoverText, plivetHoverTooltip } from './tooltip';
 export interface DebugExtensionOptions {
   /** What to say about the position under the pointer. */
   hoverText?: HoverText;
+  /**
+   * The object the open tooltip is describing, and null when it closes. It is
+   * what the canvas lights a row up from; the editor knows nothing about who
+   * is listening.
+   */
+  onHoverObject?: (object: string | null) => void;
 }
 
 export class DebugExtensions {
@@ -56,13 +64,19 @@ export class DebugExtensions {
       inlineValueField,
       expansionField,
       errorLineField,
+      focusField,
       // The gutter is what makes a warning visible without hovering for one.
       // A reader who does not know a rule exists never hovers to find out.
       lintGutter(),
       this.readOnly.of(DebugExtensions.readOnlyExtension(false)),
     ];
     if (typeof options.hoverText !== 'undefined') {
-      this.extensions.push(plivetHoverTooltip(options.hoverText));
+      this.extensions.push(
+        plivetHoverTooltip({
+          text: options.hoverText,
+          onFocus: options.onHoverObject,
+        })
+      );
     }
   }
 
@@ -81,6 +95,14 @@ export class DebugExtensions {
    */
   showStep(view: EditorView, mark: StepMark | null, scroll = true): void {
     markStep(view, mark, scroll);
+  }
+
+  /**
+   * Marks the declaration of the object the reader is pointing at on the
+   * canvas, or takes the mark off with null.
+   */
+  showFocus(view: EditorView, range: SourceRange | null): void {
+    markFocus(view, range);
   }
 
   showExpansions(view: EditorView, expansions: Expansion[]): void {

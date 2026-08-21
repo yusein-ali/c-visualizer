@@ -118,18 +118,35 @@ function entryRow(
 ): void {
   const bandY = row.y + row.bandY;
   const bandMiddle = bandY + row.bandHeight / 2;
+  // The row says which object it draws, so that pointing at the variable in
+  // the editor can light this row up and pointing at this row can mark the
+  // declaration. The attribute is on the boxes rather than the text because
+  // the text does not take pointer events.
+  const marks =
+    typeof row.object === 'undefined'
+      ? undefined
+      : {
+          'data-object-key': encodeURIComponent(row.object),
+          class: 'plivet-object-cell',
+        };
 
   if (typeof row.caption !== 'undefined') {
     const { caption } = row;
-    push(part, 'rect', `caption-${index}-body`, {
-      x: caption.x,
-      y: row.y,
-      width: caption.width,
-      height: caption.height,
-      fill: CAPTION_FILL,
-      stroke: GRID,
-      strokeWidth: 1,
-    });
+    push(
+      part,
+      'rect',
+      `caption-${index}-body`,
+      {
+        x: caption.x,
+        y: row.y,
+        width: caption.width,
+        height: caption.height,
+        fill: CAPTION_FILL,
+        stroke: GRID,
+        strokeWidth: 1,
+      },
+      marks
+    );
     push(part, 'text', `caption-${index}-text`, {
       x: caption.x + MEMORY_PADDING_X + row.indent,
       y: row.y + caption.height / 2,
@@ -148,18 +165,24 @@ function entryRow(
     const isAddress = column.key === 'address';
     const isValue = column.key === 'value';
     // The address belongs to the whole object, so its cell spans both bands.
-    push(part, 'rect', `cell-${index}-${position}-body`, {
-      x: column.x,
-      y: isAddress ? row.y : bandY,
-      width: column.width,
-      height: isAddress ? row.height : row.bandHeight,
-      fill:
-        cell.colors.length === 0 && isAddress
-          ? ADDRESS_FILL
-          : gradient(cell.colors),
-      stroke: GRID,
-      strokeWidth: 1,
-    });
+    push(
+      part,
+      'rect',
+      `cell-${index}-${position}-body`,
+      {
+        x: column.x,
+        y: isAddress ? row.y : bandY,
+        width: column.width,
+        height: isAddress ? row.height : row.bandHeight,
+        fill:
+          cell.colors.length === 0 && isAddress
+            ? ADDRESS_FILL
+            : gradient(cell.colors),
+        stroke: GRID,
+        strokeWidth: 1,
+      },
+      marks
+    );
     push(part, 'text', `cell-${index}-${position}-text`, {
       // A name keeps a gutter for the fold triangle and one step of
       // indentation per level of nesting, so a member sits under the

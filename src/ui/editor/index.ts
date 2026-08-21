@@ -29,9 +29,16 @@ export { ProgramCompletions } from './completion';
 export { cSnippets } from './snippets';
 export type { LibraryFunction } from './completion';
 export { expansionAt } from './expansions';
+export { focusField, setFocusRange } from './focus';
 export { inlineValueField } from './inlineValues';
 export { setStepHighlight, showStep } from './stepHighlight';
 export type { InlineValue, StepMark } from './stepHighlight';
 export { offsetAt, rangeOf, rowAt, rowRange, startOfRow } from './positions';
 export type { SourceRange } from './positions';
-export type { HoverContext, HoverText } from './tooltip';
+export { hoverDom } from './tooltip';
+export type {
+  HoverContext,
+  HoverFact,
+  HoverRecord,
+  HoverText,
+} from './tooltip';

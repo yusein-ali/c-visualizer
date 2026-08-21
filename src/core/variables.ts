@@ -199,6 +199,9 @@ export function extractVariables(
       const type = displayTypeOf(variable);
       const model: VariableModel = {
         name: variable.getName(),
+        // The key `extractModel` builds this object's cells under. The two
+        // passes are separate and have to agree on one thing, and this is it.
+        key: `${stack.name}-${variable.name}`,
         type,
         value: valueOf(variable, type),
         address: displayAddressOf(variable),
