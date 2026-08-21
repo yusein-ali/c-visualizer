@@ -7,3 +7,4 @@
  */
 export { FilePanel } from './FilePanel';
 export type { FilePanelOptions } from './FilePanel';
+export { download } from './download';

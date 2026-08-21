@@ -6,6 +6,12 @@
 const strings = {
   howToUse: 'How to use',
   close: 'Close',
+  openCode: 'Open',
+  openCodeHint: 'Open a C file, or a session saved from here',
+  saveCode: 'Save',
+  saveCodeHint: 'Write the program out as a C file',
+  openedNotCode: 'That file could not be read as a program.',
+  savedFileName: 'program.c',
   preprocessedButton: 'Preprocessed',
   preprocessedTitle: 'The source the compiler sees',
   preprocessedHint:

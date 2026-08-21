@@ -34,6 +34,10 @@ export interface ControlBarOptions {
   onHelp?: () => void;
   /** Show the source the compiler actually sees, beside the one written. */
   onPreprocessed?: () => void;
+  /** A file the reader chose to open: a program, or a saved session. */
+  onOpenFile?: (file: File) => void;
+  /** Write the program out. What it is called is the caller's business. */
+  onSaveCode?: () => void;
   dark?: boolean;
 }
 
@@ -52,6 +56,7 @@ export class ControlBar {
   private readonly buttons: DebugButton[] = [];
   private readonly status: HTMLSpanElement;
   private readonly theme: HTMLSelectElement;
+  private readonly fileInput: HTMLInputElement;
 
   constructor(parent: HTMLElement, options: ControlBarOptions = {}) {
     this.options = options;
@@ -74,6 +79,30 @@ export class ControlBar {
       this.options.onPreprocessed?.()
     );
 
+    // The file input is the browser's own picker and cannot be opened
+    // without one; it is hidden and a button of the bar's own shape stands in
+    // front of it, so the row does not carry a control drawn by the platform.
+    this.fileInput = document.createElement('input');
+    this.fileInput.type = 'file';
+    this.fileInput.accept = '.c,.h,.txt,.json';
+    this.fileInput.className = 'plivet-controls__file';
+    this.fileInput.setAttribute('aria-label', strings.openCode);
+    this.fileInput.addEventListener('change', this.chosen);
+
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'plivet-controls__help';
+    open.textContent = strings.openCode;
+    open.title = strings.openCodeHint;
+    open.addEventListener('click', () => this.fileInput.click());
+
+    const save = document.createElement('button');
+    save.type = 'button';
+    save.className = 'plivet-controls__help';
+    save.textContent = strings.saveCode;
+    save.title = strings.saveCodeHint;
+    save.addEventListener('click', () => this.options.onSaveCode?.());
+
     this.status = document.createElement('span');
     this.status.className = 'plivet-controls__status';
     // The counter is the only thing on the page that says a step happened, so
@@ -86,6 +115,9 @@ export class ControlBar {
     this.root.append(
       help,
       preprocessed,
+      open,
+      save,
+      this.fileInput,
       this.debugGroup(),
       this.zoomGroup(),
       this.theme,
@@ -123,8 +155,23 @@ export class ControlBar {
   }
 
   destroy(): void {
+    this.fileInput.removeEventListener('change', this.chosen);
     this.root.remove();
   }
+
+  /**
+   * The file the picker came back with. The input is cleared afterwards, so
+   * opening the same file twice in a row still raises a `change` - the same
+   * thing the upload panel does for the same reason.
+   */
+  private readonly chosen = () => {
+    const files = this.fileInput.files;
+    if (files === null || files.length === 0) {
+      return;
+    }
+    this.options.onOpenFile?.(files[0]);
+    this.fileInput.value = '';
+  };
 
   private debugGroup(): HTMLDivElement {
     const group = document.createElement('div');

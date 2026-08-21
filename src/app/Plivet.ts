@@ -14,7 +14,7 @@ import { isSession } from '../ui/editor';
 import { ControlBar, ZOOM_COMMAND } from '../ui/controls';
 import { PlivetConsole } from '../ui/console';
 import { PlivetGraph } from '../ui/graph';
-import { FilePanel } from '../ui/files';
+import { FilePanel, download } from '../ui/files';
 import { ViewStack } from '../ui/views';
 import { HowToDialog } from '../ui/help';
 import type { PreprocessedDialog } from '../ui/preprocessed';
@@ -53,6 +53,19 @@ export interface PlivetOptions {
   editableRegions?: EditableRegion[];
 }
 
+/**
+ * A session if the text is one, and null for anything else - a C program, an
+ * empty file, half a download. Nothing is thrown: a file that is not a
+ * session is not an error, it is a program.
+ */
+const parseSession = (text: string): unknown => {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+};
+
 export class Plivet {
   private readonly bus = new Bus();
   private readonly client = new InterpreterClient();
@@ -71,6 +84,8 @@ export class Plivet {
    * preprocessor did never downloads the answer.
    */
   private preprocessed: PreprocessedDialog | null = null;
+  /** What a save is called: the name of the file that was opened, or a default. */
+  private filename: string = strings.savedFileName;
   private theme: Theme;
 
   constructor(parent: HTMLElement, options: PlivetOptions = {}) {
@@ -89,6 +104,8 @@ export class Plivet {
       onTheme: (dark) => bus.signal('changeTheme', dark ? 'dark' : 'light'),
       onHelp: () => this.help.open(),
       onPreprocessed: () => void this.showPreprocessed(),
+      onOpenFile: (file: File) => void this.openFile(file),
+      onSaveCode: () => this.saveCode(),
       dark: isDark(this.theme),
     });
 
@@ -151,6 +168,43 @@ export class Plivet {
         }
       }
     );
+  }
+
+  /**
+   * A file the reader chose: a program, or a session saved from here.
+   *
+   * Which one it is, is decided by reading it rather than by its name: a
+   * session is JSON and a C program is not, and a reader who renamed either
+   * still gets what is in the file. Anything that is neither is refused with
+   * a sentence rather than half-loaded.
+   */
+  private async openFile(file: File): Promise<void> {
+    const text = await file.text();
+    if (/\.(c|h|txt)$/i.test(file.name)) {
+      this.filename = file.name;
+    }
+    const parsed = parseSession(text);
+    if (parsed !== null) {
+      // JSON, so it was meant to be a session. One this version cannot read
+      // is refused rather than dropped into the editor as text.
+      if (!this.restoreSession(parsed)) {
+        alert(strings.openedNotCode);
+      }
+      return;
+    }
+    if (text.trim() === '') {
+      alert(strings.openedNotCode);
+      return;
+    }
+    this.editor.replaceCode(text);
+  }
+
+  /**
+   * The program, written out. The name is the file's if the reader opened
+   * one, so saving what was opened gives back a file of the same name.
+   */
+  private saveCode(): void {
+    download(this.filename, this.editor.code(), 'text/x-csrc');
   }
 
   /**

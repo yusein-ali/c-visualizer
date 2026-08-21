@@ -962,7 +962,7 @@ and 10.
 
 ## Phase 12: teaching features
 
-**Status: items 1 to 16 done.** Items 1 to 4 are the phase proper; the rest are
+**Status: items 1 to 17 done.** Items 1 to 4 are the phase proper; the rest are
 independent of it and of each other, and can be taken in any order or dropped.
 
 Everything before this phase is parity work: the same application on a stack
@@ -1406,7 +1406,19 @@ it, and can be taken in any order or dropped.
     that is off is filled with nothing as well as hidden, so a run of a
     hundred thousand writes costs a reader who is not looking at them no rows
     at all. Closed, the whole strip is one line of switches.
-17. Add save code, open code.
+17. **Open a program, save a program.** **Done.** Two buttons on the control
+    bar. Saving writes the editor's text out as a C file, named after whatever
+    was opened so that saving what you opened gives back a file of the same
+    name; opening reads a file and puts it in the editor, stopping the session
+    first - the document is held while a program runs - and checking it
+    afterwards, so the marks belong to the program now in it. The picker is
+    the browser's own and cannot be opened without an input, so the bar keeps
+    a hidden one behind a button of its own shape rather than putting a
+    platform-drawn control in the row. What a file is, is decided by reading
+    it rather than by its name: a session from item 12 is JSON and a C program
+    is not, so opening either works and a reader who renamed one still gets
+    what is in it. A JSON file this version cannot read is refused with a
+    sentence rather than dropped into the editor as text.
 18. support multi-tab open --
 19. Validate the code as linker would do. -- multidefinition scan
 

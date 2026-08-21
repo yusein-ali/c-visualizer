@@ -1,5 +1,6 @@
 import './files.css';
 import strings from '../../strings';
+import { download } from './download';
 import { iconFor } from '../controls/icons';
 
 /**
@@ -7,8 +8,8 @@ import { iconFor } from '../controls/icons';
  *
  * It was `FileForm` and `FileItem`, a Bootstrap panel around a
  * `react-download-link`. That package's whole content is what `download()`
- * below does - build a Blob, name a URL after it, click a link, release the
- * URL - so it left `package.json` with the framework.
+ * in `download.ts` does - build a Blob, name a URL after it, click a link,
+ * release the URL - so it left `package.json` with the framework.
  *
  * The panel holds no files of its own. The uploaded set lives in the
  * interpreter client, which is the only thing that can hand it to a program;
@@ -100,7 +101,7 @@ export class FilePanel {
     item.className = 'plivet-files__item';
 
     const save = this.button(strings.downloadFile, filename, 'download', () =>
-      this.download(filename, arrayBuffer)
+      download(filename, arrayBuffer)
     );
     const remove = this.button(strings.removeFile, filename, 'remove', () =>
       this.options.onDelete?.(filename)
@@ -130,18 +131,5 @@ export class FilePanel {
     button.appendChild(iconFor(icon));
     button.addEventListener('click', action);
     return button;
-  }
-
-  private download(filename: string, arrayBuffer: ArrayBuffer): void {
-    const url = URL.createObjectURL(
-      new Blob([arrayBuffer], { type: 'application/octet-stream' })
-    );
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = filename;
-    anchor.click();
-    // Released on the next turn rather than now: revoking a URL the browser
-    // has not finished reading cancels the download it was asked for.
-    setTimeout(() => URL.revokeObjectURL(url), 0);
   }
 }

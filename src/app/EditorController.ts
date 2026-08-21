@@ -195,6 +195,19 @@ export class EditorController {
     return this.sourcecode;
   }
 
+  /**
+   * A program from outside: a file the reader opened, or a host handing over
+   * a new one. The session is stopped first - the document is held while a
+   * program runs - and checked afterwards, so the editor's marks belong to
+   * the program that is now in it.
+   */
+  replaceCode(code: string): void {
+    this.bus.signal('debug', 'Stop');
+    this.editor.replaceCode(code);
+    this.sourcecode = code;
+    this.bus.signal('debug', 'SyntaxCheck');
+  }
+
   /** Everything a saved session holds: the program and what is marked on it. */
   session(): SessionJSON {
     return this.editor.debug.session(this.editor.view.state);
