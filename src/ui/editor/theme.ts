@@ -269,16 +269,11 @@ export const debugTheme = EditorView.baseTheme({
     marginTop: '0.3em',
     opacity: '0.8',
   },
-  '.plivet-macro-expansion': {
-    borderBottom: '1px dashed #2e8b57',
-    backgroundColor: 'rgba(46, 139, 87, 0.12)',
-  },
+  // Excluded code is visibly inactive. Macro expansions and directive lines
+  // deliberately have no mark: they are tooltip-only constructs, and an
+  // underline would promise navigation they do not provide.
   '.plivet-excluded-region': {
     backgroundColor: 'rgba(128, 128, 128, 0.18)',
-  },
-  '.plivet-directive-line': {
-    borderBottom: '1px dotted rgba(70, 130, 180, 0.6)',
-    backgroundColor: 'rgba(70, 130, 180, 0.1)',
   },
   // The hover tooltip is the only one PLIVET adds, so its wrapper can be
   // styled by the class CodeMirror already puts on hover tooltips; there is no
@@ -365,10 +360,12 @@ export const debugTheme = EditorView.baseTheme({
     color: 'var(--plivet-tooltip-color, #f8f8f2)',
     border: '1px solid rgba(255, 255, 255, 0.25)',
   },
-  // While ctrl or command is held, the text is something to follow rather
-  // than something to select. It is the only sign the gesture exists.
-  '&.plivet-goto-ready .cm-content': {
+  // Only a name with a declaration to follow becomes a link. Syntax colours
+  // remain legible; the underline and pointer carry the link affordance.
+  '.plivet-declaration-link': {
     cursor: 'pointer',
+    textDecoration: 'underline',
+    textUnderlineOffset: '0.15em',
   },
   // Where the canvas is pointing. It is deliberately not the step marker's
   // colour: one says where the program is, the other where the reader is.

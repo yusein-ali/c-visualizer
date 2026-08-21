@@ -151,8 +151,8 @@ export class EditorController {
    */
   /**
    * The declarations the last syntax check found, kept because two things ask
-   * about them from here: the hover, which is handed them, and the ctrl-click
-   * that goes to one.
+   * about them from here: the tooltip hover, which is handed them, and the
+   * identifier hover link that goes to one.
    */
   private constructs: Construct[] = [];
   private syntaxErrors: SyntaxErrorModel[] = [];
@@ -255,7 +255,7 @@ export class EditorController {
    *
    * Everything the editor knows about the program comes from a check: the
    * construct tooltips, the completion of the program's own names, the
-   * teaching rules, and the ctrl-click that goes to a declaration. Until now
+   * teaching rules, and the hover link that goes to a declaration. Until now
    * the first one ran a second after the first edit, so all four were dead on
    * a program the reader had opened and not yet typed into - which is exactly
    * the program a reader is most likely to be asking questions about.
@@ -473,7 +473,7 @@ export class EditorController {
           }
           const { errors, expansions, constructs, lints } = response;
           const seen = typeof constructs === 'undefined' ? [] : constructs;
-          // What the ctrl-click resolves a name against. It is kept here
+          // What the hover link resolves a name against. It is kept here
           // rather than asked of the hover, because the hover is handed the
           // constructs and does not hand them back.
           this.constructs = seen;
@@ -615,7 +615,7 @@ export class EditorController {
   }
 
   /**
-   * Where the name under a ctrl-click was declared.
+   * Where the name under a declaration-navigation gesture was declared.
    *
    * The constructs are the ones the last syntax check produced, so a program
    * that has not been checked - or one that does not parse - has nowhere to

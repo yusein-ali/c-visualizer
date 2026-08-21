@@ -1,11 +1,16 @@
-import { Extension } from '@codemirror/state';
-import { EditorView, keymap } from '@codemirror/view';
+import { Extension, StateEffect, StateField } from '@codemirror/state';
+import {
+  Decoration,
+  DecorationSet,
+  EditorView,
+  keymap,
+} from '@codemirror/view';
 import { SourceRange } from './positions';
 import { setFocusRange } from './focus';
 import { rowAt } from './positions';
 
 /**
- * Ctrl-click a name, and the editor goes to where it was declared.
+ * Hover a declared name and it becomes a link; follow it to the declaration.
  *
  * It is the one navigation a reader of an unfamiliar program asks for
  * constantly - what is this, where did it come from, what does this function
@@ -41,6 +46,31 @@ export type DeclarationSource = (
 
 /** How long the declaration stays marked after the jump, in milliseconds. */
 const FLASH = 1400;
+
+/** The one identifier currently offered as a declaration link. */
+const setDeclarationLink = StateEffect.define<SourceRange | null>();
+
+const declarationLink = Decoration.mark({
+  class: 'plivet-declaration-link',
+});
+
+const declarationLinkField = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(link, transaction) {
+    let updated = link.map(transaction.changes);
+    for (const effect of transaction.effects) {
+      if (effect.is(setDeclarationLink)) {
+        const range = effect.value;
+        updated =
+          range === null || range.to <= range.from
+            ? Decoration.none
+            : Decoration.set([declarationLink.range(range.from, range.to)]);
+      }
+    }
+    return updated;
+  },
+  provide: (field) => EditorView.decorations.from(field),
+});
 
 /**
  * Which platform this is, asked per event rather than once: it costs nothing,
@@ -92,6 +122,52 @@ const requestAt = (
   };
 };
 
+/** The word occupied by the declaration link, if one is being shown. */
+const linkedRange = (view: EditorView): SourceRange | null => {
+  let found: SourceRange | null = null;
+  view.state
+    .field(declarationLinkField)
+    .between(0, view.state.doc.length, (from, to) => {
+      found = { from, to };
+    });
+  return found;
+};
+
+const showLink = (view: EditorView, range: SourceRange | null): void => {
+  const shown = linkedRange(view);
+  if (
+    (shown === null && range === null) ||
+    (shown !== null &&
+      range !== null &&
+      shown.from === range.from &&
+      shown.to === range.to)
+  ) {
+    return;
+  }
+  view.dispatch({ effects: setDeclarationLink.of(range) });
+};
+
+/** Resolve the identifier under a pointer and show only resolvable names. */
+const updateLink = (
+  event: MouseEvent,
+  view: EditorView,
+  find: DeclarationSource
+): void => {
+  const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
+  if (pos === null) {
+    showLink(view, null);
+    return;
+  }
+  const word = view.state.wordAt(pos);
+  const request = requestAt(view, pos);
+  showLink(
+    view,
+    word !== null && request !== null && find(request) !== null
+      ? { from: word.from, to: word.to }
+      : null
+  );
+};
+
 /**
  * Puts the cursor on the declaration, brings it into view, and marks it for a
  * moment.
@@ -118,15 +194,21 @@ export const goTo = (view: EditorView, range: SourceRange): void => {
 };
 
 /**
- * The gesture: ctrl-click, and F12 on the word under the cursor for a reader
- * who is not using a pointer at all.
+ * A resolvable identifier becomes a link while the pointer is over it. A
+ * primary click follows that link. Ctrl/Command-click remains available for
+ * readers accustomed to editors, and F12 does the same from the keyboard.
  */
 export const gotoDeclaration = (find: DeclarationSource): Extension => [
+  declarationLinkField,
   EditorView.domEventHandlers({
+    mousemove(event: MouseEvent, view: EditorView) {
+      updateLink(event, view, find);
+      return false;
+    },
     mousedown(event: MouseEvent, view: EditorView) {
       // The primary button only. A secondary click is the reader asking for a
       // menu, and on a Mac that is exactly what a ctrl-click is.
-      if (event.button !== 0 || !modifierHeld(event)) {
+      if (event.button !== 0 || event.altKey) {
         return false;
       }
       const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
@@ -137,31 +219,32 @@ export const gotoDeclaration = (find: DeclarationSource): Extension => [
       if (request === null) {
         return false;
       }
+      const word = view.state.wordAt(pos);
+      const shown = linkedRange(view);
+      const followsHoverLink =
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.shiftKey &&
+        word !== null &&
+        shown !== null &&
+        shown.from === word.from &&
+        shown.to === word.to;
+      if (!followsHoverLink && !modifierHeld(event)) {
+        return false;
+      }
       const found = find(request);
       if (found === null) {
-        // Not handled: a ctrl-click on a name nothing declares should still
-        // behave like the click it is, rather than swallowing itself.
+        // Not handled: a name nothing declares should still behave like the
+        // click it is, rather than swallowing itself.
         return false;
       }
       event.preventDefault();
       goTo(view, found);
+      showLink(view, null);
       return true;
     },
-    // The pointer says what the modifier would do, which is the only sign a
-    // reader gets that the gesture exists at all.
-    keydown(event: KeyboardEvent, view: EditorView) {
-      const held = onMac()
-        ? event.metaKey && !event.ctrlKey
-        : event.ctrlKey && !event.metaKey;
-      view.dom.classList.toggle('plivet-goto-ready', held && !event.altKey);
-      return false;
-    },
-    keyup(_event: KeyboardEvent, view: EditorView) {
-      view.dom.classList.remove('plivet-goto-ready');
-      return false;
-    },
     mouseleave(_event: MouseEvent, view: EditorView) {
-      view.dom.classList.remove('plivet-goto-ready');
+      showLink(view, null);
       return false;
     },
   }),

@@ -71,9 +71,9 @@ export interface DebugExtensionOptions {
    */
   onHoverObject?: (object: string | null) => void;
   /**
-   * Where a name was declared, for the ctrl-click that goes there. The editor
+   * Where a name was declared, for the hover link that goes there. The editor
    * knows where the pointer is; what a name refers to is the application's,
-   * and leaving this out leaves the gesture off.
+   * and leaving this out leaves declaration navigation off.
    */
   declarationAt?: DeclarationSource;
   /**

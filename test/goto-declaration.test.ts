@@ -168,6 +168,86 @@ describe('the modifier the platform uses', () => {
   });
 });
 
+describe('the identifier under the pointer', () => {
+  const at = PROGRAM.indexOf('+ total') + 2;
+
+  const moveTo = (view: EditorView, pos: number): void => {
+    view.posAtCoords = () => pos;
+    view.contentDOM.dispatchEvent(
+      new MouseEvent('mousemove', { bubbles: true, clientX: 10, clientY: 10 })
+    );
+  };
+
+  it('becomes a link only when it has a declaration to follow', () => {
+    const view = new EditorView({
+      state: EditorState.create({
+        doc: PROGRAM,
+        extensions: [
+          focusField,
+          gotoDeclaration((request: any) =>
+            request.word === 'total' ? { from: 0, to: 9 } : null
+          ),
+        ],
+      }),
+    });
+
+    moveTo(view, at);
+    expect(
+      view.contentDOM.querySelector('.plivet-declaration-link')!.textContent
+    ).toBe('total');
+
+    moveTo(view, PROGRAM.indexOf('return n'));
+    expect(
+      view.contentDOM.querySelector('.plivet-declaration-link')
+    ).toBeNull();
+    view.destroy();
+  });
+
+  it('follows the hovered link with a normal primary click', () => {
+    const view = new EditorView({
+      state: EditorState.create({
+        doc: PROGRAM,
+        extensions: [focusField, gotoDeclaration(() => ({ from: 0, to: 9 }))],
+      }),
+    });
+    view.dispatch({ selection: { anchor: at } });
+    moveTo(view, at);
+    view.contentDOM.dispatchEvent(
+      new MouseEvent('mousedown', { bubbles: true, button: 0 })
+    );
+
+    expect(view.state.selection.main.anchor).toBe(0);
+    expect(
+      view.contentDOM.querySelector('.plivet-declaration-link')
+    ).toBeNull();
+    view.destroy();
+  });
+
+  it('leaves a normal click alone until a resolvable name is hovered', () => {
+    const asked: string[] = [];
+    const view = new EditorView({
+      state: EditorState.create({
+        doc: PROGRAM,
+        extensions: [
+          focusField,
+          gotoDeclaration((request: any) => {
+            asked.push(request.word);
+            return { from: 0, to: 9 };
+          }),
+        ],
+      }),
+    });
+    view.dispatch({ selection: { anchor: at } });
+    view.posAtCoords = () => at;
+    view.contentDOM.dispatchEvent(
+      new MouseEvent('mousedown', { bubbles: true, button: 0 })
+    );
+
+    expect(asked).toEqual([]);
+    view.destroy();
+  });
+});
+
 describe('the jump itself', () => {
   const viewWith = (find: any) =>
     new EditorView({
