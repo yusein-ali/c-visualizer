@@ -1,4 +1,5 @@
 import './console.css';
+import strings from '../../strings';
 
 /**
  * The program's console: what it printed, and what the user types when it
@@ -21,6 +22,8 @@ import './console.css';
 export interface PlivetConsoleOptions {
   /** Initial transcript. */
   output?: string;
+  /** Permanent heading above input and output. */
+  title?: string;
   /**
    * A line the user submitted, without its terminating newline. Empty is a
    * legitimate submission: it is how a program is told to read nothing.
@@ -36,6 +39,7 @@ export interface PlivetConsoleOptions {
 
 const defaults = {
   output: '',
+  title: strings.consoleTitle,
   inputHint: 'Enter to submit, Shift+Enter for another line',
   inputLabel: 'standard input',
   dark: false,
@@ -58,6 +62,12 @@ export class PlivetConsole {
 
     this.root = document.createElement('div');
     this.root.className = 'plivet-console';
+    this.root.setAttribute('role', 'region');
+    this.root.setAttribute('aria-label', config.title);
+
+    const title = document.createElement('h2');
+    title.className = 'plivet-console-title';
+    title.textContent = config.title;
 
     this.transcript = document.createElement('pre');
     this.transcript.className = 'plivet-console-output';
@@ -78,8 +88,7 @@ export class PlivetConsole {
     this.field.addEventListener('keydown', this.keydown);
     this.field.addEventListener('input', this.fitField);
 
-    this.root.appendChild(this.transcript);
-    this.root.appendChild(this.field);
+    this.root.append(title, this.transcript, this.field);
     parent.appendChild(this.root);
 
     this.setDark(config.dark);

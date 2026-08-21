@@ -194,6 +194,7 @@ const strings = {
   uploadFile: 'The uploaded file will be displayed here.',
   downloadFile: 'download',
   removeFile: 'remove',
+  consoleTitle: 'STDIO Console',
   consoleInputLabel: 'standard input',
   // The console only accepts input while a read is blocked, so the hint is
   // also how the user learns that the program is waiting for one.

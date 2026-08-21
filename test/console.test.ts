@@ -19,6 +19,16 @@ afterEach(() => {
 });
 
 describe('output', () => {
+  it('always identifies the panel as the STDIO Console', () => {
+    const { parent } = mount();
+    const title = parent.querySelector('.plivet-console-title');
+
+    expect(title?.textContent).toBe('STDIO Console');
+    expect(
+      parent.querySelector('.plivet-console')?.getAttribute('aria-label')
+    ).toBe('STDIO Console');
+  });
+
   it('shows what the program printed, as text', () => {
     const { console, output } = mount();
     console.setOutput('<not markup>\n');
