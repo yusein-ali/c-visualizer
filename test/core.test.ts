@@ -148,6 +148,8 @@ describe('extractModel', () => {
       variables: [],
       inlineValues: [],
       constructStates: [],
+      frames: [],
+      mutations: [],
       evaluations: [],
       codeRange: null,
     });

@@ -7,6 +7,7 @@ import {
   watchNames,
 } from '../src/ui/editor';
 import { HoverTextSource } from '../src/app/hoverText';
+import { emptyStepModel } from '../src/core';
 
 /**
  * A watch window with no window.
@@ -95,18 +96,7 @@ describe('pinned watches', () => {
 
   it('says a pinned name is out of the frame rather than vanishing', () => {
     const hover = new HoverTextSource();
-    hover.setStep({
-      stacks: [],
-      pointers: [],
-      memory: [],
-      functions: [],
-      expression: null,
-      variables: [],
-      inlineValues: [],
-      constructStates: [],
-      evaluations: [],
-      codeRange: null,
-    });
+    hover.setStep(emptyStepModel());
     const record = hover.watchRecord('count');
     expect(record.title).toBe('count');
     expect(record.facts[0].label).toContain('frame');

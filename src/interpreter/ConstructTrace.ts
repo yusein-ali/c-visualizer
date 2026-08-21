@@ -13,11 +13,15 @@ import { UniTernaryOp } from 'unicoen.ts/dist/node/UniTernaryOp';
 import { UniUnaryOp } from 'unicoen.ts/dist/node/UniUnaryOp';
 import { UniWhile } from 'unicoen.ts/dist/node/UniWhile';
 import { ASSIGNMENT, expressionValue } from './ExpressionTrace';
+import { UniIdent } from 'unicoen.ts/dist/node/UniIdent';
+import { UniVariableDec } from 'unicoen.ts/dist/node/UniVariableDec';
 import type {
   CodeRangeModel,
   ConstructFactModel,
   ConstructStateModel,
   EvaluationModel,
+  FrameModel,
+  MutationModel,
 } from '../core/model';
 
 /**
@@ -57,6 +61,15 @@ import type {
 interface StateWithConstructs extends ExecState {
   plivetConstructs?: ConstructStateModel[];
   plivetEvaluations?: EvaluationModel[];
+  plivetFrames?: FrameModel[];
+  /**
+   * The whole log, shared by reference rather than copied per step, with the
+   * length it had at this step beside it. Stepping back is a lookup in the
+   * history, and a step that showed writes made after it would be showing the
+   * reader a future they have not reached.
+   */
+  plivetMutations?: MutationModel[];
+  plivetMutationCount?: number;
 }
 
 /**
@@ -101,6 +114,54 @@ interface Marker {
   label?: string;
 }
 
+/**
+ * How many writes the log keeps. A run of a hundred thousand iterations
+ * writes a hundred thousand times, and the reader is looking at the recent
+ * ones; the oldest go rather than the tab.
+ */
+const MUTATION_LIMIT = 500;
+
+/**
+ * The object an assignment names, spelled as the source names it.
+ *
+ * The recorder has the tree and not the text, so this is a reading of the
+ * left-hand side rather than a slice of the file: enough for `total`,
+ * `arr[2]`, `p->count` and `*p`, which is what an assignment in a teaching
+ * program is written against. Anything it cannot spell says nothing, because
+ * a wrong name in a log of writes is worse than a missing one.
+ */
+const targetText = (node: unknown): string => {
+  if (node === null || typeof node !== 'object') {
+    return '';
+  }
+  if (node instanceof UniIdent) {
+    return node.name;
+  }
+  if (node instanceof UniVariableDec) {
+    const first = (node.variables ?? [])[0];
+    return typeof first === 'undefined' ? '' : String(first.name ?? '');
+  }
+  if (node instanceof UniUnaryOp) {
+    const inner = targetText(node.expr);
+    return inner === '' ? '' : `${node.operator}${inner}`;
+  }
+  if (node instanceof UniBinOp) {
+    const left = targetText(node.left);
+    const right = targetText(node.right);
+    if (left === '') {
+      return '';
+    }
+    if (node.operator === '[]') {
+      return `${left}[${right}]`;
+    }
+    if (node.operator === '.' || node.operator === '->') {
+      return `${left}${node.operator}${right}`;
+    }
+    return '';
+  }
+  return '';
+};
+
 /** One construct, and what has happened to it so far. */
 interface Activation {
   node: object;
@@ -119,6 +180,10 @@ interface Activation {
   result?: string;
   /** What a cast was handed, before it converted it. */
   source?: string;
+  /** For an assignment: the object it writes, as the source names it. */
+  target?: string;
+  /** For a `functionDec`: the function's own name. */
+  name?: string;
   /** What an assignment's target held before the assignment. */
   before?: string;
   timesEntered?: number;
@@ -335,6 +400,8 @@ export class ConstructRecorder {
   private entries = new Map<object, number>();
   /** What each part of the statement running now has come to. */
   private evaluations = new Map<object, EvaluationModel>();
+  /** Every write the run has made, oldest first, bounded. */
+  private mutations: MutationModel[] = [];
 
   /**
    * A new run. The index is built once, from the tree about to execute: a
@@ -348,6 +415,7 @@ export class ConstructRecorder {
     this.assigning = [];
     this.entries = new Map<object, number>();
     this.evaluations = new Map<object, EvaluationModel>();
+    this.mutations = [];
     this.index(program);
     if (entryPoint !== null) {
       // Nothing calls `main`, so its activation is opened here; the count is
@@ -492,6 +560,9 @@ export class ConstructRecorder {
         marker.role === 'assigned'
       ) {
         activation.result = spelled;
+        if (marker.role === 'assigned') {
+          this.wrote(activation);
+        }
       } else if (marker.role === 'argument') {
         const index = marker.index ?? 0;
         activation.args[index] = spelled;
@@ -531,6 +602,11 @@ export class ConstructRecorder {
     (state as StateWithConstructs).plivetEvaluations = Array.from(
       this.evaluations.values()
     );
+    (state as StateWithConstructs).plivetFrames = this.framesOf();
+    // By reference, with the length it has now: a step is cheap to attach and
+    // stepping back still shows the log as it stood at that step.
+    (state as StateWithConstructs).plivetMutations = this.mutations;
+    (state as StateWithConstructs).plivetMutationCount = this.mutations.length;
     // An assignment whose right-hand side called something is still going on:
     // its record has to outlive the stops inside that call, or the value the
     // target held would be forgotten before the value replacing it arrives.
@@ -546,6 +622,11 @@ export class ConstructRecorder {
     this.evaluations = new Map<object, EvaluationModel>();
     (state as StateWithConstructs).plivetConstructs = [];
     (state as StateWithConstructs).plivetEvaluations = [];
+    (state as StateWithConstructs).plivetFrames = [];
+    // The writes stand: the program has ended, and what it did on the way is
+    // what a reader looks at afterwards.
+    (state as StateWithConstructs).plivetMutations = this.mutations;
+    (state as StateWithConstructs).plivetMutationCount = this.mutations.length;
   }
 
   /**
@@ -576,9 +657,89 @@ export class ConstructRecorder {
     const range = rangeOf(node);
     // A construct the tooltip cannot be pointed at is not worth recording:
     // every surface that reads these finds one by where it is written.
-    return range === null
-      ? null
-      : { node, kind, range, labels: [], args: [], parameters: [] };
+    if (range === null) {
+      return null;
+    }
+    const activation: Activation = {
+      node,
+      kind,
+      range,
+      labels: [],
+      args: [],
+      parameters: [],
+    };
+    if (kind === 'functionDec') {
+      activation.name = String((node as { name?: unknown }).name ?? '');
+    }
+    if (kind === 'assignment') {
+      activation.target = targetText((node as { left?: unknown }).left ?? node);
+    }
+    return activation;
+  }
+
+  /**
+   * One write, kept after the step that made it.
+   *
+   * The frame is the innermost function on the stack rather than the one the
+   * statement is written in, and they differ exactly where it matters: a
+   * write inside a callee is a write to the callee's own copy, which is C's
+   * by-value passing said as a fact rather than as a warning.
+   */
+  private wrote(activation: Activation): void {
+    const target = activation.target ?? '';
+    if (target === '' || typeof activation.result === 'undefined') {
+      return;
+    }
+    this.mutations.push({
+      target,
+      frame: this.innermostFunction(),
+      before: activation.before ?? '',
+      after: activation.result,
+      line: activation.range.begin.y,
+    });
+    if (MUTATION_LIMIT < this.mutations.length) {
+      this.mutations.shift();
+    }
+  }
+
+  private innermostFunction(): string {
+    for (let i = this.stack.length - 1; 0 <= i; i -= 1) {
+      const activation = this.stack[i];
+      if (activation.kind === 'functionDec') {
+        return activation.name ?? '';
+      }
+    }
+    return '';
+  }
+
+  /**
+   * The functions the run is inside, outermost first, each with the call that
+   * entered it. The memory map draws the frames as storage; this is the other
+   * question a reader asks of a stack - who called whom, from where, and with
+   * what.
+   */
+  private framesOf(): FrameModel[] {
+    const frames: FrameModel[] = [];
+    this.stack.forEach((activation, index) => {
+      if (activation.kind !== 'functionDec') {
+        return;
+      }
+      const site =
+        0 < index && this.stack[index - 1].kind === 'call'
+          ? this.stack[index - 1]
+          : null;
+      frames.push({
+        name: activation.name ?? '',
+        line: activation.range.begin.y,
+        calledFrom: site === null ? null : site.range.begin.y,
+        arguments: (site === null ? [] : site.args).map((value, position) => ({
+          name: activation.parameters[position] ?? '',
+          value,
+        })),
+        timesEntered: activation.timesEntered ?? 1,
+      });
+    });
+    return frames;
   }
 
   private remember(activation: Activation): void {
@@ -738,4 +899,25 @@ export function constructStatesOf(state: ExecState): ConstructStateModel[] {
 export function evaluationsOf(state: ExecState): EvaluationModel[] {
   const evaluations = (state as StateWithConstructs).plivetEvaluations;
   return typeof evaluations === 'undefined' ? [] : evaluations;
+}
+
+export function framesOf(state: ExecState): FrameModel[] {
+  const frames = (state as StateWithConstructs).plivetFrames;
+  return typeof frames === 'undefined' ? [] : frames;
+}
+
+/**
+ * The writes made up to this step. The log itself is shared by every state of
+ * the run, so what makes this step's answer this step's is the count taken
+ * when it was attached.
+ */
+export function mutationsOf(state: ExecState): MutationModel[] {
+  const mutations = (state as StateWithConstructs).plivetMutations;
+  if (typeof mutations === 'undefined') {
+    return [];
+  }
+  const count = (state as StateWithConstructs).plivetMutationCount;
+  return typeof count === 'undefined'
+    ? mutations.slice()
+    : mutations.slice(0, count);
 }

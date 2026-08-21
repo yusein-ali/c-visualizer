@@ -6,6 +6,8 @@ import type { RuntimeStringLiteral } from '../interpreter/RuntimeTypeInfo';
 import {
   constructStatesOf,
   evaluationsOf,
+  framesOf as callFramesOf,
+  mutationsOf,
 } from '../interpreter/ConstructTrace';
 import { expressionTraceOf } from '../interpreter/ExpressionTrace';
 import { statementNames } from '../interpreter/StatementNames';
@@ -686,6 +688,8 @@ export function extractModel(execState?: ExecState | null): StepModel {
     variables,
     inlineValues: inlineValuesFor(execState, variables),
     constructStates: constructStatesOf(execState),
+    frames: callFramesOf(execState),
+    mutations: mutationsOf(execState),
     evaluations: evaluationsOf(execState),
     codeRange: codeRangeOf(execState),
   };

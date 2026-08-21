@@ -1,0 +1,119 @@
+/*
+ * The panes under the canvas. Closed, the strip is the panel alone - a row of
+ * switches the height of one line - so a reader who wants neither pane pays a
+ * line of the page for knowing they exist.
+ */
+.plivet-views {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.35rem 0.5rem;
+  border-top: 1px solid var(--plivet-line, #ccc);
+  background: var(--plivet-surface, #fff);
+  color: var(--plivet-ink, #222);
+  font-size: 0.85rem;
+}
+
+.plivet-views__panel {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+}
+
+.plivet-views__title {
+  font-weight: bold;
+  opacity: 0.7;
+}
+
+.plivet-views__switch {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  cursor: pointer;
+}
+
+.plivet-views__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.plivet-views--open .plivet-views__body {
+  max-height: 30vh;
+  overflow: auto;
+}
+
+.plivet-view {
+  border: 1px solid var(--plivet-line, #ccc);
+  border-radius: 4px;
+}
+
+.plivet-view__title {
+  margin: 0;
+  padding: 0.25rem 0.5rem;
+  border-bottom: 1px solid var(--plivet-line, #ccc);
+  /* The header takes the theme's own button colour rather than a literal, so
+     the strip follows the shell into the dark theme with everything else. */
+  background: var(--plivet-button-bg, #eef2f6);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.plivet-view__body {
+  padding: 0.3rem 0.5rem;
+}
+
+.plivet-view__empty {
+  margin: 0;
+  font-style: italic;
+  opacity: 0.65;
+}
+
+.plivet-view__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  padding: 0.15rem 0;
+}
+
+/* The frame the step marker is in: the one a reader is asking about. */
+.plivet-view__row--current {
+  font-weight: bold;
+}
+
+.plivet-view__name,
+.plivet-view__args,
+.plivet-view__code {
+  font-family: var(
+    --plivet-editor-font,
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    monospace
+  );
+}
+
+.plivet-view__where,
+.plivet-view__times {
+  opacity: 0.7;
+}
+
+.plivet-view__table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.plivet-view__table th {
+  text-align: left;
+  font-weight: normal;
+  opacity: 0.7;
+  padding-right: 0.8rem;
+}
+
+.plivet-view__table td {
+  padding-right: 0.8rem;
+  white-space: nowrap;
+}

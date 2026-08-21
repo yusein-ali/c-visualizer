@@ -232,3 +232,14 @@
 .plivet__footer a {
   color: #ffffff;
 }
+
+/*
+ * The strip under the canvas. It grows with what is opened in it and takes no
+ * room at all when the widget inside it is empty, so a reader who opens
+ * neither pane loses nothing to it.
+ */
+.plivet__views {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}

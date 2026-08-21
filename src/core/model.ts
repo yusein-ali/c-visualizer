@@ -184,6 +184,55 @@ const ALWAYS_SHOWN: ReadonlySet<MemoryRegion> = new Set<MemoryRegion>([
 export const startsShown = (region: MemoryRegion, holds: boolean): boolean =>
   holds || ALWAYS_SHOWN.has(region);
 
+/** One argument a call passed, beside the parameter it initialised. */
+export interface FrameArgumentModel {
+  /** The parameter's name, or empty where the callee is not the program's. */
+  name: string;
+  value: string;
+}
+
+/**
+ * One function the run is inside: a frame of the call stack, as a reader
+ * reads one.
+ *
+ * The memory map already draws the frames as bands of storage. This is the
+ * other question a reader asks of a stack - who called whom, from where, with
+ * what - and it is not a question about memory: the answer is in the calls,
+ * not in the bytes they left behind.
+ */
+export interface FrameModel {
+  name: string;
+  /** 1-based line the function is defined on. */
+  line: number;
+  /** The line the call was written on; null for the function nothing called. */
+  calledFrom: number | null;
+  /** What it was passed, in order, spelled as C passed it: by value. */
+  arguments: FrameArgumentModel[];
+  /** How many times it has been entered so far, this activation included. */
+  timesEntered: number;
+}
+
+/**
+ * One write the run has made, kept after the step that made it.
+ *
+ * Every other view says what memory holds now. This one says what it held
+ * before, which is the question a reader asks when a value is wrong and they
+ * are looking for the statement that made it wrong - and across calls, which
+ * is where C's by-value passing surprises people: a write inside a callee is
+ * a write to the callee's own copy, and a log that says which frame it
+ * happened in is the shortest way to see that.
+ */
+export interface MutationModel {
+  /** The object as the source names it: `total`, `arr[2]`, `*p`. */
+  target: string;
+  /** The function whose frame the write happened in. */
+  frame: string;
+  before: string;
+  after: string;
+  /** 1-based line of the assignment. */
+  line: number;
+}
+
 /** A function occupies the text segment even though it is not a C object. */
 export interface FunctionModel {
   name: string;
@@ -333,6 +382,10 @@ export interface StepModel {
   inlineValues: InlineValueModel[];
   /** What the constructs the step is inside are doing, for the tooltips. */
   constructStates: ConstructStateModel[];
+  /** The functions the run is inside, outermost first. */
+  frames: FrameModel[];
+  /** Every write the run has made up to this step, oldest first. */
+  mutations: MutationModel[];
   /** What the parts of the statement the step just finished came to. */
   evaluations: EvaluationModel[];
   /**
@@ -351,6 +404,8 @@ export const emptyStepModel = (): StepModel => ({
   variables: [],
   inlineValues: [],
   constructStates: [],
+  frames: [],
+  mutations: [],
   evaluations: [],
   codeRange: null,
 });

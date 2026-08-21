@@ -962,7 +962,7 @@ and 10.
 
 ## Phase 12: teaching features
 
-**Status: items 1 to 13 done.** Items 1 to 4 are the phase proper; the rest are
+**Status: items 1 to 16 done.** Items 1 to 4 are the phase proper; the rest are
 independent of it and of each other, and can be taken in any order or dropped.
 
 Everything before this phase is parity work: the same application on a stack
@@ -1374,9 +1374,38 @@ it, and can be taken in any order or dropped.
     not arrived falls back to the summary the geometry works out on its own,
     so the heading always has something under it.
 
-14. Create a view for visualizing the call stack.
-15. Create a view for visualizing the mutation of variables among the function calls.
-16. Add a control panel to activate and de-active the views.
+14. **A view of the call stack.** **Done.** `CallStackView` under the canvas,
+    innermost frame first: the function, the line the call is written on, the
+    arguments it was passed beside the parameters they filled, and how many
+    times the run has entered it. The memory map already draws the frames as
+    bands of storage, and that is a different question - a frame there is an
+    address and the objects in it, and here it is a call. The arguments are
+    what earn the view its place: C passes by value, nothing else on the
+    screen says so, and a frame showing `n = 1` beside the call that wrote
+    `twice(total)` is that rule said once per call. The data is
+    `StepModel.frames`, built by `ConstructTrace` from the activations it
+    already keeps, so nothing walks the interpreter's objects from outside.
+15. **A view of what the run has written.** **Done.** `MutationView`, newest
+    write first: the frame it happened in, the object as the source names it,
+    what it held before, what it holds after, and the line. Every other view
+    says what memory holds now; this says what it held before, which is the
+    question a reader asks when a value is wrong and they are looking for the
+    statement that made it wrong. The frame column is why it is a view rather
+    than a column somewhere else: a write inside a callee is a write to the
+    callee's own copy, and naming the frame shows the by-value rule happening
+    instead of asserting it. The log lives in the recorder, bounded at 500
+    writes, and rides every state by reference with the length it had at that
+    step beside it - so attaching it costs a step nothing, and stepping back
+    shows the log as it stood rather than a future the reader has not reached.
+16. **A control panel for the views.** **Done.** The switches sit in the strip
+    that holds the panes, above them: the canvas's own disclosure decides what
+    the canvas draws, and a control that turned off a pane somewhere else on
+    the page would be one a reader has to go looking for. Both panes start
+    off - a view worth having is not worth having by default, and the two
+    columns a reader opens PLIVET for are the editor and the map - and a pane
+    that is off is filled with nothing as well as hidden, so a run of a
+    hundred thousand writes costs a reader who is not looking at them no rows
+    at all. Closed, the whole strip is one line of switches.
 17. Add save code, open code.
 18. support multi-tab open --
 19. Validate the code as linker would do. -- multidefinition scan
