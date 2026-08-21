@@ -3,6 +3,7 @@ import { UniBinOp } from 'unicoen.ts/dist/node/UniBinOp';
 import { UniBlock } from 'unicoen.ts/dist/node/UniBlock';
 import { UniBreak } from 'unicoen.ts/dist/node/UniBreak';
 import { UniCharacterLiteral } from 'unicoen.ts/dist/node/UniCharacterLiteral';
+import { UniClassDec } from 'unicoen.ts/dist/node/UniClassDec';
 import { UniDoWhile } from 'unicoen.ts/dist/node/UniDoWhile';
 import { UniDoubleLiteral } from 'unicoen.ts/dist/node/UniDoubleLiteral';
 import { UniFor } from 'unicoen.ts/dist/node/UniFor';
@@ -359,6 +360,8 @@ class LintPass {
   readonly returnTypes = new Map<string, string>();
   /** Identifiers being assigned to rather than read. */
   readonly assigned = new Set<any>();
+  /** Identifiers that name a member after `.` or `->`, rather than an object. */
+  readonly memberSelectors = new Set<any>();
   /** Names already reported by a rule that reports each name once. */
   readonly reported = new Set<string>();
 
@@ -683,6 +686,17 @@ const uninitializedRead: Rule = {
   name: 'uninitialized-read',
   severity: 'warning',
   enter(node, pass) {
+    if (
+      node instanceof UniBinOp &&
+      (node.operator === '.' || node.operator === '->') &&
+      node.right instanceof UniIdent
+    ) {
+      // Unicoen represents `record.member` as a binary operation whose right
+      // side is an identifier. That identifier selects a field; it is not a
+      // variable read and must not be resolved through the lexical scope.
+      pass.memberSelectors.add(node.right);
+      return;
+    }
     if (isAssignment(node) && node.left instanceof UniIdent) {
       // The left of an assignment is written, not read. Marked here and
       // initialised on the way out, so `x = x + 1` still reports the read.
@@ -702,7 +716,11 @@ const uninitializedRead: Rule = {
       }
       return;
     }
-    if (!(node instanceof UniIdent) || pass.assigned.has(node)) {
+    if (
+      !(node instanceof UniIdent) ||
+      pass.assigned.has(node) ||
+      pass.memberSelectors.has(node)
+    ) {
       return;
     }
     const declared = pass.declared(node.name);
@@ -815,12 +833,12 @@ export function teachingDiagnostics(
   const pass = new LintPass(source);
   collectReturnTypes(root, pass);
 
-  const visit = (node: any): void => {
+  const visit = (node: any, parent: any = null): void => {
     if (node === null || typeof node !== 'object') {
       return;
     }
     if (Array.isArray(node)) {
-      node.forEach(visit);
+      node.forEach((child) => visit(child, parent));
       return;
     }
     if (typeof node.fields === 'undefined') {
@@ -840,14 +858,23 @@ export function teachingDiagnostics(
     // function it belongs to; declaring it again here would say it has no
     // initializer, which for a parameter means nothing - it arrives with
     // whatever the caller passed.
-    if (node instanceof UniVariableDec && !(node instanceof UniParam)) {
+    const isRecordMember =
+      node instanceof UniVariableDec && parent instanceof UniClassDec;
+    if (
+      node instanceof UniVariableDec &&
+      !(node instanceof UniParam) &&
+      !isRecordMember
+    ) {
       // Declared after the rules have seen the node, so the initializer of
       // `int y = x;` is still read against the scope that has no `y` in it.
+      // A declaration nested directly in a class declaration is a structure
+      // or union member, not a lexical variable; its name only has meaning on
+      // the right of `.` or `->`.
       declareVariables(node, pass);
     }
     for (const field of Array.from(node.fields.keys()) as string[]) {
       if (field !== 'comments' && field !== 'codeRange') {
-        visit(node[field]);
+        visit(node[field], node);
       }
     }
     for (const rule of RULES) {

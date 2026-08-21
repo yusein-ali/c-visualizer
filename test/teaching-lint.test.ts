@@ -222,6 +222,27 @@ int main(void) { return twice(2); }
 `;
     expect(rules(code)).not.toContain('uninitialized-read');
   });
+
+  it('does not mistake a structure or union member for a variable read', () => {
+    const code = `struct Pair { int left; int right; };
+union Number { int whole; char byte; };
+int main(void) {
+  struct Pair pair = {1, 2};
+  struct Pair *pointer = &pair;
+  union Number number = {0};
+  number.whole = pointer->left;
+  return number.whole;
+}
+`;
+    expect(rules(code)).not.toContain('uninitialized-read');
+  });
+
+  it('does not put record-member declarations in lexical scope', () => {
+    const code = `struct Pair { int left; };
+int main(void) { return left; }
+`;
+    expect(rules(code)).not.toContain('uninitialized-read');
+  });
 });
 
 describe('a function that can reach its end without returning', () => {
