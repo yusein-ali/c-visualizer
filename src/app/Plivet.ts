@@ -9,7 +9,7 @@ import {
 } from '../core';
 import { PlivetShell } from '../ui/shell';
 import type { EditableRegion, SessionJSON } from '../ui/editor';
-import type { SourceFile } from '../core';
+import type { SourceFile, ViewSelection } from '../core';
 import type { StatementExplanation } from '../ui/records';
 import { isSession } from '../ui/editor';
 import { ControlBar, ZOOM_COMMAND } from '../ui/controls';
@@ -22,6 +22,25 @@ import strings from '../strings';
 import { EditorController } from './EditorController';
 import { Bus } from './emitter';
 import { Theme, isDark } from './theme';
+
+/**
+ * The parts of PLIVET a page may switch off before it opens.
+ *
+ * They are features rather than view options because they are not about what
+ * the canvas draws: each one is a whole capability - a dialog, a panel - that
+ * a course page either wants in front of a reader or does not. A field left
+ * out is on, so the standalone page, which passes none of these, is PLIVET
+ * entire.
+ */
+export interface PlivetFeatures {
+  /** The button that shows the text the compiler sees after the preprocessor. */
+  preprocessor?: boolean;
+  /**
+   * The upload panel under the console: the data files a running program can
+   * `fopen`. A page whose exercises read no files leaves it out.
+   */
+  loadFile?: boolean;
+}
 
 /**
  * One PLIVET: a shell, six widgets, and the bus and interpreter between them.
@@ -53,6 +72,13 @@ export interface PlivetOptions {
   entry?: string;
   /** Which theme to open in. The switch in the control bar changes it after. */
   theme?: Theme;
+  /** What the page has switched off. Everything not named here is on. */
+  features?: PlivetFeatures;
+  /**
+   * What the canvas opens with drawn. The View panel still holds the switches,
+   * so this is where the reader starts rather than what they are held to.
+   */
+  views?: ViewSelection;
   /**
    * The parts of the program the reader may edit, as offsets into
    * `sourceCode`. Left out, all of it. This is how a page hands over a
@@ -84,7 +110,8 @@ export class Plivet {
   private readonly editor: EditorController;
   private readonly console: PlivetConsole;
   private readonly graph: PlivetGraph;
-  private readonly files: FilePanel;
+  /** Null where the page has switched the upload panel off. */
+  private readonly files: FilePanel | null;
   private readonly help: HowToDialog;
   /**
    * Built on the first press and kept after it. `@codemirror/merge` and the
@@ -96,12 +123,14 @@ export class Plivet {
 
   constructor(parent: HTMLElement, options: PlivetOptions = {}) {
     this.theme = options.theme ?? 'light';
+    const features = options.features ?? {};
     const { bus, client } = this;
 
     this.shell = new PlivetShell(parent, {
       version: packageJson.version,
-      fromYear: 2018,
+      fromYear: 2026,
       dark: isDark(this.theme),
+      files: features.loadFile !== false,
     });
 
     this.controls = new ControlBar(this.shell.controls, {
@@ -113,6 +142,7 @@ export class Plivet {
       onOpenFile: (file: File) => void this.openFile(file),
       onSaveCode: () => this.saveCode(),
       dark: isDark(this.theme),
+      preprocessor: features.preprocessor !== false,
     });
 
     this.editor = new EditorController(this.shell.editor, {
@@ -137,15 +167,22 @@ export class Plivet {
 
     this.graph = new PlivetGraph(this.shell.main, {
       model: emptyStepModel(),
+      dark: isDark(this.theme),
+      views: options.views,
       onFocus: (object: string | null) =>
         bus.signal('focusObject', object, 'graph'),
     });
 
-    this.files = new FilePanel(this.shell.files, {
-      onUpload: (files: FileList) => this.upload(files),
-      onDelete: (filename: string) =>
-        this.files.setFiles(client.delete(filename)),
-    });
+    // The panel and the box it mounts into go together: with the feature off
+    // there is no panel to build and no room given up to it.
+    this.files =
+      features.loadFile === false
+        ? null
+        : new FilePanel(this.shell.files, {
+            onUpload: (files: FileList) => this.upload(files),
+            onDelete: (filename: string) =>
+              this.files?.setFiles(client.delete(filename)),
+          });
 
     this.help = new HowToDialog(this.shell.root);
 
@@ -266,7 +303,7 @@ export class Plivet {
     this.bus.destroy();
     this.help.destroy();
     this.preprocessed?.destroy();
-    this.files.destroy();
+    this.files?.destroy();
     this.graph.destroy();
     this.console.destroy();
     this.editor.destroy();
@@ -285,8 +322,8 @@ export class Plivet {
 
   private async upload(files: FileList): Promise<void> {
     try {
-      this.files.setFiles(await this.client.upload(files));
-      this.files.clearSelection();
+      this.files?.setFiles(await this.client.upload(files));
+      this.files?.clearSelection();
     } catch (e) {
       // TypeScript types a caught value as `unknown`: whatever was thrown need
       // not be an Error, and here it comes from the FileReader.

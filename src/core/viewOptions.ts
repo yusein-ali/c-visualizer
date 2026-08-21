@@ -25,6 +25,26 @@ import { MemoryRegion } from './model';
  * opened while it was empty is still open when the first object lands in it,
  * and one they closed stays closed as the program fills it.
  */
+/**
+ * A view selection as something outside the canvas states it: the sections and
+ * the regions a caller wants drawn, with everything it does not name left to
+ * the canvas's own answer. The embedding page's configuration is one of these,
+ * which is why the shape sits here beside the state it sets rather than in the
+ * reader of any one caller.
+ */
+export interface ViewSelection {
+  statement?: boolean;
+  callStack?: boolean;
+  expression?: boolean;
+  memory?: boolean;
+  mutations?: boolean;
+  /**
+   * The regions the caller has an answer for. One left out keeps the rule the
+   * canvas applies to a region nobody has switched.
+   */
+  regions?: Partial<Record<MemoryRegion, boolean>>;
+}
+
 export class ViewOptions {
   private readonly chosen = new Map<MemoryRegion, boolean>();
   /** Whether the current statement's explanation is drawn. */
@@ -95,6 +115,36 @@ export class ViewOptions {
 
   public showMutations(shown: boolean): void {
     this.mutations = shown;
+  }
+
+  /**
+   * A caller's answer, for the parts it has one for: this is what a page that
+   * embeds the canvas passes in, and it is applied exactly like a click on the
+   * matching switch. A field left out is not "off" - it is the canvas's own
+   * decision, kept, which is what lets a page name the one section it cares
+   * about without settling the other four.
+   */
+  public apply(selection: ViewSelection): void {
+    if (typeof selection.statement === 'boolean') {
+      this.statement = selection.statement;
+    }
+    if (typeof selection.callStack === 'boolean') {
+      this.callStack = selection.callStack;
+    }
+    if (typeof selection.expression === 'boolean') {
+      this.expression = selection.expression;
+    }
+    if (typeof selection.memory === 'boolean') {
+      this.memory = selection.memory;
+    }
+    if (typeof selection.mutations === 'boolean') {
+      this.mutations = selection.mutations;
+    }
+    for (const [region, shown] of Object.entries(selection.regions ?? {})) {
+      if (typeof shown === 'boolean') {
+        this.showRegion(region as MemoryRegion, shown);
+      }
+    }
   }
 
   /** Back to what the canvas decides for itself. */

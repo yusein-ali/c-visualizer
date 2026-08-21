@@ -10,6 +10,7 @@ import {
   Point,
   StepModel,
   ViewOptions,
+  ViewSelection,
   emptyStepModel,
 } from '../../core';
 import strings from '../../strings';
@@ -31,6 +32,14 @@ import './graph.css';
 export interface PlivetGraphOptions {
   model?: StepModel;
   explanation?: StatementExplanation;
+  dark?: boolean;
+  /**
+   * What the canvas opens with drawn, for a caller with an opinion: a page
+   * teaching the stack can arrive without the expression tree in the way. It
+   * is the state the View panel writes, so the reader can still switch back
+   * anything the page switched off.
+   */
+  views?: ViewSelection;
   /**
    * The object the pointer is over, and null when it leaves. The canvas says
    * which object rather than which cell: a row is what a reader points at,
@@ -176,6 +185,9 @@ export class PlivetGraph {
     this.model = options.model || emptyStepModel();
     this.explanation = options.explanation ?? emptyStatementExplanation();
     this.onFocus = options.onFocus;
+    if (typeof options.views !== 'undefined') {
+      this.view.apply(options.views);
+    }
     // The switches read the map back, so the panel is built before the toolbar
     // that carries it and refreshed by every render.
     this.panel = viewPanel(

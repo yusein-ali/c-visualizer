@@ -10,6 +10,8 @@
  */
 export { Plivet, Plivet as CVisualizer } from './app/Plivet';
 export type {
+  PlivetFeatures,
+  PlivetFeatures as CVisualizerFeatures,
   PlivetOptions,
   PlivetOptions as CVisualizerOptions,
 } from './app/Plivet';

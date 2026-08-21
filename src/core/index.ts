@@ -54,6 +54,7 @@ export type {
 } from './layout';
 export { FoldState } from './foldState';
 export { ViewOptions } from './viewOptions';
+export type { ViewSelection } from './viewOptions';
 export { HISTORY_LIMIT, StepHistory } from './history';
 export {
   CELL_FONT_SIZE,

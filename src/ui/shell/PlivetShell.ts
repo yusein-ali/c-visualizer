@@ -31,6 +31,12 @@ export interface PlivetShellOptions {
   /** The first year in the copyright range. */
   fromYear?: number;
   dark?: boolean;
+  /**
+   * Whether the column keeps a box for the upload panel. A page whose programs
+   * read no files has no use for the box, and the editor and console take the
+   * room back. Default: it is there.
+   */
+  files?: boolean;
 }
 
 const REPOSITORY = 'https://github.com/yusein-ali/c-visualizer';
@@ -102,7 +108,7 @@ export class PlivetShell {
       this.editor,
       editorSplit.element,
       this.console,
-      this.files
+      ...(options.files === false ? [] : [this.files])
     );
 
     const columnSplit = new Splitter({
