@@ -135,6 +135,8 @@ export class EditorController {
   private activePath: string;
   private entryPath: string;
   private readonly hover: HoverTextSource;
+  /** Statement records for the entry file, independent of the visible tab. */
+  private readonly statement: HoverTextSource;
   private readonly completions: ProgramCompletions;
   private isDebugging = false;
   private fontSize = 14;
@@ -172,6 +174,7 @@ export class EditorController {
     this.activePath = this.entryPath;
     this.sourcecode = this.fileAt(this.activePath).text;
     this.hover = new HoverTextSource();
+    this.statement = new HoverTextSource();
     this.completions = new ProgramCompletions(libraryFunctions());
 
     // The strip goes above the editor, in the same box: the editor is what
@@ -415,6 +418,21 @@ export class EditorController {
       this.client
         .send(request)
         .then((response: Response) => {
+          // A slower check for text that has since changed must not replace
+          // the construct map delivered by Start for the program now running.
+          const currentEntry = this.fileAt(this.entryPath);
+          const currentEntryText =
+            this.entryPath === this.activePath
+              ? this.sourcecode
+              : currentEntry.text;
+          if (response.sourcecode !== currentEntryText) {
+            return;
+          }
+          const { errors, expansions, constructs, lints } = response;
+          const seen = typeof constructs === 'undefined' ? [] : constructs;
+          // The canvas always explains the entry file, even while another tab
+          // is visible. Its syntax map must therefore not be cleared below.
+          this.statement.setConstructs(seen);
           // What the parser found is about the translation unit. While the
           // reader is looking at another file, the marks come off rather than
           // land on lines they are not about.
@@ -425,7 +443,6 @@ export class EditorController {
             this.completions.setConstructs([]);
             return;
           }
-          const { errors, expansions, constructs, lints } = response;
           this.setSyntaxError(
             errors,
             typeof lints === 'undefined' ? [] : lints
@@ -433,7 +450,6 @@ export class EditorController {
           this.setExpansions(
             typeof expansions === 'undefined' ? [] : expansions
           );
-          const seen = typeof constructs === 'undefined' ? [] : constructs;
           this.hover.setConstructs(seen);
           this.completions.setConstructs(seen);
         })
@@ -463,7 +479,15 @@ export class EditorController {
     try {
       const { debugState, model, output, step, runtime, coverage } = response;
       this.setDebugging(debugState !== 'Stop');
+      if (typeof response.constructs !== 'undefined') {
+        this.statement.setConstructs(response.constructs);
+        if (this.entryPath === this.activePath) {
+          this.hover.setConstructs(response.constructs);
+          this.completions.setConstructs(response.constructs);
+        }
+      }
       this.hover.setStep(model);
+      this.statement.setStep(model);
       this.showWatches();
       this.setRuntimeDiagnostics(typeof runtime === 'undefined' ? [] : runtime);
       this.editor.debug.showCoverage(
@@ -478,7 +502,7 @@ export class EditorController {
       this.bus.signal(
         'draw',
         model,
-        this.hover.explainStatement(this.sourcecode)
+        this.statement.explainStatement(response.sourcecode)
       );
       this.setHighlightOnCode(debugState, model);
     } catch (e) {

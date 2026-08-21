@@ -88,7 +88,7 @@ export interface Response {
   model: StepModel;
   /** Preprocessor replacements, for the editor to mark. Syntax checks only. */
   expansions?: Expansion[];
-  /** Parsed statements, for the editor to explain. Syntax checks only. */
+  /** Parsed statements, for the editor and canvas to explain. Checks/Start. */
   constructs?: Construct[];
   /** What the teaching rules found in a program that parses. Checks only. */
   lints?: LintDiagnostic[];
@@ -253,7 +253,8 @@ export class Server {
 
     switch (controlEvent) {
       case 'Start': {
-        return this.respond(await this.Start(sourcecode), sourcecode);
+        const started = await this.Start(sourcecode);
+        return this.respond(started, sourcecode, this.constructs(sourcecode));
       }
       case 'Stop': {
         return this.respond(this.Stop(), sourcecode);
@@ -291,7 +292,11 @@ export class Server {
    * objects are left behind and the model that crosses the Worker boundary is
    * built, so it is the only place a `Response` is made.
    */
-  private respond(result: StepResult, sourcecode: string): Response {
+  private respond(
+    result: StepResult,
+    sourcecode: string,
+    constructs?: Construct[]
+  ): Response {
     return {
       model: extractModel(result.execState),
       output: result.output,
@@ -301,7 +306,15 @@ export class Server {
       errors: [],
       runtime: this.runtimeDiagnostics(),
       coverage: this.lineCounts(),
+      constructs,
     };
+  }
+
+  /** The syntax map belonging to the interpreter that Start just armed. */
+  private constructs(sourcecode: string): Construct[] {
+    return this.interpreter !== null && reportsExpansions(this.interpreter)
+      ? this.interpreter.getConstructs(sourcecode)
+      : [];
   }
 
   /**

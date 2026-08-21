@@ -59,7 +59,10 @@ function innermostConstruct(model: StepModel): ConstructStateModel | null {
     return null;
   }
   let found: ConstructStateModel | null = null;
-  for (const state of model.constructStates) {
+  // Equal ranges are recursive activations of the same function. The newest
+  // one is the current frame, so inspect the records from the end.
+  for (let i = model.constructStates.length - 1; 0 <= i; i -= 1) {
+    const state = model.constructStates[i];
     if (
       rangeCovers(state.range, codeRange.begin.y, codeRange.begin.x) &&
       (found === null || rangeSpan(state.range) < rangeSpan(found.range))

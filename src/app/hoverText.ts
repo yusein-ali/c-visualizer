@@ -16,6 +16,8 @@ import {
   ConstructFactModel,
   ConstructStateModel,
   EvaluationModel,
+  ExpressionModel,
+  ExpressionNodeModel,
   StepModel,
   formatAddress,
   rangeCovers,
@@ -225,6 +227,8 @@ export class HoverTextSource {
   private variables: VariableModel[] = [];
   private constructStates: ConstructStateModel[] = [];
   private evaluations: EvaluationModel[] = [];
+  /** The expression expanded on the canvas for this same step. */
+  private expression: ExpressionModel | null = null;
   /** Where the step marker is, which is which statement is being explained. */
   private codeRange: CodeRangeModel | null = null;
 
@@ -239,7 +243,7 @@ export class HoverTextSource {
   /**
    * The step as it stands, which is what a reader wants while stepping: what
    * each variable holds, what the constructs around the marker are doing, and
-   * what the parts of the statement just finished came to. A stopped session
+   * the expression the canvas expands for this step. A stopped session
    * sends an empty model, and that is what takes every runtime line back off
    * again - a tooltip shows the last run's values to nobody.
    */
@@ -248,6 +252,7 @@ export class HoverTextSource {
     this.variables = model.variables;
     this.constructStates = model.constructStates;
     this.evaluations = model.evaluations;
+    this.expression = model.expression;
   }
 
   /**
@@ -306,7 +311,10 @@ export class HoverTextSource {
    * the reader wrote says what that was.
    */
   explainStatement(source: string): StatementExplanation {
-    const range = this.codeRange;
+    // The expansion is attached from the explicit `nextExpr` passed to the
+    // interpreter's yield hook, so it is the strongest statement identity we
+    // have. Falling back to the marker keeps simple, unexpanded statements.
+    const range = this.expression?.range ?? this.codeRange;
     if (range === null) {
       return emptyStatementExplanation();
     }
@@ -320,7 +328,7 @@ export class HoverTextSource {
         construct === null
           ? this.constructStateRecord(range)
           : this.constructRecord(construct),
-      parts: this.evaluatedParts(source),
+      parts: this.expressionParts(source),
     };
   }
 
@@ -332,7 +340,11 @@ export class HoverTextSource {
    */
   private constructStateRecord(range: CodeRangeModel): HoverRecord | null {
     let found: ConstructStateModel | null = null;
-    for (const state of this.constructStates) {
+    // Recursive calls produce several function records with exactly the same
+    // source span. Walk newest-to-oldest so an equal span stays attached to
+    // the innermost activation shown at the top of the call stack.
+    for (let i = this.constructStates.length - 1; 0 <= i; i -= 1) {
+      const state = this.constructStates[i];
       if (
         rangeCovers(state.range, range.begin.y, range.begin.x) &&
         (found === null || rangeSpan(state.range) < rangeSpan(found.range))
@@ -350,31 +362,40 @@ export class HoverTextSource {
    * written. Each is the text the reader wrote and what it turned out to be,
    * which is the same pair the tooltip gives for one of them at a time.
    */
-  private evaluatedParts(source: string): HoverRecord[] {
+  private expressionParts(source: string): HoverRecord[] {
+    if (this.expression === null) {
+      return [];
+    }
     const lines = source.split('\n');
-    const written = (evaluation: EvaluationModel): string => {
-      const { begin, end } = evaluation.range;
+    const written = (node: ExpressionNodeModel): string => {
+      const { begin, end } = node.range;
       if (begin.y !== end.y || begin.y < 1 || lines.length < begin.y) {
         return '';
       }
       return lines[begin.y - 1].slice(begin.x, end.x).trim();
     };
-    return this.evaluations
-      .slice()
+    const nodes: ExpressionNodeModel[] = [];
+    const visit = (node: ExpressionNodeModel): void => {
+      nodes.push(node);
+      node.children.forEach(visit);
+    };
+    visit(this.expression.root);
+    return nodes
+      .filter((node) => node.value !== null)
       .sort(
         (left, right) =>
           left.range.begin.y - right.range.begin.y ||
           left.range.begin.x - right.range.begin.x ||
           rangeSpan(right.range) - rangeSpan(left.range)
       )
-      .flatMap((evaluation) => {
-        const text = written(evaluation);
+      .flatMap((node) => {
+        const text = written(node);
         return text === ''
           ? []
           : [
               {
                 title: text,
-                facts: [fact(strings.value, evaluation.value, true)],
+                facts: [fact(strings.value, node.value as string, true)],
               },
             ];
       });

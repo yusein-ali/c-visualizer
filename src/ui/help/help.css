@@ -5,7 +5,9 @@
  */
 
 .plivet-help {
-  max-width: 40rem;
+  box-sizing: border-box;
+  width: min(48rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
   padding: 0;
   border: 1px solid var(--plivet-line, #333333);
   border-radius: 0.3rem;
@@ -13,6 +15,11 @@
   background: var(--plivet-surface, #ffffff);
   font-family: var(--plivet-font, system-ui, sans-serif);
   font-size: 14px;
+}
+
+.plivet-help[open] {
+  display: flex;
+  flex-direction: column;
 }
 
 .plivet-help::backdrop {
@@ -27,14 +34,40 @@
 }
 
 .plivet-help__body {
-  padding: 0.5rem 1rem;
+  min-height: 0;
+  padding: 0.75rem 1.25rem;
+  overflow-y: auto;
 }
 
 .plivet-help__body p {
   margin: 0.5rem 0;
 }
 
+.plivet-help__body h3 {
+  margin: 1rem 0 0.35rem;
+  font-size: 1rem;
+}
+
+.plivet-help__body h3:first-of-type {
+  margin-top: 0.75rem;
+}
+
+.plivet-help__body ul {
+  margin: 0;
+  padding-left: 1.35rem;
+}
+
+.plivet-help__body li {
+  margin: 0.35rem 0;
+  line-height: 1.4;
+}
+
+.plivet-help__intro {
+  line-height: 1.4;
+}
+
 .plivet-help__footer {
+  flex: none;
   padding: 0.75rem 1rem;
   border-top: 1px solid var(--plivet-line, #e5e5e5);
   text-align: right;

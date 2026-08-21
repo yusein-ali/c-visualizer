@@ -47,8 +47,7 @@ const strings = {
   graphViewOptionsTitle: 'Choose what the canvas draws',
   graphViewRegions: 'Memory regions',
   graphViewSections: 'Sections',
-  // The panes under the canvas, and the switches that open them.
-  viewsPanelTitle: 'Views',
+  // The state views consolidated into the canvas workspace.
   viewCallStack: 'Call stack',
   viewMutations: 'Variables over time',
   viewNothingRunning: 'nothing is running',
@@ -71,18 +70,79 @@ const strings = {
   memoryColumnName: 'Name',
   memoryColumnValue: 'Value',
   memoryEmptySegment: 'empty at this step',
-  // The two sections of the canvas, in the order they are read: what the
-  // program holds, and what the statement under the marker is doing with it.
+  // The JointJS sections, read as cause then state: the operation and active
+  // call, its expression, and what the program holds after it.
   graphMemoryHeading: 'Memory',
   graphStatementHeading: 'Statement',
+  graphExpressionHeading: 'Expression expansion',
+  expressionNotAvailable: 'no expression is available at this step',
   statementNotRunning: 'no statement is running',
-  howToText: [
-    'PVC.js has five GUI components:',
-    '(1) editor, (2) execution controller, buttons, (3) I/O window, (4) canvas for visualization, and (5) file upload form.',
-    'Users can write source code in the editor. Clicking on the execution control buttons initiates the step execution.',
-    'The I/O window shows the content of the standard output written by the program (e.g., printf) and accepts standard input (e.g., scanf).',
-    "Canvas shows the program's execution status using tables and figures.",
-    'PVC.js adaptively changes its layout to correspond with the size of the browser window.',
+  statementCurrent: 'Current statement',
+  statementNoActive: 'No active statement',
+  statementOnLine: 'Currently executing on line',
+  statementStartHint:
+    'Start or step through the program to see what the current statement does.',
+  statementWith: 'with',
+  statementAnd: 'and',
+  statementWhich: 'which',
+  statementControllingExpression: 'Its controlling expression',
+  statementReadsNonzero:
+    'C reads the evaluated expression as true because it is not zero',
+  statementReadsZero:
+    'C reads the evaluated expression as false because it is zero',
+  statementValuesHeading: 'Values produced so far',
+  howToIntro:
+    'PLIVET runs and visualizes C programs entirely in your browser. Start with the editor, then use the controls to move through the program and inspect what each statement does.',
+  howToSections: [
+    {
+      title: 'Write and understand the program',
+      items: [
+        'Write C in the editor or choose Open to add a C file. The editor checks the entry file after you pause typing and marks syntax errors, runtime problems, and teaching suggestions; some suggestions include a one-click fix.',
+        'Completions offer C constructs, names in the program, and common library functions. Hover over highlighted code or a name to see what it means and, while debugging, its current value. Alt-click a name to pin or unpin its live value.',
+        'Use the fold gutter to collapse blocks. Macro expansions, directives, and code excluded by conditional compilation are marked in the editor; choose Preprocessed to compare your source with the source produced by preprocessing.',
+        'In an exercise, only the regions chosen by its author may be editable. PLIVET keeps the rest of the program fixed.',
+      ],
+    },
+    {
+      title: 'Run and step through it',
+      items: [
+        'Click the breakpoint gutter to set or remove a breakpoint. Continue stops at the next breakpoint, standard-input request, or the end of the program.',
+        'The six execution buttons, from left to right, restart, stop, rewind to the first recorded step, step backward, step forward, and continue. Before a session starts, the two forward buttons start stepping or run to the first breakpoint.',
+        'During a session the source is read-only. The editor highlights the current statement, shows relevant values beside it, shades lines by how often they ran, and the status displays the current step. Stop to edit the source again.',
+        'Backward controls replay recorded history; they do not execute C in reverse. Restart begins again with the current source and breakpoints.',
+      ],
+    },
+    {
+      title: 'Read input and output',
+      items: [
+        'Program output from functions such as printf appears below the editor. When a function such as scanf waits for input, the input field becomes available and receives focus.',
+        'Press Enter to submit the input, or Shift+Enter to add another line before submitting. Execution continues until it next pauses for input, reaches a breakpoint, or finishes.',
+      ],
+    },
+    {
+      title: 'Explore the visualization',
+      items: [
+        'The canvas explains the current statement and expression, shows the call stack, and lays out registers, program memory, the heap, and stack frames. Pointer arrows connect addresses to the objects they name.',
+        'Click a section heading, memory-region heading, or aggregate row to collapse or expand it. Open View to show or hide the statement, call stack, expression, memory, mutation history, or individual memory regions.',
+        'Hover over a variable in either the editor or canvas to highlight the matching declaration and memory row. Variables over time lists writes newest first, including the frame, old value, new value, and source line.',
+        'Use the canvas magnifiers to zoom its drawing, and scroll the canvas when the visualization is larger than its window.',
+      ],
+    },
+    {
+      title: 'Work with files',
+      items: [
+        'Opening more than one source file adds tabs. The filled triangle marks the entry file that runs; choose a hollow triangle to make another tab the entry file. Save downloads the active tab as a C file.',
+        'Open can also restore a valid PLIVET session supplied by an embedding page, including its source, cursor, breakpoints, and pinned values.',
+        'File Upload is for data that the running C program opens with functions such as fopen. Uploaded files can be downloaded or removed and are separate from source tabs.',
+      ],
+    },
+    {
+      title: 'Adjust the workspace',
+      items: [
+        'The text-size buttons change the editor font, and the theme menu switches between light and dark. Canvas zoom is controlled separately in the canvas toolbar.',
+        'Drag the handles between the editor, console, columns, and canvas to resize them. With a handle focused, use the arrow keys to resize; press Enter or double-click it to restore the default size.',
+      ],
+    },
   ],
   fileUpload: 'File Upload',
   uploadFile: 'The uploaded file will be displayed here.',

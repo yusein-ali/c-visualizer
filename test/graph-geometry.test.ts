@@ -618,10 +618,9 @@ describe('memory geometry', () => {
 /**
  * The line under the statement heading.
  *
- * The heading is always on the canvas, so it always has something under it:
- * the expansion where the statement has one, and this where it does not. It is
- * read from the records the tooltip reads, so the two surfaces cannot give a
- * reader two accounts of one step.
+ * The heading is always on the canvas, so it always has something under it.
+ * It is read from the records the tooltip reads, so the two surfaces cannot
+ * give a reader two accounts of one step; the expansion is a separate view.
  */
 describe('what the statement section says without an expansion', () => {
   const at = (line: number, column = 0, endColumn = 40) => ({

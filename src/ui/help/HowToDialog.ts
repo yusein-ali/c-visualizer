@@ -22,10 +22,23 @@ export class HowToDialog {
 
     const body = document.createElement('div');
     body.className = 'plivet-help__body';
-    for (const line of strings.howToText) {
-      const paragraph = document.createElement('p');
-      paragraph.textContent = line.trim();
-      body.appendChild(paragraph);
+
+    const intro = document.createElement('p');
+    intro.className = 'plivet-help__intro';
+    intro.textContent = strings.howToIntro;
+    body.appendChild(intro);
+
+    for (const section of strings.howToSections) {
+      const heading = document.createElement('h3');
+      heading.textContent = section.title;
+
+      const list = document.createElement('ul');
+      for (const text of section.items) {
+        const item = document.createElement('li');
+        item.textContent = text;
+        list.appendChild(item);
+      }
+      body.append(heading, list);
     }
 
     const footer = document.createElement('div');

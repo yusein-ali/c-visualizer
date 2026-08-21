@@ -541,12 +541,13 @@ so an unassigned `int` reads as a negative number rather than as raw bytes -
 and addresses are padded to the width they occupy. The stack tables and
 `layout` remain for a step that carries no segments.
 
-The expression window sits under the memory map rather than beside it, and it
-expands the statement the editor is highlighting: the operators, the operands
-under them, and what each name holds going in. It used to show the statement
-that had just finished, numbered in evaluation order, which read as a different
-program the moment a call suspended one - the caller's half-evaluated
-assignment against a line inside the callee. `ExpressionRecorder` now attaches
+The expression window is a full-width section below the Statement and Call
+stack columns, and it expands the statement the editor is highlighting: the
+operators, the operands under them, and what each name holds going in. It used
+to show the statement that had just finished, numbered in evaluation order,
+which read as a different program the moment a call suspended one - the
+caller's half-evaluated assignment against a line inside the callee.
+`ExpressionRecorder` now attaches
 the statement about to run, and `extractModel` fills the operands in from the
 variables it has already extracted, where the execution state is assembled.
 
@@ -630,8 +631,9 @@ protocol in `baseline/README.md` before declaring the exit criterion met.
     What remains open is the connection between an object and the memory cells
     it covers, which wants its own visual module rather than more table.
 12. Place the segments as a reader uses them - registers and stack on the left,
-    the rest of the address space beside them - print values to the width of
-    their type, and put the expression window underneath. **Done.**
+    the rest of the address space beside them - and print values to the width
+    of their type. **Done.** The statement and its expression now precede the
+    memory map, so the canvas reads from the operation to the state it defines.
 13. Align the segments and the objects in them to four bytes. **Done.** What
     item 10 still wants is separate: a segment's objects take their display
     addresses from the frame they were declared in, not from the segment's own
@@ -641,7 +643,7 @@ protocol in `baseline/README.md` before declaring the exit criterion met.
 14. Let the reader decide what the canvas draws. **Done.** The graph toolbar
     carries a disclosure - "View", painted as one of the zoom buttons and
     opening a panel drawn in the map's own palette - holding one checkbox per
-    memory region and one for the expression under them. The answers live in
+    memory region and one for each canvas section. The answers live in
     `ViewOptions` beside `FoldState` in the core. A region that is not shown is
     dropped before `layoutMemory` runs rather than hidden after it, so the map
     closes up over it and the pointers into it go with its rows; that is what
@@ -654,8 +656,8 @@ protocol in `baseline/README.md` before declaring the exit criterion met.
     answered for keeps their answer as the folds do. A step is drawn as a map
     or as the call-frame tables according to whether the model carries memory,
     so switching every region off leaves an empty map rather than bringing the
-    tables back. Phase 12 item 16 wants the same panel for the teaching views;
-    this is the half of it that the visualization owns.
+    tables back. Phase 12 item 16 completed the same panel with controls for
+    all five canvas sections.
 15. Draw a pointer that crosses between the columns down the gap between them.
     **Done.** Both ends already touched the sides that face each other, but the
     line between them was handed to a router, which drew a pointer running
@@ -770,7 +772,7 @@ fan-out in `PlivetApp` - now `Plivet` - checkable.
    points and the footer, at the same breakpoints Bootstrap was being asked
    for. The four stylesheets under `src/css/` went with it. The three
    boundaries a reader sizes for themselves - between the columns, under the
-   editor and under the canvas - carry a `Splitter` each: a drag, or an arrow
+   editor and under the canvas workspace - carry a `Splitter` each: a drag, or an arrow
    key, writes a length onto `--plivet-side-width`, `--plivet-editor-height`
    or `--plivet-graph-height` on the root, and the breakpoint proportions stay
    where they were, as the fallback of each `var()`.
@@ -1348,14 +1350,13 @@ it, and can be taken in any order or dropped.
     of one.
 
 13. **One explanation of the current statement.** **Done.** A teaching view that says
-    what the statement under the step marker does, and it is the general case
-    that the expression expansion of Phase 8 item 6 sits inside rather than a
-    view beside it. The expansion draws the operands, the operators, the
-    evaluation order and the intermediate values; the explanation puts that
-    picture under a reading of the whole statement - which kind of statement it
-    is, which branch or which iteration this is, what it leaves behind when it
-    finishes - so the expression window beneath the memory map is this view's
-    picture, and switching the explanation off takes the expansion with it.
+    what the statement under the step marker does. Statement and Call stack
+    occupy the canvas's two top columns; the expression expansion of Phase 8
+    item 6 is a separate full-width view below them. The expansion draws the
+    operands, the operators, the evaluation order and the intermediate values;
+    the explanation reads the whole statement - which kind of statement it is,
+    which branch or which iteration this is, and what it leaves behind when it
+    finishes.
 
     Its content is item 4's tooltip data read as a whole rather than one hover
     at a time: the construct record for the statement, and the subexpression
@@ -1376,13 +1377,19 @@ it, and can be taken in any order or dropped.
     say. Two rules decide what is printed. The parts are printed only where
     there is no expansion to draw - when there is one, the tree says what each
     operator came to, and saying it twice on one screen is noise rather than
-    emphasis. And the section is one switch rather than two: the reading and
-    the picture are one view of one step, so the box that takes the
-    explanation away takes the expansion with it. A step whose records have
-    not arrived falls back to the summary the geometry works out on its own,
-    so the heading always has something under it.
+    emphasis. Statement and Expression expansion have independent switches and
+    disclosure headings; if the expansion is hidden or collapsed, its part
+    facts remain in the statement rather than disappearing with the tree. A
+    step whose records have not arrived falls back to the summary the geometry
+    works out on its own, so the heading always has something under it.
 
-14. **A view of the call stack.** **Done.** `CallStackView` under the canvas,
+    The canvas reads those records as a teaching card: the construct name and
+    current line lead, then its clauses, runtime result and meaning in C form one
+    full-width prose explanation rather than a stack of table cells. Produced
+    values form a named subsection when the separate expression tree is hidden.
+
+14. **A view of the call stack.** **Done.** The call stack is drawn beside the
+    statement with the same slate disclosure heading and an independent fold,
     innermost frame first: the function, the line the call is written on, the
     arguments it was passed beside the parameters they filled, and how many
     times the run has entered it. The memory map already draws the frames as
@@ -1393,7 +1400,8 @@ it, and can be taken in any order or dropped.
     `twice(total)` is that rule said once per call. The data is
     `StepModel.frames`, built by `ConstructTrace` from the activations it
     already keeps, so nothing walks the interpreter's objects from outside.
-15. **A view of what the run has written.** **Done.** `MutationView`, newest
+15. **A view of what the run has written.** **Done.** `MutationView` is the
+    collapsible Variables over time region beneath the JointJS paper, newest
     write first: the frame it happened in, the object as the source names it,
     what it held before, what it holds after, and the line. Every other view
     says what memory holds now; this says what it held before, which is the
@@ -1405,15 +1413,15 @@ it, and can be taken in any order or dropped.
     writes, and rides every state by reference with the length it had at that
     step beside it - so attaching it costs a step nothing, and stepping back
     shows the log as it stood rather than a future the reader has not reached.
-16. **A control panel for the views.** **Done.** The switches sit in the strip
-    that holds the panes, above them: the canvas's own disclosure decides what
-    the canvas draws, and a control that turned off a pane somewhere else on
-    the page would be one a reader has to go looking for. Both panes start
-    off - a view worth having is not worth having by default, and the two
-    columns a reader opens PLIVET for are the editor and the map - and a pane
-    that is off is filled with nothing as well as hidden, so a run of a
-    hundred thousand writes costs a reader who is not looking at them no rows
-    at all. Closed, the whole strip is one line of switches.
+16. **A control panel for the views.** **Done.** One View disclosure in the
+    canvas toolbar controls Statement, Call stack, Expression expansion,
+    Memory and Variables over time together with the individual memory regions.
+    All five sections start visible and each has the same slate disclosure at
+    the content it controls; the first two form a row, Expression expansion and
+    Memory span both columns, and Variables over time is a native details region
+    under the paper. Switching the history off removes its rows as well as
+    hiding it, so a long run costs a reader who is not looking at them no DOM
+    rows.
 17. **Open a program, save a program.** **Done.** Two buttons on the control
     bar. Saving writes the editor's text out as a C file, named after whatever
     was opened so that saving what you opened gives back a file of the same

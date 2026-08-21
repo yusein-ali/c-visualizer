@@ -374,7 +374,7 @@ export interface StepModel {
   pointers: PointerModel[];
   memory: MemorySegmentModel[];
   functions: FunctionModel[];
-  /** The completed binary/ternary expression, including its assignment. */
+  /** The current expression expanded into operands and operators. */
   expression: ExpressionModel | null;
   /** Every variable in scope, innermost frame last. */
   variables: VariableModel[];

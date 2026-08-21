@@ -14,15 +14,18 @@ import {
 } from '../../core';
 import strings from '../../strings';
 import { IconName, iconFor } from '../controls/icons';
-import { graphGeometry, memoryGeometry, statementSummary } from './geometry';
+import { MutationView } from '../views';
+import { graphGeometry, memoryGeometry } from './geometry';
 import { ViewPanelHandle, viewPanel } from './ViewPanel';
-import {
-  emptyStatementExplanation,
-  Explanation,
-  StatementExplanation,
-} from '../records';
+import { callStackRows } from './callStack';
+import { emptyStatementExplanation, StatementExplanation } from '../records';
 import { MemoryNode, memoryNodeOf } from './MemoryNode';
 import { StackTable, stackTableOf } from './StackTable';
+import {
+  statementCard,
+  StatementCardModel,
+  StatementCardRow,
+} from './statementCard';
 import './graph.css';
 
 export interface PlivetGraphOptions {
@@ -44,32 +47,44 @@ const depthOf = (node: ExpressionNodeModel): number =>
   node.children.length === 0 ? 0 : 1 + Math.max(...node.children.map(depthOf));
 
 /**
- * The canvas is two sections read one after the other, each under its own
- * heading: what the program holds, and what the statement under the step
- * marker is doing with it. A heading is the same size wherever it appears and
- * whatever stands under it - it is the name of a section, and a band that grew
- * and shrank with its contents would read as part of them.
+ * The canvas is read from cause to state. Statement and Call stack share its
+ * first row; Expression expansion spans both columns beneath them, and Memory
+ * follows. The write history is the final DOM section under the paper. Each
+ * major section has one disclosure heading and one switch in the shared View
+ * panel.
  */
-const HEADING_WIDTH = 320;
 const HEADING_HEIGHT = 26;
 /** The room between a heading and the section it names. */
 const HEADING_GAP = 10;
 /** One line of the statement's reading, and the room under the last of them. */
 const STATEMENT_LINE_HEIGHT = 20;
-const STATEMENT_GAP = 14;
-/** The room between the memory map and the statement section under it. */
+const CARD_TITLE_HEIGHT = 38;
+const CARD_CONTEXT_HEIGHT = 28;
+const CARD_DESCRIPTION_HEIGHT = 58;
+const CARD_ROW_HEIGHT = 38;
+const CARD_SECTION_HEIGHT = 28;
+const CARD_LABEL_WIDTH = 164;
+/** The room between the statement and memory sections. */
 const SECTION_GAP = 36;
+const COLUMN_GAP = 24;
+const COLUMN_WIDTH = 480;
+const TWO_COLUMN_WIDTH = COLUMN_WIDTH * 2 + COLUMN_GAP;
 /** Where the drawing starts, which is where `layoutMemory` puts the map. */
 const ORIGIN_X = 24;
 const ORIGIN_Y = 24;
 /** What the map has to come down by to leave its own heading room. */
 const MEMORY_DROP = HEADING_HEIGHT + HEADING_GAP;
+const CALL_ROW_GAP = 5;
 
-/** A record's facts as lines: `label: value`, or the sentence on its own. */
-const explanationFacts = (explanation: Explanation): string[] =>
-  explanation.facts.map((fact) =>
-    fact.value === '' ? fact.label : `${fact.label}: ${fact.value}`
-  );
+/** JointJS rectangles center labels unless both axes are overridden. */
+export const leftAlignedLabel = (x: number, height: number) => ({
+  x,
+  y: height / 2,
+  textAnchor: 'start' as const,
+  textVerticalAnchor: 'middle' as const,
+});
+
+type CanvasSection = 'statement' | 'callStack' | 'expression' | 'memory';
 
 const lowered = (point: Point, dy: number): Point => ({
   x: point.x,
@@ -119,6 +134,8 @@ export class PlivetGraph {
   private readonly folds = new FoldState();
   private readonly view = new ViewOptions();
   private readonly panel: ViewPanelHandle;
+  private readonly mutations: MutationView;
+  private readonly collapsed = new Set<CanvasSection>();
   /** The window the drawing scrolls inside, below the bar. */
   private readonly viewport: HTMLDivElement;
   private readonly paperHost: HTMLDivElement;
@@ -186,6 +203,10 @@ export class PlivetGraph {
     this.paperHost.className = 'plivet-graph__paper';
     this.viewport.appendChild(this.paperHost);
     this.container.appendChild(this.viewport);
+    // The history belongs to the same workspace and View panel, but remains
+    // ordinary DOM: a bounded table is clearer and cheaper than hundreds of
+    // SVG cells. It follows the paper, so it is literally under the canvas.
+    this.mutations = new MutationView(this.container);
 
     this.graph = new dia.Graph({}, { cellNamespace });
     this.paper = new dia.Paper({
@@ -202,18 +223,28 @@ export class PlivetGraph {
     });
     this.paper.on('element:pointerclick', (_view, event) => {
       const target = event.target as Element | null;
-      // An aggregate's triangle folds its members away; a segment's title bar
-      // folds the whole segment away. Both are clicks on the same paper.
+      // Aggregate rows, memory segments and whole canvas sections all fold in
+      // the place where the reader sees them.
       const hit =
         target === null
           ? null
-          : target.closest('[data-fold-target], [data-collapse-target]');
+          : target.closest(
+              '[data-section-target], [data-fold-target], [data-collapse-target]'
+            );
       if (hit === null) {
         return;
       }
       const group = hit.getAttribute('data-fold-target');
       const segment = hit.getAttribute('data-collapse-target');
-      if (group !== null) {
+      const section = hit.getAttribute('data-section-target');
+      if (
+        section === 'statement' ||
+        section === 'callStack' ||
+        section === 'expression' ||
+        section === 'memory'
+      ) {
+        this.toggleSection(section);
+      } else if (group !== null) {
         this.folds.toggle(decodeURIComponent(group));
       } else if (segment !== null) {
         // What the click flips is what the user is looking at: a segment
@@ -253,49 +284,93 @@ export class PlivetGraph {
     if (typeof explanation !== 'undefined') {
       this.explanation = explanation;
     }
-    // A step that knows its memory is drawn as a memory map; a step that only
-    // has call frames - the empty model this starts on - keeps the tables.
-    // Both sections come down by the height of the memory heading: the map
-    // now stands under its own name rather than at the top of the paper.
-    const memory = loweredMemory(
-      memoryGeometry(model, this.folds, this.view),
-      MEMORY_DROP
-    );
-    this.memory = memory;
-    // Which of the two it is, is a question about the model rather than about
-    // the geometry: a reader who switches every region off is looking at an
-    // empty memory map, not asking for the tables back.
-    const frames =
-      model.memory.length === 0
-        ? loweredFrames(graphGeometry(model, this.folds), MEMORY_DROP)
-        : { stacks: [], arrows: [] };
-    this.contentWidth = frames.stacks.reduce(
-      (maximum, stack) => Math.max(maximum, stack.x + stack.width),
-      memory.width
-    );
-    this.contentHeight = frames.stacks.reduce(
-      (maximum, stack) => Math.max(maximum, stack.y + stack.height),
-      memory.height
-    );
-    // The statement sits under the memory map, not beside it: the two are read
-    // one after the other, and a step is easier to follow when the memory does
-    // not move sideways as the expression under it grows.
-    const statementCells = this.statementCells(
-      model,
-      ORIGIN_X,
-      this.contentHeight + SECTION_GAP
+    this.contentWidth = 0;
+    this.contentHeight = 0;
+    const cells: dia.Cell[] = [];
+    let nextY = ORIGIN_Y;
+
+    // Statement and Call stack are peers: the first names the operation and
+    // the second the activation whose state that operation is changing.
+    let hasTopRow = false;
+    if (this.view.isStatementShown()) {
+      cells.push(...this.statementCells(model, ORIGIN_X, nextY));
+      hasTopRow = true;
+    }
+    if (this.view.isCallStackShown()) {
+      cells.push(
+        ...this.callStackCells(
+          model,
+          this.view.isStatementShown()
+            ? ORIGIN_X + COLUMN_WIDTH + COLUMN_GAP
+            : ORIGIN_X,
+          nextY
+        )
+      );
+      hasTopRow = true;
+    }
+    if (hasTopRow) {
+      nextY =
+        Math.max(this.contentHeight, nextY + HEADING_HEIGHT) + SECTION_GAP;
+    }
+
+    // The tree is a view of its own and gets the whole width below the two
+    // textual state views, so wider expressions do not squeeze either one.
+    if (this.view.isExpressionShown()) {
+      cells.push(...this.expressionSectionCells(model, ORIGIN_X, nextY));
+      nextY =
+        Math.max(this.contentHeight, nextY + HEADING_HEIGHT) + SECTION_GAP;
+    }
+
+    const baseMemory = memoryGeometry(model, this.folds, this.view);
+    if (this.view.isMemoryShown()) {
+      const memoryDrop = nextY + MEMORY_DROP - ORIGIN_Y;
+      const memory = loweredMemory(baseMemory, memoryDrop);
+      this.memory = memory;
+      cells.push(
+        this.sectionHeading(
+          strings.graphMemoryHeading,
+          ORIGIN_X,
+          nextY,
+          'memory',
+          TWO_COLUMN_WIDTH
+        )
+      );
+      if (!this.collapsed.has('memory')) {
+        // A hand-built model with stacks and no process segments keeps the
+        // old frame tables; ordinary execution uses the memory map.
+        const frames =
+          model.memory.length === 0
+            ? loweredFrames(graphGeometry(model, this.folds), memoryDrop)
+            : { stacks: [], arrows: [] };
+        this.contentWidth = frames.stacks.reduce(
+          (maximum, stack) => Math.max(maximum, stack.x + stack.width),
+          Math.max(this.contentWidth, memory.width)
+        );
+        this.contentHeight = frames.stacks.reduce(
+          (maximum, stack) => Math.max(maximum, stack.y + stack.height),
+          Math.max(this.contentHeight, memory.height)
+        );
+        cells.push(
+          ...memory.segments.map(memoryNodeOf),
+          ...frames.stacks.map(stackTableOf),
+          ...[...memory.arrows, ...frames.arrows].map((arrow) =>
+            this.pointerLink(arrow)
+          )
+        );
+      }
+    } else {
+      // Region switches still report their configured/dynamic state while the
+      // enclosing memory section is switched off.
+      this.memory = baseMemory;
+    }
+
+    this.mutations.setShown(this.view.areMutationsShown());
+    this.mutations.setMutations(
+      this.view.areMutationsShown() ? model.mutations : []
     );
     this.panel.refresh();
     this.paper.freeze();
-    this.graph.resetCells([
-      this.sectionHeading(strings.graphMemoryHeading, ORIGIN_X, ORIGIN_Y),
-      ...memory.segments.map(memoryNodeOf),
-      ...frames.stacks.map(stackTableOf),
-      ...[...memory.arrows, ...frames.arrows].map((arrow) =>
-        this.pointerLink(arrow)
-      ),
-      ...statementCells,
-    ]);
+    this.graph.resetCells(cells);
     this.resize();
     this.paper.unfreeze();
     // The scene was rebuilt under whatever the reader was pointing at, so the
@@ -330,6 +405,7 @@ export class PlivetGraph {
     }
     this.paper.remove();
     this.graph.clear();
+    this.mutations.destroy();
     this.container.replaceChildren();
     this.container.classList.remove('plivet-graph');
   }
@@ -350,6 +426,15 @@ export class PlivetGraph {
     if (typeof this.onFocus !== 'undefined') {
       this.onFocus(object);
     }
+  }
+
+  private toggleSection(section: CanvasSection): void {
+    if (this.collapsed.has(section)) {
+      this.collapsed.delete(section);
+    } else {
+      this.collapsed.add(section);
+    }
+    this.render(this.model);
   }
 
   /**
@@ -398,114 +483,413 @@ export class PlivetGraph {
   }
 
   /**
-   * A section's name, in a band the same size wherever it stands.
+   * A section's name, in the same slate disclosure band wherever it stands.
    *
-   * The heading used to be as wide as the tree under it, so it changed size at
-   * every step and read as the top of the drawing rather than as the name of a
-   * section. A name is not a measurement of what it names.
+   * A one-column section takes one column and a spanning section takes two;
+   * neither changes width with the content at the current step.
    */
-  private sectionHeading(text: string, x: number, y: number): dia.Element {
+  private sectionHeading(
+    text: string,
+    x: number,
+    y: number,
+    section: CanvasSection,
+    width: number
+  ): dia.Element {
+    const collapsed = this.collapsed.has(section);
     const heading = new shapes.standard.Rectangle({ z: 4 });
     heading.position(x, y);
-    heading.resize(HEADING_WIDTH, HEADING_HEIGHT);
+    heading.resize(width, HEADING_HEIGHT);
     heading.attr({
-      body: { fill: '#26384a', stroke: '#26384a', rx: 4, ry: 4 },
+      body: {
+        fill: '#26384a',
+        stroke: '#26384a',
+        rx: 4,
+        ry: 4,
+        class: 'plivet-section-heading',
+        'data-section-target': section,
+      },
       label: {
-        text,
+        text: `${collapsed ? '▶' : '▼'}  ${text}`,
         fill: '#ffffff',
         fontFamily: 'system-ui, sans-serif',
         fontSize: 14,
         fontWeight: 'bold',
+        pointerEvents: 'none',
       },
     });
+    this.contentWidth = Math.max(this.contentWidth, x + width + ORIGIN_X);
+    this.contentHeight = Math.max(this.contentHeight, y + HEADING_HEIGHT);
     return heading;
   }
 
   /**
-   * The second section: what the statement under the step marker is doing.
+   * The first section: what the statement under the step marker is doing.
    *
    * Its heading is always drawn, whatever the step is. A section that appeared
    * and vanished as the program moved from one kind of statement to the next
-   * moved the memory map up and down with it, and a reader following a run
+   * moved the call stack and memory map with it, and a reader following a run
    * cannot read a page that will not hold still.
    *
-   * What goes under the heading is the expansion where the statement has one,
-   * and otherwise a line naming the construct the step is inside and what it
-   * is doing - the same records the tooltip reads, so the two never disagree.
+   * What goes under the heading names the construct the step is inside and
+   * what it is doing - the same records the tooltip reads, so the two never
+   * disagree. Its expression is the full-width section below the top row.
    */
   private statementCells(
     model: StepModel,
     originX: number,
     originY: number
   ): dia.Cell[] {
-    // The reading and the picture are one view: a reader who has switched the
-    // statement off is not asking to keep its expansion.
+    // Statement visibility is independent of the expansion below it.
     if (!this.view.isStatementShown()) {
       return [];
     }
     const cells: dia.Cell[] = [
-      this.sectionHeading(strings.graphStatementHeading, originX, originY),
+      this.sectionHeading(
+        strings.graphStatementHeading,
+        originX,
+        originY,
+        'statement',
+        COLUMN_WIDTH
+      ),
     ];
+    if (this.collapsed.has('statement')) {
+      return cells;
+    }
     const headingBottom = originY + HEADING_HEIGHT + HEADING_GAP;
     this.contentWidth = Math.max(
       this.contentWidth,
-      originX + HEADING_WIDTH + ORIGIN_X
+      originX + COLUMN_WIDTH + ORIGIN_X
     );
     this.contentHeight = Math.max(this.contentHeight, headingBottom);
-    // What kind of statement this is and what it is doing, over the drawing
-    // of the expression it contains. The expansion draws the operands and the
-    // operators; this says what the statement they make up is for.
-    const said = this.explanationLines(model);
-    const reading =
-      said.length === 0
-        ? []
-        : [this.statementLine(said, originX, headingBottom)];
-    const bodyY =
-      headingBottom + said.length * STATEMENT_LINE_HEIGHT + STATEMENT_GAP;
-    if (model.expression !== null) {
-      return cells.concat(
-        reading,
-        this.expressionCells(model.expression, originX, bodyY)
+    // Preserve the explanation's title/fact structure. Flattening these into
+    // one string made a clause, a runtime result and a language note look like
+    // equally important fragments of prose.
+    const includeValues =
+      model.expression === null ||
+      !this.view.isExpressionShown() ||
+      this.collapsed.has('expression');
+    cells.push(
+      ...this.statementCardCells(
+        statementCard(model, this.explanation, includeValues),
+        originX,
+        headingBottom
+      )
+    );
+    return cells;
+  }
+
+  /** The active calls beside the statement whose state they define. */
+  private callStackCells(
+    model: StepModel,
+    originX: number,
+    originY: number
+  ): dia.Cell[] {
+    const cells: dia.Cell[] = [
+      this.sectionHeading(
+        strings.viewCallStack,
+        originX,
+        originY,
+        'callStack',
+        COLUMN_WIDTH
+      ),
+    ];
+    if (this.collapsed.has('callStack')) {
+      return cells;
+    }
+
+    const rows = callStackRows(model.frames);
+    const shown =
+      rows.length === 0
+        ? [
+            {
+              name: strings.viewNothingRunning,
+              where: '',
+              arguments: '',
+              timesEntered: '',
+              current: false,
+            },
+          ]
+        : rows;
+    let y = originY + HEADING_HEIGHT + HEADING_GAP;
+    for (const row of shown) {
+      const details = [row.where, row.arguments, row.timesEntered].filter(
+        (part) => part !== ''
       );
+      const text = [row.name, details.join(' · ')].filter(Boolean).join('\n');
+      const height = details.length === 0 ? 34 : 48;
+      const cell = new shapes.standard.Rectangle({ z: 4 });
+      cell.position(originX, y);
+      cell.resize(COLUMN_WIDTH, height);
+      cell.attr({
+        body: {
+          fill: row.current ? '#e8f2ff' : '#ffffff',
+          stroke: row.current ? '#4f81bd' : '#cfd8e1',
+          strokeWidth: row.current ? 2 : 1,
+          rx: 3,
+          ry: 3,
+        },
+        label: {
+          text,
+          fill: '#26384a',
+          fontFamily: "Consolas, 'Courier New', monospace",
+          fontSize: 13,
+          ...leftAlignedLabel(10, height),
+        },
+      });
+      cells.push(cell);
+      y += height + CALL_ROW_GAP;
     }
-    return cells.concat(reading);
-  }
-
-  /**
-   * The statement, read out.
-   *
-   * The records come from the application, which is the only place that knows
-   * what a construct is; what is left here is where the lines go. A step
-   * whose records have not arrived - the empty model the canvas opens on -
-   * falls back to the summary the geometry can work out on its own, so the
-   * section always has something under its heading.
-   *
-   * The parts of the statement are printed only where there is no expansion
-   * to draw. When there is one, the tree under this says what each operator
-   * came to, and saying it twice on one screen is noise rather than emphasis.
-   */
-  private explanationLines(model: StepModel): string[] {
-    const { statement, parts } = this.explanation;
-    if (statement === null) {
-      return [statementSummary(model)];
-    }
-    const lines = [statement.title].concat(explanationFacts(statement));
-    if (model.expression !== null) {
-      return lines;
-    }
-    return lines.concat(
-      parts.map((part) => `${part.title} = ${part.facts[0]?.value ?? ''}`)
+    this.contentWidth = Math.max(
+      this.contentWidth,
+      originX + COLUMN_WIDTH + ORIGIN_X
     );
+    this.contentHeight = Math.max(this.contentHeight, y + ORIGIN_X);
+    return cells;
   }
 
-  /** The reading of the statement: one line per fact, left-aligned. */
-  private statementLine(lines: string[], x: number, y: number): dia.Element {
+  /** The expression tree below, spanning both top-row columns. */
+  private expressionSectionCells(
+    model: StepModel,
+    originX: number,
+    originY: number
+  ): dia.Cell[] {
+    const cells: dia.Cell[] = [
+      this.sectionHeading(
+        strings.graphExpressionHeading,
+        originX,
+        originY,
+        'expression',
+        TWO_COLUMN_WIDTH
+      ),
+    ];
+    if (this.collapsed.has('expression')) {
+      return cells;
+    }
+    const bodyY = originY + HEADING_HEIGHT + HEADING_GAP;
+    if (model.expression === null) {
+      cells.push(
+        this.messageLine(
+          [strings.expressionNotAvailable],
+          originX,
+          bodyY,
+          TWO_COLUMN_WIDTH
+        )
+      );
+    } else {
+      cells.push(...this.expressionCells(model.expression, originX, bodyY));
+    }
+    return cells;
+  }
+
+  /** A teaching card: title, context, one explanation, then produced values. */
+  private statementCardCells(
+    card: StatementCardModel,
+    originX: number,
+    originY: number
+  ): dia.Cell[] {
+    const cells: dia.Cell[] = [];
+    let y = originY;
+
+    cells.push(
+      this.cardCell(card.title, originX, y, COLUMN_WIDTH, CARD_TITLE_HEIGHT, {
+        fill: '#e8f2ff',
+        stroke: '#9fbfe5',
+        color: '#234b73',
+        bold: true,
+        fontSize: 15,
+      })
+    );
+    y += CARD_TITLE_HEIGHT;
+
+    if (card.context !== '') {
+      const contextHeight = this.cardTextHeight(
+        card.context,
+        COLUMN_WIDTH,
+        CARD_CONTEXT_HEIGHT
+      );
+      cells.push(
+        this.cardCell(card.context, originX, y, COLUMN_WIDTH, contextHeight, {
+          fill: '#f7f9fb',
+          stroke: '#cfd8e1',
+          color: '#5d6b78',
+          fontSize: 12,
+        })
+      );
+      y += contextHeight;
+    }
+
+    if (card.description !== '') {
+      const descriptionHeight = this.cardTextHeight(
+        card.description,
+        COLUMN_WIDTH,
+        CARD_DESCRIPTION_HEIGHT
+      );
+      cells.push(
+        this.cardCell(
+          card.description,
+          originX,
+          y,
+          COLUMN_WIDTH,
+          descriptionHeight,
+          {
+            fill: '#ffffff',
+            stroke: '#cfd8e1',
+            color: '#26384a',
+            fontSize: 13,
+          }
+        )
+      );
+      y += descriptionHeight;
+    }
+
+    if (card.values.length !== 0) {
+      cells.push(
+        this.cardCell(
+          strings.statementValuesHeading,
+          originX,
+          y,
+          COLUMN_WIDTH,
+          CARD_SECTION_HEIGHT,
+          {
+            fill: '#eef2f6',
+            stroke: '#cfd8e1',
+            color: '#4a5b6c',
+            bold: true,
+            fontSize: 12,
+          }
+        )
+      );
+      y += CARD_SECTION_HEIGHT;
+      for (const row of card.values) {
+        const rendered = this.cardRow(row, originX, y);
+        cells.push(...rendered.cells);
+        y = rendered.bottom;
+      }
+    }
+
+    this.contentWidth = Math.max(
+      this.contentWidth,
+      originX + COLUMN_WIDTH + ORIGIN_X
+    );
+    this.contentHeight = Math.max(this.contentHeight, y + ORIGIN_X);
+    return cells;
+  }
+
+  private cardRow(
+    row: StatementCardRow,
+    originX: number,
+    originY: number
+  ): { cells: dia.Cell[]; bottom: number } {
+    if (row.value === '') {
+      const height = this.cardRowHeight(row.label, COLUMN_WIDTH);
+      return {
+        cells: [
+          this.cardCell(row.label, originX, originY, COLUMN_WIDTH, height, {
+            fill: '#fff8e1',
+            stroke: '#e2d3a4',
+            color: '#5c5130',
+            code: row.labelCode,
+            fontSize: 13,
+          }),
+        ],
+        bottom: originY + height,
+      };
+    }
+
+    const valueWidth = COLUMN_WIDTH - CARD_LABEL_WIDTH;
+    const height = Math.max(
+      this.cardRowHeight(row.label, CARD_LABEL_WIDTH),
+      this.cardRowHeight(row.value, valueWidth)
+    );
+    return {
+      cells: [
+        this.cardCell(row.label, originX, originY, CARD_LABEL_WIDTH, height, {
+          fill: '#eef2f6',
+          stroke: '#cfd8e1',
+          color: '#4a5b6c',
+          bold: !row.labelCode,
+          code: row.labelCode,
+          fontSize: 12,
+        }),
+        this.cardCell(
+          row.value,
+          originX + CARD_LABEL_WIDTH,
+          originY,
+          valueWidth,
+          height,
+          {
+            fill: '#ffffff',
+            stroke: '#cfd8e1',
+            color: '#26384a',
+            code: row.valueCode,
+            fontSize: 13,
+          }
+        ),
+      ],
+      bottom: originY + height,
+    };
+  }
+
+  private cardRowHeight(text: string, width: number): number {
+    return this.cardTextHeight(text, width, CARD_ROW_HEIGHT);
+  }
+
+  private cardTextHeight(text: string, width: number, minimum: number): number {
+    const characters = Math.max(1, Math.floor((width - 20) / 7.2));
+    return Math.max(minimum, Math.ceil(text.length / characters) * 18 + 12);
+  }
+
+  private cardCell(
+    text: string,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    style: {
+      fill: string;
+      stroke: string;
+      color: string;
+      bold?: boolean;
+      code?: boolean;
+      fontSize: number;
+    }
+  ): dia.Element {
+    const cell = new shapes.standard.Rectangle({ z: 4 });
+    cell.position(x, y);
+    cell.resize(width, height);
+    cell.attr({
+      body: { fill: style.fill, stroke: style.stroke },
+      label: {
+        text,
+        fill: style.color,
+        fontFamily:
+          style.code === true
+            ? "Consolas, 'Courier New', monospace"
+            : 'system-ui, sans-serif',
+        fontSize: style.fontSize,
+        fontWeight: style.bold === true ? 'bold' : 'normal',
+        ...leftAlignedLabel(10, height),
+        textWrap: { width: -20, height: -8 },
+      },
+    });
+    return cell;
+  }
+
+  /** A plain full-width message, used when a visual section has no model. */
+  private messageLine(
+    lines: string[],
+    x: number,
+    y: number,
+    width: number
+  ): dia.Element {
     const text = lines.join('\n');
-    const height = Math.max(32, lines.length * STATEMENT_LINE_HEIGHT);
-    const width = Math.max(
-      HEADING_WIDTH,
-      Math.max(...lines.map((line) => line.length)) * 7.4 + 24
+    const charactersPerLine = Math.max(1, Math.floor((width - 24) / 7.4));
+    const renderedLines = lines.reduce(
+      (count, line) =>
+        count + Math.max(1, Math.ceil(line.length / charactersPerLine)),
+      0
     );
+    const height = Math.max(32, renderedLines * STATEMENT_LINE_HEIGHT);
     const line = new shapes.standard.Rectangle({ z: 4 });
     line.position(x, y);
     line.resize(width, height);
@@ -516,9 +900,8 @@ export class PlivetGraph {
         fill: '#3c4a58',
         fontFamily: 'system-ui, sans-serif',
         fontSize: 14,
-        textAnchor: 'start',
-        refX: 2,
-        refX2: 0,
+        ...leftAlignedLabel(2, height),
+        textWrap: { width: -12, height: -6 },
       },
     });
     this.contentWidth = Math.max(this.contentWidth, x + width + ORIGIN_X);

@@ -1,6 +1,6 @@
 import { MutationModel } from '../../core';
 import strings from '../../strings';
-import { empty } from './CallStackView';
+import './views.css';
 
 /**
  * What the run has written, newest first, with the frame it happened in.
@@ -13,15 +13,19 @@ import { empty } from './CallStackView';
  * passing happening rather than asserting it.
  */
 export class MutationView {
-  readonly root: HTMLElement;
+  readonly root: HTMLDetailsElement;
 
   private readonly body: HTMLDivElement;
+  private readonly onToggle = (): void => this.refresh();
+  private mutations: MutationModel[] = [];
 
   constructor(parent: HTMLElement) {
-    this.root = document.createElement('section');
-    this.root.className = 'plivet-view plivet-view--mutations';
+    this.root = document.createElement('details');
+    this.root.className =
+      'plivet-view plivet-view--mutations plivet-graph__history';
+    this.root.open = true;
 
-    const title = document.createElement('h3');
+    const title = document.createElement('summary');
     title.className = 'plivet-view__title';
     title.textContent = strings.viewMutations;
 
@@ -30,10 +34,26 @@ export class MutationView {
 
     this.root.append(title, this.body);
     parent.appendChild(this.root);
+    this.root.addEventListener('toggle', this.onToggle);
     this.setMutations([]);
   }
 
   setMutations(mutations: MutationModel[]): void {
+    this.mutations = mutations;
+    this.refresh();
+  }
+
+  setShown(shown: boolean): void {
+    this.root.hidden = !shown;
+    this.refresh();
+  }
+
+  private refresh(): void {
+    if (this.root.hidden || !this.root.open) {
+      this.body.replaceChildren();
+      return;
+    }
+    const { mutations } = this;
     if (mutations.length === 0) {
       this.body.replaceChildren(empty(strings.viewNothingWritten));
       return;
@@ -67,9 +87,17 @@ export class MutationView {
   }
 
   destroy(): void {
+    this.root.removeEventListener('toggle', this.onToggle);
     this.root.remove();
   }
 }
+
+const empty = (text: string): HTMLElement => {
+  const line = document.createElement('p');
+  line.className = 'plivet-view__empty';
+  line.textContent = text;
+  return line;
+};
 
 const headerRow = (titles: string[]): HTMLTableRowElement => {
   const row = document.createElement('tr');

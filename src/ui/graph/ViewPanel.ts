@@ -10,16 +10,11 @@ export interface ViewPanelHandle {
 }
 
 /**
- * The switches that decide what the canvas draws: one per memory region, and
- * one for the statement section under them.
- *
- * The statement section is one switch rather than two. The reading of the
- * statement and the expansion under it are one view of one step - the picture
- * is what the words are about - so the box that takes the explanation away
- * takes its picture with it.
+ * The switches that decide what the canvas workspace draws: its five
+ * sections, and one per memory region inside the memory section.
  *
  * It is a disclosure rather than a row of checkboxes because the toolbar sits
- * over the paper and stays there while the reader scrolls: eight controls
+ * over the paper and stays there while the reader scrolls: all the controls
  * along it would cost more of the drawing than they are worth, and the answer
  * they hold is one a reader gives once and then leaves alone. It is painted as
  * the map is - the slate title bar, the pale column header, the grid lines
@@ -85,7 +80,30 @@ export function viewPanel(
     view.showStatement(shown);
     onChange();
   });
-  sections.append(sectionTitle, statement.label);
+  const callStack = checkbox(strings.viewCallStack, (shown) => {
+    view.showCallStack(shown);
+    onChange();
+  });
+  const expression = checkbox(strings.graphExpressionHeading, (shown) => {
+    view.showExpression(shown);
+    onChange();
+  });
+  const memory = checkbox(strings.graphMemoryHeading, (shown) => {
+    view.showMemory(shown);
+    onChange();
+  });
+  const mutations = checkbox(strings.viewMutations, (shown) => {
+    view.showMutations(shown);
+    onChange();
+  });
+  sections.append(
+    sectionTitle,
+    statement.label,
+    callStack.label,
+    expression.label,
+    memory.label,
+    mutations.label
+  );
 
   const body = document.createElement('div');
   body.className = 'plivet-graph__config-body';
@@ -98,6 +116,10 @@ export function viewPanel(
       box.checked = drawn(region);
     }
     statement.input.checked = view.isStatementShown();
+    callStack.input.checked = view.isCallStackShown();
+    expression.input.checked = view.isExpressionShown();
+    memory.input.checked = view.isMemoryShown();
+    mutations.input.checked = view.areMutationsShown();
   };
   refresh();
   return { root, refresh };

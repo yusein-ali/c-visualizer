@@ -1,18 +1,18 @@
 import { EditorState } from '@codemirror/state';
 import { PlivetCPP14Interpreter } from '../src/interpreter/CPP14';
 import { extractModel } from '../src/core/extractModel';
-import { StepModel } from '../src/core';
+import { StepModel, emptyStepModel } from '../src/core';
 import { HoverTextSource } from '../src/app/hoverText';
+import { statementCard } from '../src/ui/graph';
 
 /**
  * One explanation of the current statement.
  *
- * It is the general case the expression expansion sits inside: the expansion
- * draws the operands and the operators, and this puts a reading of the whole
- * statement over it - which kind of statement it is, which branch or which
- * iteration this is. Nothing here describes a construct a second time, which
- * is what these tests are really checking: the lines are the tooltip's own
- * records, gathered.
+ * The separate expression view draws the operands and operators below this;
+ * this view reads the whole statement - which kind it is, which branch or
+ * which iteration this is. Nothing here describes a construct a second time,
+ * which is what these tests are really checking: the lines are the tooltip's
+ * own records, gathered.
  */
 
 const PROGRAM = `int twice(int n) {
@@ -108,10 +108,15 @@ describe('what the statement section says', () => {
     expect(source.explainStatement(PROGRAM).statement).toEqual(hovered);
   });
 
-  it('prints the parts of the statement that came to something', () => {
-    const stepped = steps.filter((step) => step.evaluations.length !== 0);
+  it('prints the valued parts of the expression being expanded now', () => {
+    const stepped = steps.filter((step) => step.expression !== null);
     expect(stepped.length).toBeGreaterThan(0);
-    const explanation = explaining(PROGRAM, stepped[0]);
+    const step = stepped.find((one) =>
+      one.expression === null
+        ? false
+        : one.expression.root.children.some((child) => child.value !== null)
+    )!;
+    const explanation = explaining(PROGRAM, step);
     expect(explanation.parts.length).toBeGreaterThan(0);
     for (const part of explanation.parts) {
       expect(part.title).not.toBe('');
@@ -119,13 +124,138 @@ describe('what the statement section says', () => {
     }
   });
 
-  it('prints the parts in the order they are written', () => {
-    const stepped = steps.find((step) => 1 < step.evaluations.length)!;
+  it('does not carry values from the previous statement into the expansion', () => {
+    const stepped = steps.find(
+      (step) =>
+        step.expression !== null &&
+        step.evaluations.some(
+          (evaluation) =>
+            evaluation.range.begin.y !== step.expression!.range.begin.y
+        )
+    )!;
     const explanation = explaining(PROGRAM, stepped);
-    const source = PROGRAM.split('\n');
-    const positions = explanation.parts.map((part) =>
-      source.findIndex((line) => line.includes(part.title))
+    const currentLine =
+      PROGRAM.split('\n')[stepped.expression!.range.begin.y - 1];
+
+    expect(explanation.parts.length).toBeGreaterThan(0);
+    explanation.parts.forEach((part) => {
+      expect(currentLine).toContain(part.title);
+    });
+  });
+
+  it('uses the innermost activation when recursive ranges are equal', () => {
+    const source = new HoverTextSource();
+    const step = emptyStepModel();
+    step.codeRange = {
+      begin: { x: 2, y: 4 },
+      end: { x: 7, y: 4 },
+    };
+    const functionRange = {
+      begin: { x: 0, y: 3 },
+      end: { x: 1, y: 8 },
+    };
+    step.constructStates = [
+      {
+        kind: 'functionDec',
+        range: functionRange,
+        facts: [{ label: 'factArgument', value: 'n = 0' }],
+      },
+      {
+        kind: 'functionDec',
+        range: functionRange,
+        facts: [{ label: 'factArgument', value: 'n = 1' }],
+      },
+    ];
+
+    source.setStep(step);
+
+    expect(source.explainStatement(PROGRAM).statement).toEqual({
+      title: 'function definition',
+      facts: [{ label: 'argument', value: 'n = 1', code: true }],
+    });
+  });
+});
+
+describe('the statement teaching card', () => {
+  const steps = stepsOf(PROGRAM);
+
+  it('leads with a friendly construct name and current line', () => {
+    const step = stepOn(steps, 6);
+    const card = statementCard(step, explaining(PROGRAM, step), false);
+
+    expect(card.title).toBe('For loop');
+    expect(card.context).toBe('Currently executing on line 6');
+    expect(card.description).toContain('initialization `int i = 0`');
+  });
+
+  it('reads an evaluated if statement as one complete explanation', () => {
+    const step = emptyStepModel();
+    step.codeRange = {
+      begin: { x: 2, y: 4 },
+      end: { x: 9, y: 4 },
+    };
+    const card = statementCard(
+      step,
+      {
+        statement: {
+          title: 'if statement',
+          facts: [
+            { label: 'controlling expression', value: 'n < 3', code: true },
+            { label: 'evaluates to', value: '1', code: true },
+            {
+              label: 'which C reads as true, because it is not zero',
+              value: '',
+            },
+            {
+              label: 'the branch after `if` is the one running',
+              value: '',
+            },
+          ],
+        },
+        parts: [],
+      },
+      false
     );
-    expect(positions).toEqual([...positions].sort((a, b) => a - b));
+
+    expect(card.description).toBe(
+      'If statement with controlling expression `n < 3`, which evaluates to `1`. ' +
+        'C reads the evaluated expression as true because it is not zero. ' +
+        'The branch after `if` is the one running.'
+    );
+  });
+
+  it('gives useful guidance before execution starts', () => {
+    const card = statementCard(emptyStepModel(), explaining(PROGRAM), false);
+
+    expect(card.title).toBe('No active statement');
+    expect(card.context).toContain('Start or step through the program');
+    expect(card.description).toBe('');
+  });
+
+  it('groups produced expression values only when requested', () => {
+    const step = steps.find((one) => one.expression !== null)!;
+    const explanation = explaining(PROGRAM, step);
+
+    expect(statementCard(step, explanation, false).values).toEqual([]);
+    expect(
+      statementCard(step, explanation, true).values.length
+    ).toBeGreaterThan(0);
+    expect(statementCard(step, explanation, true).values[0]).toMatchObject({
+      labelCode: true,
+      valueCode: true,
+    });
+  });
+
+  it('uses the expansion line as the shared current-statement line', () => {
+    const step = steps.find((one) => one.expression !== null)!;
+    step.codeRange = {
+      begin: { x: 0, y: 1 },
+      end: { x: 1, y: 1 },
+    };
+    const card = statementCard(step, explaining(PROGRAM, step), false);
+
+    expect(card.context).toBe(
+      `Currently executing on line ${step.expression!.range.begin.y}`
+    );
   });
 });

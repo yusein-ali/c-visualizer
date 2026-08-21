@@ -89,14 +89,21 @@ describe('the shell', () => {
 });
 
 describe('the instructions', () => {
-  it('shows every line of the text, as text', () => {
+  it('shows every section and instruction as text', () => {
     const parent = parentOf();
     const dialog = new HowToDialog(parent);
     dialog.open();
 
-    const paragraphs = dialog.root.querySelectorAll('.plivet-help__body p');
-    expect(paragraphs).toHaveLength(strings.howToText.length);
-    expect(paragraphs[0].textContent).toBe(strings.howToText[0].trim());
+    const intro = dialog.root.querySelector('.plivet-help__intro');
+    const headings = dialog.root.querySelectorAll('.plivet-help__body h3');
+    const items = dialog.root.querySelectorAll('.plivet-help__body li');
+    expect(intro?.textContent).toBe(strings.howToIntro);
+    expect(headings).toHaveLength(strings.howToSections.length);
+    expect(items).toHaveLength(
+      strings.howToSections.flatMap((section) => section.items).length
+    );
+    expect(headings[0].textContent).toBe(strings.howToSections[0].title);
+    expect(items[0].textContent).toBe(strings.howToSections[0].items[0]);
   });
 
   it('closes from the button', () => {

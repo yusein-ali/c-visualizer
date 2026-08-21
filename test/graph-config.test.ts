@@ -17,20 +17,43 @@ const boxFor = (panel: HTMLElement, text: string) =>
   )!;
 
 describe('the canvas view panel', () => {
-  it('offers a switch per memory region, and one for the statement', () => {
+  it('combines all canvas sections with the memory-region switches', () => {
     const { root } = viewPanel(
       new ViewOptions(),
       () => undefined,
       drawing(MEMORY_REGIONS)
     );
 
-    // The statement section is one switch rather than two: the reading and
-    // the expansion under it are one view of one step.
-    expect(boxesOf(root)).toHaveLength(MEMORY_REGIONS.length + 1);
+    expect(boxesOf(root)).toHaveLength(MEMORY_REGIONS.length + 5);
     MEMORY_REGIONS.forEach((region: MemoryRegion) => {
       expect(boxFor(root, memoryRegionName(region)).checked).toBe(true);
     });
     expect(boxFor(root, strings.graphViewStatement).checked).toBe(true);
+    expect(boxFor(root, strings.viewCallStack).checked).toBe(true);
+    expect(boxFor(root, strings.graphExpressionHeading).checked).toBe(true);
+    expect(boxFor(root, strings.graphMemoryHeading).checked).toBe(true);
+    expect(boxFor(root, strings.viewMutations).checked).toBe(true);
+  });
+
+  it('controls memory and value history from the same panel', () => {
+    const view = new ViewOptions();
+    let redraws = 0;
+    const { root } = viewPanel(
+      view,
+      () => (redraws += 1),
+      drawing(MEMORY_REGIONS)
+    );
+    const memory = boxFor(root, strings.graphMemoryHeading);
+    const mutations = boxFor(root, strings.viewMutations);
+
+    memory.checked = false;
+    memory.dispatchEvent(new Event('change'));
+    mutations.checked = false;
+    mutations.dispatchEvent(new Event('change'));
+
+    expect(view.isMemoryShown()).toBe(false);
+    expect(view.areMutationsShown()).toBe(false);
+    expect(redraws).toBe(2);
   });
 
   it('takes the statement section off and puts it back', () => {
@@ -45,6 +68,21 @@ describe('the canvas view panel', () => {
     box.checked = true;
     box.dispatchEvent(new Event('change'));
     expect(view.isStatementShown()).toBe(true);
+  });
+
+  it('controls the call stack and expression as separate views', () => {
+    const view = new ViewOptions();
+    const { root } = viewPanel(view, () => undefined, drawing(MEMORY_REGIONS));
+    const callStack = boxFor(root, strings.viewCallStack);
+    const expression = boxFor(root, strings.graphExpressionHeading);
+
+    callStack.checked = false;
+    callStack.dispatchEvent(new Event('change'));
+    expression.checked = false;
+    expression.dispatchEvent(new Event('change'));
+
+    expect(view.isCallStackShown()).toBe(false);
+    expect(view.isExpressionShown()).toBe(false);
   });
 
   it('ticks the regions the map is actually drawing', () => {

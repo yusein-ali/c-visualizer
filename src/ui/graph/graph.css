@@ -223,8 +223,15 @@
 }
 
 .plivet-graph .plivet-fold-cell,
-.plivet-graph .plivet-collapse-cell {
+.plivet-graph .plivet-collapse-cell,
+.plivet-graph .plivet-section-heading {
   cursor: pointer;
+}
+
+/* The bounded write history is the final collapsible region in the canvas
+   workspace. The paper keeps the remaining height and scrolls independently. */
+.plivet-graph__history[open] {
+  min-height: 7rem;
 }
 
 /*

@@ -27,13 +27,16 @@ import { MemoryRegion } from './model';
  */
 export class ViewOptions {
   private readonly chosen = new Map<MemoryRegion, boolean>();
-  /**
-   * Whether the statement section is drawn at all. It is one answer rather
-   * than two: the reading of the statement and the expansion under it are one
-   * view of one step - the picture is what the words are about - so switching
-   * the explanation off takes the expansion with it.
-   */
+  /** Whether the current statement's explanation is drawn. */
   private statement = true;
+  /** Whether the active calls beside the statement are drawn. */
+  private callStack = true;
+  /** Whether the expression tree spanning the two top columns is drawn. */
+  private expression = true;
+  /** The memory map is one canvas section, around its individual regions. */
+  private memory = true;
+  /** The write history is the section under the JointJS drawing. */
+  private mutations = true;
 
   /**
    * Whether the memory map draws this region at all. `whenUntouched` is the
@@ -62,9 +65,45 @@ export class ViewOptions {
     this.statement = shown;
   }
 
+  public isCallStackShown(): boolean {
+    return this.callStack;
+  }
+
+  public showCallStack(shown: boolean): void {
+    this.callStack = shown;
+  }
+
+  public isExpressionShown(): boolean {
+    return this.expression;
+  }
+
+  public showExpression(shown: boolean): void {
+    this.expression = shown;
+  }
+
+  public isMemoryShown(): boolean {
+    return this.memory;
+  }
+
+  public showMemory(shown: boolean): void {
+    this.memory = shown;
+  }
+
+  public areMutationsShown(): boolean {
+    return this.mutations;
+  }
+
+  public showMutations(shown: boolean): void {
+    this.mutations = shown;
+  }
+
   /** Back to what the canvas decides for itself. */
   public clear(): void {
     this.chosen.clear();
     this.statement = true;
+    this.callStack = true;
+    this.expression = true;
+    this.memory = true;
+    this.mutations = true;
   }
 }

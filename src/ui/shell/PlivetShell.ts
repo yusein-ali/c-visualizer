@@ -3,7 +3,7 @@ import { Splitter } from './Splitter';
 import './shell.css';
 
 /**
- * The frame the application hangs in: two columns, a footer, and six boxes
+ * The frame the application hangs in: two columns, a footer, and five boxes
  * for the widgets to mount into.
  *
  * It was `App`, `EditorSide`, `Menu` and `Footer` - four React class
@@ -67,11 +67,6 @@ export class PlivetShell {
   readonly files: HTMLDivElement;
   /** The right-hand column: the visualization. */
   readonly main: HTMLDivElement;
-  /**
-   * Under the canvas: the panes that draw the shape of the run rather than
-   * the memory of one step. Closed, it is a strip of switches one line high.
-   */
-  readonly views: HTMLDivElement;
   private readonly side: HTMLDivElement;
   private readonly splitters: Splitter[];
   private readonly observer: ResizeObserver | null;
@@ -126,17 +121,11 @@ export class PlivetShell {
       resize: (height) => this.setCanvasHeight(height),
       reset: () => this.root.style.removeProperty(CANVAS_HEIGHT),
     });
-    // The canvas mount is handed out whole - the graph widget takes the
-    // element over, class and children - so the handle under it hangs in a
-    // column beside it rather than inside it.
-    this.views = document.createElement('div');
-    this.views.className = 'plivet__views';
-
     const column = document.createElement('div');
     column.className = 'plivet__column';
-    // The handle sits between the canvas and the panes under it, so dragging
-    // it trades the map's height against theirs rather than against the page.
-    column.append(this.main, canvasSplit.element, this.views);
+    // Statement, call stack, memory and history now share the graph mount;
+    // the handle changes the height of that one visualization workspace.
+    column.append(this.main, canvasSplit.element);
 
     this.splitters = [editorSplit, columnSplit, canvasSplit];
     this.root.append(

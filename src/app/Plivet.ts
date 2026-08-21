@@ -16,7 +16,6 @@ import { ControlBar, ZOOM_COMMAND } from '../ui/controls';
 import { PlivetConsole } from '../ui/console';
 import { PlivetGraph } from '../ui/graph';
 import { FilePanel, download } from '../ui/files';
-import { ViewStack } from '../ui/views';
 import { HowToDialog } from '../ui/help';
 import type { PreprocessedDialog } from '../ui/preprocessed';
 import strings from '../strings';
@@ -86,8 +85,6 @@ export class Plivet {
   private readonly console: PlivetConsole;
   private readonly graph: PlivetGraph;
   private readonly files: FilePanel;
-  /** The panes under the canvas: the call stack, and the writes so far. */
-  private readonly views: ViewStack;
   private readonly help: HowToDialog;
   /**
    * Built on the first press and kept after it. `@codemirror/merge` and the
@@ -144,8 +141,6 @@ export class Plivet {
         bus.signal('focusObject', object, 'graph'),
     });
 
-    this.views = new ViewStack(this.shell.views);
-
     this.files = new FilePanel(this.shell.files, {
       onUpload: (files: FileList) => this.upload(files),
       onDelete: (filename: string) =>
@@ -167,7 +162,6 @@ export class Plivet {
     );
     bus.slot('draw', (model: StepModel, explanation: StatementExplanation) => {
       this.graph.render(model, explanation);
-      this.views.render(model);
     });
     // The editor's tooltip lights up the row the canvas draws for the same
     // object. What the canvas said itself comes back here and is ignored.
@@ -273,7 +267,6 @@ export class Plivet {
     this.help.destroy();
     this.preprocessed?.destroy();
     this.files.destroy();
-    this.views.destroy();
     this.graph.destroy();
     this.console.destroy();
     this.editor.destroy();

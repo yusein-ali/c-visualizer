@@ -1,5 +1,6 @@
 import { ExecState } from 'unicoen.ts/dist/interpreter/Engine/ExecState';
 import { PlivetCPP14Interpreter } from '../src/interpreter/CPP14';
+import strings from '../src/strings';
 import {
   CELL_HEIGHT,
   CONTROL_EVENT,
@@ -578,6 +579,22 @@ int main(void) {
   };
   const send = (server: Server, controlEvent: CONTROL_EVENT) =>
     quiet(() => server.send({ controlEvent, sourcecode: code }));
+
+  it('sends the parsed statement map with the first execution state', async () => {
+    const started = await quiet(() =>
+      new Server().send({
+        controlEvent: 'Start',
+        sourcecode: strings.sourceCode,
+      })
+    );
+
+    expect(started.constructs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'call', line: 3 }),
+        expect.objectContaining({ kind: 'variableDec', line: 11 }),
+      ])
+    );
+  });
 
   it('steps back through every step to the first one', async () => {
     const server = new Server();

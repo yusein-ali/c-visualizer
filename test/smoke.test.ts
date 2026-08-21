@@ -2,6 +2,7 @@ import { Plivet } from '../src/index';
 import { Server } from '../src/core/server';
 import type { Response, RUN_EVENT, StepModel } from '../src/core';
 import type { FromWorker, ToWorker } from '../src/core/messages';
+import type { StatementExplanation } from '../src/ui/records';
 
 /**
  * The whole application, once, end to end: a `Plivet` built into a div, the
@@ -73,10 +74,12 @@ jest.mock('../src/core/spawnWorker', () => ({
  * not got. The model it was handed is kept, so that a step reaching the
  * canvas is still something this test can see. */
 const drawn: StepModel[] = [];
+const explained: StatementExplanation[] = [];
 jest.mock('../src/ui/graph', () => ({
   PlivetGraph: class {
-    render(model: StepModel): void {
+    render(model: StepModel, explanation: StatementExplanation): void {
       drawn.push(model);
+      explained.push(explanation);
     }
     setScale(): void {}
     destroy(): void {}
@@ -163,6 +166,7 @@ afterAll(() => {
 
 beforeEach(() => {
   drawn.length = 0;
+  explained.length = 0;
   parent = document.createElement('div');
   document.body.appendChild(parent);
   plivet = new Plivet(parent, { sourceCode: PROGRAM });
@@ -205,6 +209,36 @@ describe('a PLIVET on a page', () => {
     expect(model.codeRange).not.toBeNull();
     expect(parent.querySelector('.cm-editor')!.getAttribute('read-only')).toBe(
       'true'
+    );
+  });
+
+  it('updates the statement type as execution moves to a new construct', async () => {
+    const buttons = buttonsOf(parent);
+    buttons[STEP].click();
+    await until(
+      'the variable declaration',
+      () => statusOf(parent) === 'DebugStatus: First'
+    );
+    expect(explained[explained.length - 1].statement!.title).toBe(
+      'variable declaration'
+    );
+
+    buttons[STEP].click();
+    await until(
+      'the assignment',
+      () => statusOf(parent) === 'DebugStatus: Step 1'
+    );
+    expect(explained[explained.length - 1].statement!.title).toBe(
+      'assignment statement'
+    );
+
+    buttons[STEP].click();
+    await until(
+      'the function call',
+      () => statusOf(parent) === 'DebugStatus: Step 2'
+    );
+    expect(explained[explained.length - 1].statement!.title).toBe(
+      'function call — printf'
     );
   });
 
