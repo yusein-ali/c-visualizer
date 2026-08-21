@@ -30,6 +30,8 @@ export { cSnippets } from './snippets';
 export type { LibraryFunction } from './completion';
 export { expansionAt } from './expansions';
 export { focusField, setFocusRange } from './focus';
+export { goTo, gotoDeclaration } from './gotoDeclaration';
+export type { DeclarationRequest, DeclarationSource } from './gotoDeclaration';
 export { coverageField, setCoverage } from './coverage';
 export { isSession, restoreSession, sessionOf } from './session';
 export type { SessionJSON } from './session';

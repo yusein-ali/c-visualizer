@@ -20,6 +20,7 @@ import {
 } from './diagnostics';
 import { expansionField, showExpansions as markExpansions } from './expansions';
 import { focusField, showFocus as markFocus } from './focus';
+import { DeclarationSource, gotoDeclaration } from './gotoDeclaration';
 import {
   LineCoverage,
   coverageField,
@@ -70,6 +71,12 @@ export interface DebugExtensionOptions {
    */
   onHoverObject?: (object: string | null) => void;
   /**
+   * Where a name was declared, for the ctrl-click that goes there. The editor
+   * knows where the pointer is; what a name refers to is the application's,
+   * and leaving this out leaves the gesture off.
+   */
+  declarationAt?: DeclarationSource;
+  /**
    * A name was pinned or unpinned. What the pinned names hold is the
    * application's to look up, so it is told to look again.
    */
@@ -101,6 +108,9 @@ export class DebugExtensions {
       lintGutter(),
       this.readOnly.of(DebugExtensions.readOnlyExtension(false)),
     ];
+    if (typeof options.declarationAt !== 'undefined') {
+      this.extensions.push(gotoDeclaration(options.declarationAt));
+    }
     // The gesture is only worth adding where somebody is listening for what
     // it changed: a pinned watch nobody fills in says a name and nothing.
     if (typeof options.onWatchesChanged !== 'undefined') {

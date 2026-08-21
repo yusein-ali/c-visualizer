@@ -365,6 +365,11 @@ export const debugTheme = EditorView.baseTheme({
     color: 'var(--plivet-tooltip-color, #f8f8f2)',
     border: '1px solid rgba(255, 255, 255, 0.25)',
   },
+  // While ctrl or command is held, the text is something to follow rather
+  // than something to select. It is the only sign the gesture exists.
+  '&.plivet-goto-ready .cm-content': {
+    cursor: 'pointer',
+  },
   // Where the canvas is pointing. It is deliberately not the step marker's
   // colour: one says where the program is, the other where the reader is.
   '.plivet-focus-line': {

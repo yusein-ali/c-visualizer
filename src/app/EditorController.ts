@@ -11,8 +11,10 @@ import {
   SyntaxErrorModel,
 } from '../core';
 import strings from '../strings';
+import { Construct } from '../interpreter/Construct';
 import { Expansion } from '../interpreter/Expansion';
 import {
+  DeclarationRequest,
   EditableRegion,
   LibraryFunction,
   SessionJSON,
@@ -21,6 +23,7 @@ import {
   rangeOf,
   TeachingDiagnostic,
 } from '../ui/editor';
+import { declarationFor } from './declarations';
 import { HoverTextSource } from './hoverText';
 import { libraryHelp, libraryNames } from './libraryHelp';
 import { Bus } from './emitter';
@@ -146,6 +149,12 @@ export class EditorController {
    * answers on every step. The linter holds one set, so all three are handed
    * over together whenever any of them changes.
    */
+  /**
+   * The declarations the last syntax check found, kept because two things ask
+   * about them from here: the hover, which is handed them, and the ctrl-click
+   * that goes to one.
+   */
+  private constructs: Construct[] = [];
   private syntaxErrors: SyntaxErrorModel[] = [];
   private teachingLints: TeachingDiagnostic[] = [];
   private runtimeLints: TeachingDiagnostic[] = [];
@@ -194,6 +203,8 @@ export class EditorController {
       onHoverObject: (object: string | null) =>
         this.bus.signal('focusObject', object, 'editor'),
       onWatchesChanged: () => this.showWatches(),
+      declarationAt: (request: DeclarationRequest) =>
+        this.declarationRange(request),
       completions: this.completions.source,
       onChange: (code: string) => this.edited(code),
     });
@@ -437,6 +448,7 @@ export class EditorController {
           // reader is looking at another file, the marks come off rather than
           // land on lines they are not about.
           if (this.entryPath !== this.activePath) {
+            this.constructs = [];
             this.setSyntaxError([], []);
             this.setExpansions([]);
             this.hover.setConstructs([]);
@@ -563,6 +575,30 @@ export class EditorController {
     this.editor.debug.showWatches(
       this.editor.view,
       names.map((name) => ({ name, record: this.hover.watchRecord(name) }))
+    );
+  }
+
+  /**
+   * Where the name under a ctrl-click was declared.
+   *
+   * The constructs are the ones the last syntax check produced, so a program
+   * that has not been checked - or one that does not parse - has nowhere to
+   * send the reader, and the click stays a click. What the name refers to is
+   * `declarations.ts`; what is added here is the conversion into the
+   * document's own offsets, which is the editor's coordinate system and not
+   * the interpreter's.
+   */
+  private declarationRange(request: DeclarationRequest) {
+    const found = declarationFor(this.constructs, request);
+    if (found === null) {
+      return null;
+    }
+    return rangeOf(
+      this.editor.view.state.doc,
+      found.line,
+      found.column,
+      found.endLine,
+      found.endColumn
     );
   }
 
