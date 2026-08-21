@@ -23,6 +23,7 @@ import {
 import { RuntimeDiagnostic } from './RuntimeDiagnostic';
 import { StructTable } from './StructTable';
 import { LintDiagnostic, teachingDiagnostics } from './TeachingLint';
+import { linkerDiagnostics } from './LinkerCheck';
 import { UnionTable } from './UnionTable';
 
 /**
@@ -193,10 +194,13 @@ export class PlivetCPP14Interpreter extends Interpreter {
   getLints(code: string): LintDiagnostic[] {
     const prepared = this.prepare(code);
     try {
-      return teachingDiagnostics(
-        this.mapper.parseToUniTree(prepared.code),
-        code
-      );
+      const tree = this.mapper.parseToUniTree(prepared.code);
+      // Two passes over one tree: what a compiler would say about the
+      // statements, and what a linker would say about the file as a whole.
+      // They are separate because they are different questions - one walks
+      // with scope, the other asks about the translation unit - and one list
+      // because the reader has one editor.
+      return teachingDiagnostics(tree, code).concat(linkerDiagnostics(tree));
     } catch {
       return [];
     }

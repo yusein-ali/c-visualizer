@@ -962,7 +962,7 @@ and 10.
 
 ## Phase 12: teaching features
 
-**Status: items 1 to 18 done.** Items 1 to 4 are the phase proper; the rest are
+**Status: items 1 to 19 done.** Items 1 to 4 are the phase proper; the rest are
 independent of it and of each other, and can be taken in any order or dropped.
 
 Everything before this phase is parity work: the same application on a stack
@@ -1194,6 +1194,7 @@ it, and can be taken in any order or dropped.
    source out turns completion off rather than falling back to the buffer's
    own words; the library arrives from the application, so `libraryHelp` stays
    the one place that knows what `printf` is.
+
 6. **Snippets.** **Done.** `snippetCompletion` skeletons for `for`, `while`,
    `switch`, `struct`, `printf` and `scanf`, with tab-through fields. Beginners
    spend a disproportionate share of their time on C's punctuation. The snippet
@@ -1211,6 +1212,7 @@ it, and can be taken in any order or dropped.
    matches the file it lands in. Where a snippet and a library function are
    the same word, one entry is offered rather than two, and it is the template
    carrying `libraryHelp`'s own signature and sentence.
+
 7. **Structured hover, and cross-highlighting with the graph.** **Done.**
    `src/ui/editor/tooltip.ts` set `textContent`; `create()` may return any DOM.
    It now renders type, address and current value as a small table, and the
@@ -1241,6 +1243,7 @@ it, and can be taken in any order or dropped.
    scroll - the reader is looking at the canvas, and a page that moved under a
    pointer they are not pointing with would be the editor answering a question
    nobody asked.
+
 8. **Pinned watches.** **Done.** A `showTooltip` `StateField` holding tooltips
    the reader pinned to a variable, updated on every step. A watch window with
    no new user interface.
@@ -1262,6 +1265,7 @@ it, and can be taken in any order or dropped.
    name cannot disagree. A pinned name the current frame has no object for
    says so instead of vanishing, which is a lesson about scope rather than a
    pin that seems to have come loose.
+
 9. **Editor affordances**, worth one pull request together. **Done.**
    `highlightSelectionMatches` lights up every occurrence of the identifier
    under the cursor (`@codemirror/search`, so standalone only); `foldGutter`
@@ -1289,6 +1293,7 @@ it, and can be taken in any order or dropped.
    variables hold - the same values item 1 prints at the end of the line -
    because that is what a reader who cannot see the marker would otherwise
    hover every name on the line to learn.
+
 10. **Protected regions.** **Done.** A `transactionFilter` rejecting edits
     outside marked spans turns a program into a fill-in-the-blank exercise,
     which is the shape an A+ task usually takes. No new package, and it
@@ -1309,6 +1314,7 @@ it, and can be taken in any order or dropped.
     program: a host handing PLIVET a new file is not a student typing outside
     the blank, and it says so with an annotation rather than by turning the
     filter off.
+
 11. **The preprocessed source, side by side.** **Done.** `@codemirror/merge`
     against the output of `src/interpreter/preprocess.ts`, showing what
     `#define` and `#if` actually did. The merge view is a second editor, so it
@@ -1324,6 +1330,7 @@ it, and can be taken in any order or dropped.
     and a merge view holding a stale half is worse than none. The dialog and
     the preprocessor arrive together in a chunk of their own, so a reader who
     never asks what the preprocessor did never downloads the answer.
+
 12. **Session serialisation.** **Done.** `EditorState.toJSON`, plus the
     breakpoint set and the pinned names, so a session can be saved, handed in,
     or opened by a teacher looking at where a student had got to.
@@ -1339,6 +1346,7 @@ it, and can be taken in any order or dropped.
     be restored into its blanks. What arrives from outside is checked rather
     than trusted, since it may be another version's, another tool's, or half
     of one.
+
 13. **One explanation of the current statement.** **Done.** A teaching view that says
     what the statement under the step marker does, and it is the general case
     that the expression expansion of Phase 8 item 6 sits inside rather than a
@@ -1438,7 +1446,16 @@ it, and can be taken in any order or dropped.
     off rather than land on lines they are not about. The file that runs
     cannot be closed, and with one file open the strip is not drawn at all, so
     the ordinary case looks exactly as it did before tabs existed.
-19. Validate the code as linker would do. -- multidefinition scan
+
+19. **Linker diagnostics.** **Done.** `src/interpreter/LinkerCheck.ts` walks the
+    translation unit once and reports the failures that parsing and statement
+    lint cannot: a second function or initialized file-scope object definition,
+    a called prototype with no definition, and a program with no defined
+    `main`. The checks deliberately leave an undeclared call alone because it
+    may name a library function, and distinguish initialized definitions from
+    C's compatible tentative definitions and `extern` declarations. Findings
+    share the teaching-lint surface, so the editor displays compiler and linker
+    explanations in one place.
 
 Exit criterion: each item lands as its own pull request, behind no flag; the
 debug extension array still attaches to an `EditorView` somebody else built;
