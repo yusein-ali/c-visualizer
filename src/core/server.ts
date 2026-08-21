@@ -30,11 +30,36 @@ export type DEBUG_STATE =
  * boundary through `structuredClone`, which keeps an object's fields and
  * throws its prototype away.
  */
+/** One file the reader has open, named the way the page names it. */
+export interface SourceFile {
+  path: string;
+  text: string;
+}
+
 export interface Request {
   controlEvent: CONTROL_EVENT;
+  /**
+   * The translation unit to compile. It is the text of the entry file, and it
+   * stays in the protocol as its own field because everything downstream -
+   * the response, the history, the breakpoint rows - is about this one text.
+   */
   sourcecode: string;
   stdinText?: string;
   lineNumOfBreakpoint?: number[];
+  /**
+   * Every file the reader has open, and which of them is the one that runs.
+   *
+   * C compiles one translation unit at a time and PLIVET's preprocessor
+   * discards `#include`, so only the entry is compiled today. The list still
+   * crosses the boundary, because the directive PLIVET is meant to embed in
+   * is multi-file by design - the parts of a block are editor tabs, exactly
+   * one of them is the main file, and every part is submitted together - and
+   * widening a string afterwards would touch every `controlEvent` branch, the
+   * line mapping and the message shapes at once.
+   */
+  files?: SourceFile[];
+  /** The `path` of the file in `files` that is the translation unit. */
+  entry?: string;
 }
 
 /**
@@ -82,6 +107,20 @@ export interface Response {
    */
   runtime?: RuntimeDiagnostic[];
 }
+
+/**
+ * The text to compile: the entry file where the request names one, and the
+ * `sourcecode` field otherwise. The two agree today - the caller fills both -
+ * and this is what decides when they ever do not.
+ */
+const entryTextOf = (request: Request): string => {
+  const { files, entry, sourcecode } = request;
+  if (typeof files === 'undefined' || typeof entry === 'undefined') {
+    return sourcecode;
+  }
+  const found = files.find((file) => file.path === entry);
+  return typeof found === 'undefined' ? sourcecode : found.text;
+};
 
 /** How many times the run has reached one line. Lines are 1-based. */
 export interface LineCount {
@@ -209,8 +248,8 @@ export class Server {
   }
 
   public async send(request: Request): Promise<Response> {
-    const { controlEvent, sourcecode, stdinText, lineNumOfBreakpoint } =
-      request;
+    const { controlEvent, stdinText, lineNumOfBreakpoint } = request;
+    const sourcecode = entryTextOf(request);
 
     switch (controlEvent) {
       case 'Start': {

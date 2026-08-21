@@ -1,5 +1,6 @@
 import {
   Request,
+  SourceFile,
   CONTROL_EVENT,
   InterpreterClient,
   LintDiagnosticModel,
@@ -23,6 +24,7 @@ import {
 import { HoverTextSource } from './hoverText';
 import { libraryHelp, libraryNames } from './libraryHelp';
 import { Bus } from './emitter';
+import { TabBar } from '../ui/tabs';
 import type { ZOOM_COMMAND } from '../ui/controls';
 
 /**
@@ -45,6 +47,13 @@ export interface EditorControllerOptions {
   dark?: boolean;
   /** The program the editor opens with. */
   doc?: string;
+  /**
+   * Several files instead of one, as tabs. Exactly one of them runs; the
+   * rest are open beside it. Given, `doc` is ignored.
+   */
+  files?: SourceFile[];
+  /** Which of `files` is the translation unit. Defaults to the first. */
+  entry?: string;
   /**
    * The spans of that program the reader may edit. Left out, the whole file
    * is theirs; given, everything outside them is fixed, which is the shape an
@@ -102,11 +111,29 @@ const libraryFunctions = (): LibraryFunction[] =>
         ];
   });
 
+/**
+ * One open file. The session is what a tab remembers while the reader is
+ * looking at another one: not only its text, but where the cursor was, which
+ * lines were marked and what was pinned - the same record item 12 hands over,
+ * used here to hold a tab between visits.
+ */
+interface OpenFile {
+  path: string;
+  text: string;
+  session: SessionJSON | null;
+}
+
 export class EditorController {
   private readonly bus: Bus;
   private readonly client: InterpreterClient;
   private sourcecode: string;
   private readonly editor: PlivetEditor;
+  private readonly tabs: TabBar;
+  /** Every file open, in the order they were opened. */
+  private files: OpenFile[];
+  /** The file being edited, and the file that runs. Usually the same one. */
+  private activePath: string;
+  private entryPath: string;
   private readonly hover: HoverTextSource;
   private readonly completions: ProgramCompletions;
   private isDebugging = false;
@@ -127,13 +154,34 @@ export class EditorController {
       client,
       dark = false,
       doc = strings.sourceCode,
+      files,
+      entry,
       editableRegions = [],
     } = options;
     this.bus = bus;
     this.client = client;
-    this.sourcecode = doc;
+    const opened =
+      typeof files === 'undefined' || files.length === 0
+        ? [{ path: strings.savedFileName, text: doc, session: null }]
+        : files.map((file) => ({ ...file, session: null }));
+    this.files = opened;
+    this.entryPath =
+      typeof entry !== 'undefined' && opened.some((file) => file.path === entry)
+        ? entry
+        : opened[0].path;
+    this.activePath = this.entryPath;
+    this.sourcecode = this.fileAt(this.activePath).text;
     this.hover = new HoverTextSource();
     this.completions = new ProgramCompletions(libraryFunctions());
+
+    // The strip goes above the editor, in the same box: the editor is what
+    // the tabs are tabs of, and a bar anywhere else would be a bar for the
+    // page rather than for this widget.
+    this.tabs = new TabBar(mount, {
+      onSelect: (path: string) => this.activate(path),
+      onClose: (path: string) => this.closeFile(path),
+      onEntry: (path: string) => this.setEntry(path),
+    });
 
     this.editor = new PlivetEditor(mount, {
       doc: this.sourcecode,
@@ -150,6 +198,7 @@ export class EditorController {
     if (editableRegions.length !== 0) {
       this.editor.debug.setEditableRegions(this.editor.view, editableRegions);
     }
+    this.showTabs();
 
     this.bus.slot(
       'debug',
@@ -205,6 +254,7 @@ export class EditorController {
     this.bus.signal('debug', 'Stop');
     this.editor.replaceCode(code);
     this.sourcecode = code;
+    this.fileAt(this.activePath).text = code;
     this.bus.signal('debug', 'SyntaxCheck');
   }
 
@@ -226,7 +276,110 @@ export class EditorController {
   }
 
   destroy(): void {
+    this.tabs.destroy();
     this.editor.destroy();
+  }
+
+  /**
+   * Every file open, and which of them runs. It is what a request carries and
+   * what a host page would submit.
+   */
+  openFiles(): SourceFile[] {
+    return this.files.map((file) =>
+      file.path === this.activePath
+        ? { path: file.path, text: this.sourcecode }
+        : { path: file.path, text: file.text }
+    );
+  }
+
+  entry(): string {
+    return this.entryPath;
+  }
+
+  active(): string {
+    return this.activePath;
+  }
+
+  /**
+   * A file from outside, opened beside the ones already there rather than
+   * over them. A path that is already open is replaced and shown, which is
+   * what re-opening a file a reader has edited means.
+   */
+  openInTab(path: string, text: string): void {
+    const existing = this.files.find((file) => file.path === path);
+    if (typeof existing === 'undefined') {
+      this.files = this.files.concat({ path, text, session: null });
+    } else {
+      existing.text = text;
+      existing.session = null;
+    }
+    this.activate(path, true);
+  }
+
+  /**
+   * Switches to a file. What the reader had in the one they are leaving -
+   * the text, the cursor, the breakpoints, the pinned names - is kept as a
+   * session and put back when they return, because a tab that forgot where
+   * they were is a tab they have to find their place in twice.
+   */
+  private activate(path: string, force = false): void {
+    if (path === this.activePath && !force) {
+      return;
+    }
+    const leaving = this.files.find((file) => file.path === this.activePath);
+    if (typeof leaving !== 'undefined') {
+      leaving.text = this.sourcecode;
+      leaving.session = this.session();
+    }
+    const arriving = this.fileAt(path);
+    this.activePath = path;
+    if (arriving.session === null) {
+      this.editor.replaceCode(arriving.text);
+    } else {
+      this.editor.debug.restore(this.editor.view, arriving.session);
+    }
+    this.sourcecode = this.editor.getCode();
+    this.showTabs();
+    // A file that is not the one that runs has no marks of its own to show:
+    // the parser is answering about the translation unit, and drawing its
+    // findings over another file would be pointing at the wrong lines.
+    this.bus.signal('debug', 'SyntaxCheck');
+  }
+
+  private setEntry(path: string): void {
+    this.entryPath = path;
+    this.showTabs();
+    // The program that runs has changed, so what the run and the checker said
+    // about the old one is no longer about anything.
+    this.bus.signal('debug', 'Stop');
+    this.bus.signal('debug', 'SyntaxCheck');
+  }
+
+  private closeFile(path: string): void {
+    if (path === this.entryPath || this.files.length < 2) {
+      return;
+    }
+    this.files = this.files.filter((file) => file.path !== path);
+    if (this.activePath === path) {
+      this.activate(this.entryPath, true);
+      return;
+    }
+    this.showTabs();
+  }
+
+  private fileAt(path: string): OpenFile {
+    const found = this.files.find((file) => file.path === path);
+    return typeof found === 'undefined' ? this.files[0] : found;
+  }
+
+  private showTabs(): void {
+    this.tabs.setTabs(
+      this.files.map((file) => ({
+        path: file.path,
+        entry: file.path === this.entryPath,
+        active: file.path === this.activePath,
+      }))
+    );
   }
 
   private setFontSize(fontSize: number) {
@@ -237,6 +390,7 @@ export class EditorController {
   /** Every edit, with the syntax check that follows a second of quiet. */
   private edited(code: string) {
     this.sourcecode = code;
+    this.fileAt(this.activePath).text = code;
     setTimeout(() => {
       if (code === this.sourcecode) {
         this.bus.signal('debug', 'SyntaxCheck');
@@ -245,16 +399,32 @@ export class EditorController {
   }
 
   send(controlEvent: CONTROL_EVENT, stdinText?: string) {
+    const files = this.openFiles();
+    const entry = this.fileAt(this.entryPath);
     const request: Request = {
-      sourcecode: this.sourcecode,
+      // The text that runs is the entry's, whichever tab is on the screen.
+      sourcecode:
+        this.entryPath === this.activePath ? this.sourcecode : entry.text,
       controlEvent,
       stdinText,
       lineNumOfBreakpoint: this.breakpoints(),
+      files,
+      entry: this.entryPath,
     };
     if (controlEvent === 'SyntaxCheck') {
       this.client
         .send(request)
         .then((response: Response) => {
+          // What the parser found is about the translation unit. While the
+          // reader is looking at another file, the marks come off rather than
+          // land on lines they are not about.
+          if (this.entryPath !== this.activePath) {
+            this.setSyntaxError([], []);
+            this.setExpansions([]);
+            this.hover.setConstructs([]);
+            this.completions.setConstructs([]);
+            return;
+          }
           const { errors, expansions, constructs, lints } = response;
           this.setSyntaxError(
             errors,

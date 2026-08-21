@@ -6,6 +6,10 @@
 const strings = {
   howToUse: 'How to use',
   close: 'Close',
+  tabsLabel: 'Open files',
+  tabRuns: 'this is the file that runs',
+  tabMakeEntry: 'run this file instead',
+  tabClose: 'Close',
   openCode: 'Open',
   openCodeHint: 'Open a C file, or a session saved from here',
   saveCode: 'Save',

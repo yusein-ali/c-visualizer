@@ -9,6 +9,7 @@ import {
 } from '../core';
 import { PlivetShell } from '../ui/shell';
 import type { EditableRegion, SessionJSON } from '../ui/editor';
+import type { SourceFile } from '../core';
 import type { StatementExplanation } from '../ui/records';
 import { isSession } from '../ui/editor';
 import { ControlBar, ZOOM_COMMAND } from '../ui/controls';
@@ -41,6 +42,16 @@ import { Theme, isDark } from './theme';
 export interface PlivetOptions {
   /** The program the editor opens with. Defaults to the sample in `strings`. */
   sourceCode?: string;
+  /**
+   * Several files instead of one, drawn as tabs over the editor. Exactly one
+   * of them is the translation unit - `entry`, or the first - and it is the
+   * one that runs; the rest are open beside it. This is the shape a block of
+   * the interactive-code directive has, and the reason the Worker protocol
+   * carries a named set of files rather than a string.
+   */
+  files?: SourceFile[];
+  /** Which of `files` runs. Defaults to the first. */
+  entry?: string;
   /** Which theme to open in. The switch in the control bar changes it after. */
   theme?: Theme;
   /**
@@ -84,8 +95,6 @@ export class Plivet {
    * preprocessor did never downloads the answer.
    */
   private preprocessed: PreprocessedDialog | null = null;
-  /** What a save is called: the name of the file that was opened, or a default. */
-  private filename: string = strings.savedFileName;
   private theme: Theme;
 
   constructor(parent: HTMLElement, options: PlivetOptions = {}) {
@@ -114,6 +123,8 @@ export class Plivet {
       client,
       dark: isDark(this.theme),
       doc: options.sourceCode,
+      files: options.files,
+      entry: options.entry,
       editableRegions: options.editableRegions,
     });
 
@@ -180,9 +191,6 @@ export class Plivet {
    */
   private async openFile(file: File): Promise<void> {
     const text = await file.text();
-    if (/\.(c|h|txt)$/i.test(file.name)) {
-      this.filename = file.name;
-    }
     const parsed = parseSession(text);
     if (parsed !== null) {
       // JSON, so it was meant to be a session. One this version cannot read
@@ -196,7 +204,9 @@ export class Plivet {
       alert(strings.openedNotCode);
       return;
     }
-    this.editor.replaceCode(text);
+    // Beside what is open rather than over it: a reader who opens a second
+    // file has two files, and which of them runs is theirs to say.
+    this.editor.openInTab(file.name, text);
   }
 
   /**
@@ -204,7 +214,9 @@ export class Plivet {
    * one, so saving what was opened gives back a file of the same name.
    */
   private saveCode(): void {
-    download(this.filename, this.editor.code(), 'text/x-csrc');
+    // The file on the screen, under its own name: with several open, saving
+    // the entry while looking at another one would be a surprise.
+    download(this.editor.active(), this.editor.code(), 'text/x-csrc');
   }
 
   /**

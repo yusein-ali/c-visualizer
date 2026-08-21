@@ -962,7 +962,7 @@ and 10.
 
 ## Phase 12: teaching features
 
-**Status: items 1 to 17 done.** Items 1 to 4 are the phase proper; the rest are
+**Status: items 1 to 18 done.** Items 1 to 4 are the phase proper; the rest are
 independent of it and of each other, and can be taken in any order or dropped.
 
 Everything before this phase is parity work: the same application on a stack
@@ -1419,7 +1419,25 @@ it, and can be taken in any order or dropped.
     is not, so opening either works and a reader who renamed one still gets
     what is in it. A JSON file this version cannot read is refused with a
     sentence rather than dropped into the editor as text.
-18. support multi-tab open --
+18. **Several files open at once.** **Done.** A strip of tabs over the editor,
+    one per open file, with the translation unit marked: C compiles one, and
+    PLIVET's preprocessor discards `#include`, so exactly one of them runs and
+    pressing another file's marker makes that one the entry instead. This is
+    the shape the interactive-code directive already has - the parts of a
+    block are tabs, one of them is the main file, all of them are submitted -
+    which is why constraint 7 asked for it, and the Worker protocol now
+    carries `files` and `entry` beside `sourcecode` rather than a string
+    alone.
+
+    A tab is not only a text. Switching away keeps the whole session of the
+    file being left - the cursor, the breakpoints, the pinned names, using
+    item 12's own record - and switching back puts it in place, because a tab
+    a reader has to find their place in twice is a worse way to hold a second
+    file than a second window. The entry runs whichever tab is on the screen,
+    and while the reader is looking at another file the parser's marks come
+    off rather than land on lines they are not about. The file that runs
+    cannot be closed, and with one file open the strip is not drawn at all, so
+    the ordinary case looks exactly as it did before tabs existed.
 19. Validate the code as linker would do. -- multidefinition scan
 
 Exit criterion: each item lands as its own pull request, behind no flag; the

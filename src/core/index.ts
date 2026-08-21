@@ -9,7 +9,7 @@
  */
 export { InterpreterClient } from './client';
 export { Server } from './server';
-export type { Request, Response } from './server';
+export type { Request, Response, SourceFile } from './server';
 export type {
   CONTROL_EVENT,
   DEBUG_STATE,
