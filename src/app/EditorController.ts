@@ -238,6 +238,7 @@ export class EditorController {
         }
       }
     );
+    this.checkOnApproach();
     this.bus.slot('zoom', (command: ZOOM_COMMAND) => {
       if (command === 'In') {
         this.setFontSize(this.fontSize + 1);
@@ -247,6 +248,37 @@ export class EditorController {
         this.setFontSize(14);
       }
     });
+  }
+
+  /**
+   * The first syntax check, and when it happens.
+   *
+   * Everything the editor knows about the program comes from a check: the
+   * construct tooltips, the completion of the program's own names, the
+   * teaching rules, and the ctrl-click that goes to a declaration. Until now
+   * the first one ran a second after the first edit, so all four were dead on
+   * a program the reader had opened and not yet typed into - which is exactly
+   * the program a reader is most likely to be asking questions about.
+   *
+   * It is not run on construction either. The interpreter client starts its
+   * Worker on the first command on purpose, so that a page holding several
+   * PLIVETs pays for the ones somebody uses; checking from the constructor
+   * would spawn a Worker and load the parser chunk for every instance on the
+   * page. Coming near the editor - the pointer entering it, or the focus
+   * arriving from a keyboard - is the first moment that says this instance is
+   * the one being used, and it comes before the click that asks a question.
+   */
+  private checkOnApproach(): void {
+    let checked = false;
+    const check = () => {
+      if (checked) {
+        return;
+      }
+      checked = true;
+      this.bus.signal('debug', 'SyntaxCheck');
+    };
+    this.editor.view.dom.addEventListener('mouseenter', check);
+    this.editor.view.dom.addEventListener('focusin', check);
   }
 
   setDark(dark: boolean): void {
@@ -441,6 +473,10 @@ export class EditorController {
           }
           const { errors, expansions, constructs, lints } = response;
           const seen = typeof constructs === 'undefined' ? [] : constructs;
+          // What the ctrl-click resolves a name against. It is kept here
+          // rather than asked of the hover, because the hover is handed the
+          // constructs and does not hand them back.
+          this.constructs = seen;
           // The canvas always explains the entry file, even while another tab
           // is visible. Its syntax map must therefore not be cleared below.
           this.statement.setConstructs(seen);
