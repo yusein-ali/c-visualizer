@@ -1,4 +1,4 @@
-import { Plivet } from './index';
+import { CVisualizer, readConfig } from './index';
 
 /**
  * The standalone page: one instance, in the one element `index.html` provides.
@@ -9,5 +9,10 @@ import { Plivet } from './index';
  */
 const root = document.getElementById('root');
 if (root !== null) {
-  new Plivet(root);
+  // What the page asked for, before anything is built: the theme it opens in,
+  // the features it leaves out and the canvas sections it starts with are all
+  // decided here rather than switched afterwards, so a reader never sees a
+  // panel appear and then go again. A page with no configuration element gets
+  // an empty one, which is c-visualizer as it comes.
+  new CVisualizer(root, readConfig());
 }

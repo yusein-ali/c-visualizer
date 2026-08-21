@@ -15,6 +15,13 @@ export type {
   PlivetOptions,
   PlivetOptions as CVisualizerOptions,
 } from './app/Plivet';
+export {
+  CONFIG_ATTRIBUTE,
+  CONFIG_ELEMENT_ID,
+  parseConfig,
+  readConfig,
+} from './app/config';
+export type { ViewSelection } from './core';
 export type { Theme } from './app/theme';
 export type { EditableRegion, SessionJSON } from './ui/editor';
 export type { SourceFile } from './core';

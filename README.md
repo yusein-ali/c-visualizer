@@ -132,3 +132,43 @@ new CVisualizer(document.getElementById('root'), { theme: 'dark' });
 
 The public `CVisualizer` and `CVisualizerOptions` exports are aliases of the
 existing `Plivet` and `PlivetOptions` API.
+
+### Configuring the standalone page
+
+A page that only includes the bundle - a course page, a Moodle block, anything
+that cannot run a line of JavaScript of its own - configures the same options
+in markup. The standalone entry looks for an element with the id
+`c-visualizer-config` and reads the JSON on its `config` attribute before it
+builds anything:
+
+```html
+<div
+  id="c-visualizer-config"
+  config='{
+    "theme": "dark",
+    "features": { "preprocessor": false, "loadFile": false },
+    "views": { "expression": false, "regions": { "registers": false } }
+  }'
+></div>
+<div id="root"></div>
+```
+
+An element with no `config` attribute is read for its own text instead, so the
+JSON may be written as the element's content where that is easier.
+
+| Field             | What it says                                                                                                                                                                                        |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `theme`           | `"light"` or `"dark"`. The switch in the control bar still changes it afterwards.                                                                                                                   |
+| `sourceCode`      | The program the editor opens with.                                                                                                                                                                  |
+| `files`           | `{ "path", "text" }` objects, drawn as tabs over the editor.                                                                                                                                        |
+| `entry`           | Which of `files` is the translation unit that runs. Defaults to the first.                                                                                                                          |
+| `editableRegions` | `{ "from", "to" }` offsets the reader may type in. Everything outside them is fixed.                                                                                                                |
+| `features`        | `preprocessor` - the button showing the preprocessed source; `loadFile` - the upload panel of data files a program can `fopen`.                                                                     |
+| `views`           | Which canvas sections open drawn: `statement`, `callStack`, `expression`, `memory`, `mutations`, and `regions` per memory region (`text`, `readOnly`, `data`, `bss`, `heap`, `stack`, `registers`). |
+
+Everything is optional, and a feature or a view left out is on. The View panel
+over the canvas still holds every switch, so `views` says where a reader
+starts rather than what they are held to. A field written wrongly - a
+misspelled theme, a string where a boolean belongs - is dropped with a console
+warning and the rest of the configuration still applies, so one typo in a
+course page cannot leave a reader with a blank pane.
