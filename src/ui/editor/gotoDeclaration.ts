@@ -42,9 +42,31 @@ export type DeclarationSource = (
 /** How long the declaration stays marked after the jump, in milliseconds. */
 const FLASH = 1400;
 
-/** Ctrl on a PC, Command on a Mac - and never Alt, which pins a watch. */
-const modifierHeld = (event: MouseEvent): boolean =>
-  (event.ctrlKey || event.metaKey) && !event.altKey;
+/**
+ * Which platform this is, asked per event rather than once: it costs nothing,
+ * and a module-level answer is one a test cannot change.
+ */
+const onMac = (): boolean =>
+  typeof navigator !== 'undefined' &&
+  /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent);
+
+/**
+ * Command on a Mac, Ctrl everywhere else - the same key VS Code uses, and for
+ * the same reason: on macOS Ctrl-click *is* the secondary click. The system
+ * opens a context menu from it, so a gesture bound to Ctrl there is not a
+ * gesture that occasionally fails, it is one that can never be made to work
+ * without stealing the platform's own click.
+ *
+ * Alt is excluded on both: alt-click pins a watch.
+ */
+const modifierHeld = (event: MouseEvent): boolean => {
+  if (event.altKey) {
+    return false;
+  }
+  return onMac()
+    ? event.metaKey && !event.ctrlKey
+    : event.ctrlKey && !event.metaKey;
+};
 
 /** Whether an open parenthesis follows the name, spaces aside. */
 const callAt = (view: EditorView, to: number): boolean => {
@@ -102,7 +124,9 @@ export const goTo = (view: EditorView, range: SourceRange): void => {
 export const gotoDeclaration = (find: DeclarationSource): Extension => [
   EditorView.domEventHandlers({
     mousedown(event: MouseEvent, view: EditorView) {
-      if (!modifierHeld(event)) {
+      // The primary button only. A secondary click is the reader asking for a
+      // menu, and on a Mac that is exactly what a ctrl-click is.
+      if (event.button !== 0 || !modifierHeld(event)) {
         return false;
       }
       const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
@@ -126,10 +150,10 @@ export const gotoDeclaration = (find: DeclarationSource): Extension => [
     // The pointer says what the modifier would do, which is the only sign a
     // reader gets that the gesture exists at all.
     keydown(event: KeyboardEvent, view: EditorView) {
-      view.dom.classList.toggle(
-        'plivet-goto-ready',
-        (event.ctrlKey || event.metaKey) && !event.altKey
-      );
+      const held = onMac()
+        ? event.metaKey && !event.ctrlKey
+        : event.ctrlKey && !event.metaKey;
+      view.dom.classList.toggle('plivet-goto-ready', held && !event.altKey);
       return false;
     },
     keyup(_event: KeyboardEvent, view: EditorView) {

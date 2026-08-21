@@ -90,6 +90,84 @@ describe('which declaration a name means', () => {
   });
 });
 
+describe('the modifier the platform uses', () => {
+  /** A click on the first character of `total` on line 12. */
+  const clickAt = (view: EditorView, init: MouseEventInit): void => {
+    view.posAtCoords = () => PROGRAM.indexOf('+ total') + 2;
+    view.contentDOM.dispatchEvent(
+      new MouseEvent('mousedown', { bubbles: true, button: 0, ...init })
+    );
+  };
+
+  const platform = (value: string) => {
+    Object.defineProperty(navigator, 'platform', {
+      value,
+      configurable: true,
+    });
+  };
+  const originalPlatform = navigator.platform;
+  afterEach(() => platform(originalPlatform));
+
+  const viewAsking = (asked: string[]) =>
+    new EditorView({
+      state: EditorState.create({
+        doc: PROGRAM,
+        extensions: [
+          focusField,
+          gotoDeclaration((request: any) => {
+            asked.push(request.word);
+            return null;
+          }),
+        ],
+      }),
+    });
+
+  it('follows command-click on a Mac, and not ctrl-click', () => {
+    // Ctrl-click is the secondary click there: the system opens a menu from
+    // it, so a gesture bound to it could only work by stealing that.
+    platform('MacIntel');
+    const asked: string[] = [];
+    const view = viewAsking(asked);
+    clickAt(view, { metaKey: true });
+    expect(asked).toEqual(['total']);
+    clickAt(view, { ctrlKey: true });
+    expect(asked).toEqual(['total']);
+    view.destroy();
+  });
+
+  it('follows ctrl-click everywhere else, and not command-click', () => {
+    platform('Win32');
+    const asked: string[] = [];
+    const view = viewAsking(asked);
+    clickAt(view, { ctrlKey: true });
+    expect(asked).toEqual(['total']);
+    clickAt(view, { metaKey: true });
+    expect(asked).toEqual(['total']);
+    view.destroy();
+  });
+
+  it('leaves a secondary click to the menu it belongs to', () => {
+    platform('Win32');
+    const asked: string[] = [];
+    const view = viewAsking(asked);
+    view.posAtCoords = () => PROGRAM.indexOf('+ total') + 2;
+    view.contentDOM.dispatchEvent(
+      new MouseEvent('mousedown', { bubbles: true, button: 2, ctrlKey: true })
+    );
+    expect(asked).toEqual([]);
+    view.destroy();
+  });
+
+  it('leaves alt-click to the watch it pins', () => {
+    platform('Win32');
+    const asked: string[] = [];
+    const view = viewAsking(asked);
+    clickAt(view, { ctrlKey: true, altKey: true });
+    expect(asked).toEqual([]);
+    view.destroy();
+  });
+});
+
 describe('the jump itself', () => {
   const viewWith = (find: any) =>
     new EditorView({
