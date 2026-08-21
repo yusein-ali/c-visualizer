@@ -10,4 +10,4 @@
 export { Plivet } from './app/Plivet';
 export type { PlivetOptions } from './app/Plivet';
 export type { Theme } from './app/theme';
-export type { EditableRegion } from './ui/editor';
+export type { EditableRegion, SessionJSON } from './ui/editor';

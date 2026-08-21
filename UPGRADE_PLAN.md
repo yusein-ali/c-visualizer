@@ -962,7 +962,7 @@ and 10.
 
 ## Phase 12: teaching features
 
-**Status: items 1 to 11 done.** Items 1 to 4 are the phase proper; the rest are
+**Status: items 1 to 12 done.** Items 1 to 4 are the phase proper; the rest are
 independent of it and of each other, and can be taken in any order or dropped.
 
 Everything before this phase is parity work: the same application on a stack
@@ -1324,9 +1324,21 @@ it, and can be taken in any order or dropped.
     and a merge view holding a stale half is worse than none. The dialog and
     the preprocessor arrive together in a chunk of their own, so a reader who
     never asks what the preprocessor did never downloads the answer.
-12. **Session serialisation.** -- not strictly required -- `EditorState.toJSON` and `fromJSON`, plus the
-    breakpoint set, so a session can be saved, handed in, or replayed by a
-    teacher looking at how a student got where they are.
+12. **Session serialisation.** **Done.** `EditorState.toJSON`, plus the
+    breakpoint set and the pinned names, so a session can be saved, handed in,
+    or opened by a teacher looking at where a student had got to.
+
+    `Plivet.session()` writes one and `Plivet.restoreSession()` reads one back,
+    both over plain JSON. The run is deliberately not in it: a session
+    restores the program and what the reader marked on it, and then the
+    program is run again from the start, because a replayed run has to be a
+    run of this interpreter over this source rather than a recording somebody
+    could have edited. The document is replaced rather than the view rebuilt -
+    the debug extensions are configured into that view - and the replacement
+    goes in as the application's own, so a protected-region exercise can still
+    be restored into its blanks. What arrives from outside is checked rather
+    than trusted, since it may be another version's, another tool's, or half
+    of one.
 13. **One explanation of the current statement.** A teaching view that says
     what the statement under the step marker does, and it is the general case
     that the expression expansion of Phase 8 item 6 sits inside rather than a

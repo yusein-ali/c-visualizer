@@ -14,6 +14,7 @@ import { Expansion } from '../interpreter/Expansion';
 import {
   EditableRegion,
   LibraryFunction,
+  SessionJSON,
   PlivetEditor,
   ProgramCompletions,
   rangeOf,
@@ -192,6 +193,23 @@ export class EditorController {
   /** The program as it stands, for whoever needs to read it rather than run it. */
   code(): string {
     return this.sourcecode;
+  }
+
+  /** Everything a saved session holds: the program and what is marked on it. */
+  session(): SessionJSON {
+    return this.editor.debug.session(this.editor.view.state);
+  }
+
+  /**
+   * Puts one back. The interpreter is stopped first: the session being
+   * restored is a program, and a running one is a different program with the
+   * document held against edits.
+   */
+  restore(session: SessionJSON): void {
+    this.bus.signal('debug', 'Stop');
+    this.editor.debug.restore(this.editor.view, session);
+    this.sourcecode = this.editor.getCode();
+    this.bus.signal('debug', 'SyntaxCheck');
   }
 
   destroy(): void {

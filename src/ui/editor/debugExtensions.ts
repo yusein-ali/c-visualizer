@@ -25,6 +25,7 @@ import {
   coverageField,
   showCoverage as markCoverage,
 } from './coverage';
+import { SessionJSON, restoreSession, sessionOf } from './session';
 import {
   EditableRegion,
   editableRegions,
@@ -139,6 +140,18 @@ export class DebugExtensions {
    */
   showFocus(view: EditorView, range: SourceRange | null): void {
     markFocus(view, range);
+  }
+
+  /**
+   * The session as plain JSON: the program, the cursor, the breakpoints and
+   * the pinned names. What it deliberately leaves out is the run.
+   */
+  session(state: EditorState): SessionJSON {
+    return sessionOf(state);
+  }
+
+  restore(view: EditorView, session: SessionJSON): void {
+    restoreSession(view, session);
   }
 
   /**

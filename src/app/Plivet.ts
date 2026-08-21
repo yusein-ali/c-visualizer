@@ -8,7 +8,8 @@ import {
   emptyStepModel,
 } from '../core';
 import { PlivetShell } from '../ui/shell';
-import type { EditableRegion } from '../ui/editor';
+import type { EditableRegion, SessionJSON } from '../ui/editor';
+import { isSession } from '../ui/editor';
 import { ControlBar, ZOOM_COMMAND } from '../ui/controls';
 import { PlivetConsole } from '../ui/console';
 import { PlivetGraph } from '../ui/graph';
@@ -141,6 +142,29 @@ export class Plivet {
         }
       }
     );
+  }
+
+  /**
+   * The session, for a page that wants to store it or hand it in: the
+   * program, the cursor, the breakpoints and the pinned names, as JSON that
+   * survives `JSON.stringify`.
+   */
+  session(): SessionJSON {
+    return this.editor.session();
+  }
+
+  /**
+   * Puts a saved session back. What arrives from outside is checked rather
+   * than trusted - it may be another version's, another tool's, or half of
+   * one - and a value that is not a session is refused rather than half
+   * applied.
+   */
+  restoreSession(session: unknown): boolean {
+    if (!isSession(session)) {
+      return false;
+    }
+    this.editor.restore(session);
+    return true;
   }
 
   /**
