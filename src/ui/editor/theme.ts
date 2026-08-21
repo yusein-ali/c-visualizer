@@ -254,6 +254,21 @@ export const debugTheme = EditorView.baseTheme({
   '.plivet-lint-description': {
     opacity: '0.8',
   },
+  // The completion side panel: the signature on its own line, in the editor's
+  // own monospace, and the sentence under it.
+  '.plivet-completion-info': {
+    maxWidth: '32em',
+    whiteSpace: 'normal',
+  },
+  '.plivet-completion-info code': {
+    display: 'block',
+    fontFamily:
+      'var(--plivet-editor-font, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace)',
+  },
+  '.plivet-completion-info div': {
+    marginTop: '0.3em',
+    opacity: '0.8',
+  },
   '.plivet-macro-expansion': {
     borderBottom: '1px dashed #2e8b57',
     backgroundColor: 'rgba(46, 139, 87, 0.12)',

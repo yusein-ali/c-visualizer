@@ -11,9 +11,15 @@ import {
 } from '../core';
 import strings from '../strings';
 import { Expansion } from '../interpreter/Expansion';
-import { PlivetEditor, rangeOf, TeachingDiagnostic } from '../ui/editor';
+import {
+  LibraryFunction,
+  PlivetEditor,
+  ProgramCompletions,
+  rangeOf,
+  TeachingDiagnostic,
+} from '../ui/editor';
 import { HoverTextSource } from './hoverText';
-import { libraryHelp } from './libraryHelp';
+import { libraryHelp, libraryNames } from './libraryHelp';
 import { Bus } from './emitter';
 import type { ZOOM_COMMAND } from '../ui/controls';
 
@@ -69,12 +75,32 @@ const asDiagnostic = (found: RuntimeDiagnosticModel): TeachingDiagnostic => ({
   endColumn: found.endColumn + 1,
 });
 
+/**
+ * The library as the completion list wants it: a name, its signature and the
+ * sentence beside it. `libraryHelp` is the one place that knows what a library
+ * function is, and the editor is handed the answer rather than the table.
+ */
+const libraryFunctions = (): LibraryFunction[] =>
+  libraryNames().flatMap((name: string) => {
+    const entry = libraryHelp(name);
+    return entry === null
+      ? []
+      : [
+          {
+            name,
+            signature: entry.signature,
+            description: entry.description,
+          },
+        ];
+  });
+
 export class EditorController {
   private readonly bus: Bus;
   private readonly client: InterpreterClient;
   private sourcecode: string;
   private readonly editor: PlivetEditor;
   private readonly hover: HoverTextSource;
+  private readonly completions: ProgramCompletions;
   private isDebugging = false;
   private fontSize = 14;
   /**
@@ -93,12 +119,14 @@ export class EditorController {
     this.client = client;
     this.sourcecode = doc;
     this.hover = new HoverTextSource();
+    this.completions = new ProgramCompletions(libraryFunctions());
 
     this.editor = new PlivetEditor(mount, {
       doc: this.sourcecode,
       dark,
       fontSize: this.fontSize,
       hoverText: this.hover.text,
+      completions: this.completions.source,
       onChange: (code: string) => this.edited(code),
     });
 
@@ -168,9 +196,9 @@ export class EditorController {
           this.setExpansions(
             typeof expansions === 'undefined' ? [] : expansions
           );
-          this.hover.setConstructs(
-            typeof constructs === 'undefined' ? [] : constructs
-          );
+          const seen = typeof constructs === 'undefined' ? [] : constructs;
+          this.hover.setConstructs(seen);
+          this.completions.setConstructs(seen);
         })
         .catch((e) => {
           console.log(e);

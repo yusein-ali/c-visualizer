@@ -962,7 +962,7 @@ and 10.
 
 ## Phase 12: teaching features
 
-**Status: items 1 to 4 done** — the phase proper. Items 5 to 19 are
+**Status: items 1 to 5 done.** Items 1 to 4 are the phase proper; the rest are
 independent of it and of each other, and can be taken in any order or dropped.
 
 Everything before this phase is parity work: the same application on a stack
@@ -1168,14 +1168,32 @@ it, and can be taken in any order or dropped.
    `replacement` records the macro's own replacement list where it differs, and
    the tooltip reads `NEXT → STEP → 3`.
 
-5. **Completion from the program's own symbols.** `completeAnyWord` in
-   `PlivetEditor.ts` is a placeholder that completes any word in the buffer,
-   including misspellings. Replace it with a `CompletionSource` over the syntax
-   tree and `Construct.ts`: variables in scope with their types, struct and
-   union members after `.` and `->`, and the `libraryHelp` names with
+5. **Completion from the program's own symbols.** **Done.** `completeAnyWord` in
+   `PlivetEditor.ts` was a placeholder that completed any word in the buffer,
+   including misspellings. It is replaced by a `CompletionSource` over the
+   syntax tree and `Construct.ts`: variables in scope with their types, struct
+   and union members after `.` and `->`, and the `libraryHelp` names with
    `Completion.info` rendering the signature and description into the side
-   panel. The reference material becomes reachable while typing instead of only
-   on hover.
+   panel. The reference material is reachable while typing instead of only on
+   hover.
+
+   `ProgramCompletions` in `src/ui/editor/completion.ts` holds the constructs
+   of the last syntax check - the same ones the tooltip reads, so nothing here
+   parses anything - and the syntax tree is asked one question, which is a
+   question about text rather than about C: whether the cursor is inside a
+   comment or a string, where a suggestion interrupts rather than offers.
+   Scope is read as C reads it, a name after its declaration and a local
+   inside its own function, and deliberately no narrower: the constructs
+   record where a declaration is, not where its block ends, and offering a
+   name one block too widely is a smaller wrong answer than hiding one the
+   reader can see on the screen. A member list is offered only where the name
+   in front of the `.` resolves to a record - through a pointer, and through
+   however many typedefs stand between the reader's spelling and the tag the
+   members are recorded under - because a list of every member of every
+   structure would be a guess wearing the clothes of an answer. Leaving the
+   source out turns completion off rather than falling back to the buffer's
+   own words; the library arrives from the application, so `libraryHelp` stays
+   the one place that knows what `printf` is.
 6. **Snippets.** `snippetCompletion` skeletons for `for`, `while`, `switch`,
    `struct`, `printf` and `scanf`, with tab-through fields. Beginners spend a
    disproportionate share of their time on C's punctuation. The snippet shows

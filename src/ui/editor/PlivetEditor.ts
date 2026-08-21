@@ -17,7 +17,7 @@ import {
   historyKeymap,
   indentWithTab,
 } from '@codemirror/commands';
-import { autocompletion, completeAnyWord } from '@codemirror/autocomplete';
+import { autocompletion, CompletionSource } from '@codemirror/autocomplete';
 import { cpp } from '@codemirror/lang-cpp';
 import { DebugExtensions, DebugExtensionOptions } from './debugExtensions';
 import { ThemeControl } from './theme';
@@ -55,8 +55,16 @@ export interface PlivetEditorOptions extends DebugExtensionOptions {
   matchBrackets?: boolean;
   /** `line_numbers` */
   lineNumbers?: boolean;
-  /** `autocomplete`: complete words already present in the document. */
+  /** `autocomplete`: offer the names the program declares while typing. */
   autocomplete?: boolean;
+  /**
+   * What to offer. `ProgramCompletions` builds one over the constructs of the
+   * last syntax check; a host that has its own completion for C hands its own
+   * source in, and leaving it out turns completion off rather than falling
+   * back to completing any word in the buffer - a suggestion list built from
+   * the reader's own typing offers their misspellings back to them.
+   */
+  completions?: CompletionSource;
 }
 
 const defaults = {
@@ -110,10 +118,11 @@ export class PlivetEditor {
     } else {
       extensions.push(indentUnit.of(' '.repeat(config.indentUnit)));
     }
-    if (config.autocomplete) {
+    if (config.autocomplete && typeof options.completions !== 'undefined') {
+      const completions = options.completions;
       extensions.push(autocompletion());
       extensions.push(
-        EditorState.languageData.of(() => [{ autocomplete: completeAnyWord }])
+        EditorState.languageData.of(() => [{ autocomplete: completions }])
       );
     }
     if (typeof options.onChange !== 'undefined') {

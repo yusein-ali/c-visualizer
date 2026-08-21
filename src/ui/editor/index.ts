@@ -25,6 +25,8 @@ export type { DebugExtensionOptions } from './debugExtensions';
 export { breakpointRows } from './breakpoints';
 export { diagnosticsFor, teachingDiagnosticsFor } from './diagnostics';
 export type { SyntaxError, TeachingDiagnostic } from './diagnostics';
+export { ProgramCompletions } from './completion';
+export type { LibraryFunction } from './completion';
 export { expansionAt } from './expansions';
 export { inlineValueField } from './inlineValues';
 export { setStepHighlight, showStep } from './stepHighlight';
