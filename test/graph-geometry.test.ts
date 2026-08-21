@@ -506,6 +506,28 @@ describe('memory geometry', () => {
     expect(first.vertices![0].x).toBeLessThan(stack.x);
   });
 
+  it('reuses a gutter lane for arrows at different heights', () => {
+    const step = model();
+    const stack = step.memory.find((one) => one.key === 'stack')!;
+    stack.groups = [];
+    stack.rows.push(
+      scalarRow('q', 'int *', '0x1010', 0x100c),
+      scalarRow('b', 'int', '9', 0x1010)
+    );
+    step.pointers = [
+      { from: 'p-value', to: 'a-address' },
+      { from: 'q-value', to: 'b-address' },
+    ];
+
+    const together = mapOf(step, new FoldState());
+    const firstOnly = model();
+    const alone = mapOf(firstOnly, new FoldState());
+    const lanes = together.arrows.map((arrow) => arrow.vertices![0].x);
+
+    expect(new Set(lanes).size).toBe(1);
+    expect(together.width).toBe(alone.width);
+  });
+
   it("runs the right-hand column's own arrow down its right-hand side", () => {
     const step = model();
     // A heap block naming itself: both ends are in the right column, whose

@@ -461,6 +461,47 @@ interface Routed {
   color: string;
 }
 
+interface LaneAllocation {
+  /** One lane per route, or -1 when that route was not part of this group. */
+  laneOf: number[];
+  /** How many lanes the overlapping vertical spans actually require. */
+  count: number;
+}
+
+/**
+ * Packs arrows into the first gutter lane whose previous vertical run has
+ * ended. Two arrows at different heights can share the same x coordinate;
+ * only arrows whose vertical spans overlap need separate lanes.
+ */
+const allocateLanes = (
+  routes: Routed[],
+  accepts: (route: Routed) => boolean
+): LaneAllocation => {
+  const laneOf = new Array<number>(routes.length).fill(-1);
+  const requests = routes
+    .map((route, index) => ({
+      index,
+      start: Math.min(route.fromCell.y, route.toCell.y),
+      end: Math.max(route.fromCell.y, route.toCell.y),
+    }))
+    .filter(({ index }) => accepts(routes[index]))
+    .sort((left, right) => left.start - right.start || left.end - right.end);
+  const laneEnds: number[] = [];
+
+  for (const request of requests) {
+    let lane = laneEnds.findIndex((end) => end < request.start);
+    if (lane === -1) {
+      lane = laneEnds.length;
+      laneEnds.push(request.end);
+    } else {
+      laneEnds[lane] = request.end;
+    }
+    laneOf[request.index] = lane;
+  }
+
+  return { laneOf, count: laneEnds.length };
+};
+
 const middleOf = (cell: CellGeometry): number => cell.y + MEMORY_ROW_HEIGHT / 2;
 
 /**
@@ -733,18 +774,29 @@ export function layoutMemory(
 
   // Every arrow is given a lane before any of them is drawn: one down the
   // outside of its own column when both ends are in it, and one down the space
-  // between the columns when it crosses. Nothing is left to a router, so no
-  // line is ever sent back through the segments it was drawn around.
-  const lanes = [0, 0];
-  let crossings = 0;
-  const laneOf = routed.map((one) =>
-    one.fromAnchor.side === one.toAnchor.side
-      ? lanes[one.fromAnchor.side]++
-      : -1
+  // between the columns when it crosses. Lanes are reused once an arrow's
+  // vertical run has ended, so adding an unrelated pointer further down the
+  // table does not make the whole canvas wider.
+  const leftLanes = allocateLanes(
+    routed,
+    (one) => one.fromAnchor.side === 0 && one.toAnchor.side === 0
   );
-  const crossingLaneOf = routed.map((one) =>
-    one.fromAnchor.side === one.toAnchor.side ? -1 : crossings++
+  const rightLanes = allocateLanes(
+    routed,
+    (one) => one.fromAnchor.side === 1 && one.toAnchor.side === 1
   );
+  const crossing = allocateLanes(
+    routed,
+    (one) => one.fromAnchor.side !== one.toAnchor.side
+  );
+  const lanes = [leftLanes.count, rightLanes.count];
+  const laneOf = routed.map((one, index) =>
+    one.fromAnchor.side === 0
+      ? leftLanes.laneOf[index]
+      : rightLanes.laneOf[index]
+  );
+  const crossingLaneOf = crossing.laneOf;
+  const crossings = crossing.count;
   // The left column's gutter is taken out of the margin the map starts at, so
   // the whole map moves right by whatever the margin does not already cover.
   const shift = Math.max(0, gutterWidth(lanes[0]) - ORIGIN_X);
