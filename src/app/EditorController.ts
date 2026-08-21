@@ -128,6 +128,7 @@ export class EditorController {
       hoverText: this.hover.describe,
       onHoverObject: (object: string | null) =>
         this.bus.signal('focusObject', object, 'editor'),
+      onWatchesChanged: () => this.showWatches(),
       completions: this.completions.source,
       onChange: (code: string) => this.edited(code),
     });
@@ -240,6 +241,7 @@ export class EditorController {
       const { debugState, model, output, step, runtime } = response;
       this.setDebugging(debugState !== 'Stop');
       this.hover.setStep(model);
+      this.showWatches();
       this.setRuntimeDiagnostics(typeof runtime === 'undefined' ? [] : runtime);
       if (debugState === 'Executing') {
         return;
@@ -292,6 +294,21 @@ export class EditorController {
       ),
       values: model.inlineValues,
     });
+  }
+
+  /**
+   * What the pinned names hold, as of the step just drawn.
+   *
+   * The editor holds which names are pinned - they are pinned to positions in
+   * its document - and this side holds what a name is worth, so the values
+   * are pushed in rather than looked up by the editor.
+   */
+  private showWatches() {
+    const names = this.editor.debug.watches(this.editor.view.state);
+    this.editor.debug.showWatches(
+      this.editor.view,
+      names.map((name) => ({ name, record: this.hover.watchRecord(name) }))
+    );
   }
 
   /**

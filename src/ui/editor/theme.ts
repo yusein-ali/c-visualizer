@@ -321,6 +321,27 @@ export const debugTheme = EditorView.baseTheme({
     opacity: '0.85',
     whiteSpace: 'normal',
   },
+  // A pinned watch. It is the hover tooltip's twin and deliberately looks
+  // like it - the same table saying the same things - with a line down its
+  // left edge to say that this one stays.
+  '.cm-tooltip .plivet-watch': {
+    maxWidth: '30em',
+    padding: '4px 8px',
+    fontSize: '12px',
+    borderLeft: '3px solid var(--plivet-watch-edge, #d9a400)',
+  },
+  '.cm-tooltip:has(.plivet-watch)': {
+    backgroundColor: 'var(--plivet-tooltip-bg, #fffbe6)',
+    color: 'var(--plivet-tooltip-color, #222)',
+    border: '1px solid rgba(0, 0, 0, 0.2)',
+    borderRadius: '3px',
+    boxShadow: '0 1px 4px rgba(0, 0, 0, 0.25)',
+  },
+  '&dark .cm-tooltip:has(.plivet-watch)': {
+    backgroundColor: 'var(--plivet-tooltip-bg, #3e3d32)',
+    color: 'var(--plivet-tooltip-color, #f8f8f2)',
+    border: '1px solid rgba(255, 255, 255, 0.25)',
+  },
   // Where the canvas is pointing. It is deliberately not the step marker's
   // colour: one says where the program is, the other where the reader is.
   '.plivet-focus-line': {

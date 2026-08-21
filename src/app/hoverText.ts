@@ -288,6 +288,19 @@ export class HoverTextSource {
   };
 
   /**
+   * What a pinned name holds, or a record saying that nothing of that name is
+   * in the frame being executed. A watch that vanished when the program left
+   * the function would leave the reader wondering whether they had unpinned
+   * it by accident; one that says so is telling them about scope.
+   */
+  watchRecord(name: string): HoverRecord {
+    const variable = this.variableNamed(name);
+    return variable === null
+      ? { title: name, facts: [note(strings.notInScope)] }
+      : this.variableRecord(variable);
+  }
+
+  /**
    * The declaration of an object the canvas is pointing at, as the parser
    * recorded it. The canvas names an object by the key its cells carry, this
    * side knows which variable that is, and the constructs know where its

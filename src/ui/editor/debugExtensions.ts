@@ -29,6 +29,13 @@ import {
 import { debugTheme } from './theme';
 import { HoverText, plivetHoverTooltip } from './tooltip';
 import { SourceRange } from './positions';
+import {
+  WatchRecord,
+  watchField,
+  watchGesture,
+  watchNames,
+  showWatchRecords,
+} from './watches';
 
 /**
  * PLIVET's debugger, as an extension array and a handle to drive it.
@@ -49,6 +56,11 @@ export interface DebugExtensionOptions {
    * is listening.
    */
   onHoverObject?: (object: string | null) => void;
+  /**
+   * A name was pinned or unpinned. What the pinned names hold is the
+   * application's to look up, so it is told to look again.
+   */
+  onWatchesChanged?: () => void;
 }
 
 export class DebugExtensions {
@@ -65,11 +77,18 @@ export class DebugExtensions {
       expansionField,
       errorLineField,
       focusField,
+      watchField,
       // The gutter is what makes a warning visible without hovering for one.
       // A reader who does not know a rule exists never hovers to find out.
       lintGutter(),
       this.readOnly.of(DebugExtensions.readOnlyExtension(false)),
     ];
+    // The gesture is only worth adding where somebody is listening for what
+    // it changed: a pinned watch nobody fills in says a name and nothing.
+    if (typeof options.onWatchesChanged !== 'undefined') {
+      const changed = options.onWatchesChanged;
+      this.extensions.push(watchGesture(() => changed()));
+    }
     if (typeof options.hoverText !== 'undefined') {
       this.extensions.push(
         plivetHoverTooltip({
@@ -103,6 +122,16 @@ export class DebugExtensions {
    */
   showFocus(view: EditorView, range: SourceRange | null): void {
     markFocus(view, range);
+  }
+
+  /** The names the reader has pinned, in the order they pinned them. */
+  watches(state: EditorState): string[] {
+    return watchNames(state);
+  }
+
+  /** What those names hold now. Sent at every step, and when one is pinned. */
+  showWatches(view: EditorView, records: WatchRecord[]): void {
+    showWatchRecords(view, records);
   }
 
   showExpansions(view: EditorView, expansions: Expansion[]): void {

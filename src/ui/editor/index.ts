@@ -30,6 +30,13 @@ export { cSnippets } from './snippets';
 export type { LibraryFunction } from './completion';
 export { expansionAt } from './expansions';
 export { focusField, setFocusRange } from './focus';
+export {
+  setWatchRecords,
+  toggleWatch,
+  watchField,
+  watchNames,
+} from './watches';
+export type { Watch, WatchRecord } from './watches';
 export { inlineValueField } from './inlineValues';
 export { setStepHighlight, showStep } from './stepHighlight';
 export type { InlineValue, StepMark } from './stepHighlight';

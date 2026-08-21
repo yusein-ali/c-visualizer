@@ -962,7 +962,7 @@ and 10.
 
 ## Phase 12: teaching features
 
-**Status: items 1 to 7 done.** Items 1 to 4 are the phase proper; the rest are
+**Status: items 1 to 8 done.** Items 1 to 4 are the phase proper; the rest are
 independent of it and of each other, and can be taken in any order or dropped.
 
 Everything before this phase is parity work: the same application on a stack
@@ -1241,9 +1241,27 @@ it, and can be taken in any order or dropped.
    scroll - the reader is looking at the canvas, and a page that moved under a
    pointer they are not pointing with would be the editor answering a question
    nobody asked.
-8. **Pinned watches.** A `showTooltip` `StateField` holding tooltips the reader
-   pinned by clicking a variable, updated on every step. A watch window with no
-   new user interface.
+8. **Pinned watches.** **Done.** A `showTooltip` `StateField` holding tooltips
+   the reader pinned to a variable, updated on every step. A watch window with
+   no new user interface.
+
+   `src/ui/editor/watches.ts` holds the field and the gesture. The values a
+   debugger's watch pane shows are already in the document, beside the names
+   they belong to, and a pane on the far side of the editor asks the reader to
+   hold a second copy of the program in their head to use it - so a pinned
+   tooltip stays where the name is written and says what it says there. The
+   gesture is alt-click rather than a plain click, because a plain click is
+   how a reader moves the cursor and a watch pinned by every cursor move is
+   not a watch window but a mess. A watch is pinned to a place in the text: an
+   edit above it moves it, and an edit that deletes the name takes the watch
+   with it rather than leaving a value floating over whatever moved into that
+   position. Which names are pinned is the editor's - they are positions in
+   its document - and what a name is worth is the application's, so the
+   records are pushed in at every step rather than looked up by the editor;
+   they are the same records item 7 built, so a watch and a hover of the same
+   name cannot disagree. A pinned name the current frame has no object for
+   says so instead of vanishing, which is a lesson about scope rather than a
+   pin that seems to have come loose.
 9. **Editor affordances**, worth one pull request together:
    `highlightSelectionMatches` to light up every occurrence of the identifier
    under the cursor (`@codemirror/search`, so standalone only); `foldGutter`

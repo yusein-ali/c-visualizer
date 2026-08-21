@@ -88,6 +88,7 @@ const strings = {
   parameter: 'parameter',
   signature: 'signature',
   pointsAt: 'points at',
+  notInScope: 'no name of this kind is in the frame being executed',
   typedefName: 'typedef name',
   enumeration: 'enumeration',
   record: 'structure or union',
