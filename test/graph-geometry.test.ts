@@ -165,6 +165,25 @@ describe('memory geometry', () => {
     ]);
   });
 
+  it('ellipsizes a capped value without losing its full text', () => {
+    const step = model();
+    const readOnly = step.memory.find((one) => one.key === 'readOnly')!;
+    const full = 'a string literal whose complete value belongs in a tooltip';
+    const row = scalarRow('_unnamed_cs_0', 'const char[58]', full, 0x2710);
+    row.find((one) => one.kind === 'value')!.maxWidth = 120;
+    readOnly.rows = [row];
+
+    const folds = new FoldState();
+    folds.toggleSegment('readOnly', true);
+    const geometry = mapOf(step, folds);
+    const value = geometry.segments
+      .find((one) => one.key === 'readOnly')!
+      .rows[0].cells.find((one) => one.kind === 'value')!;
+
+    expect(value.text).toMatch(/…$/);
+    expect(value.tooltip).toBe(full);
+  });
+
   it('writes the address as an address and the type above the object', () => {
     const geometry = mapOf(model(), new FoldState());
     const heap = geometry.segments.find((one) => one.key === 'heap');

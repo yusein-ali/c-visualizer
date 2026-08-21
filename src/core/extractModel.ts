@@ -395,6 +395,9 @@ const MEMORY_ORDER: MemoryRegion[] = [
   'stack',
 ];
 
+/** A literal shows a useful prefix without deciding the map's column width. */
+const UNNAMED_CONSTANT_VALUE_WIDTH = 220;
+
 /**
  * The frames the stack segment's rows fall into, as spans: consecutive
  * entries declared in the same frame are one group, so `main` and the
@@ -430,31 +433,27 @@ class MemoryCollector {
     this.entries.set(region, entries);
   }
 
-  /**
-   * The string literals, as the read-only objects they are. They have no name
-   * in C, so the text they hold stands in for one; what a reader wants to see
-   * is that `"hi"` occupies three bytes somewhere a `const char *` can point
-   * at, and which pointer is pointing there.
-   */
+  /** The string literals, as named rows in read-only memory. */
   addStrings(literals: RuntimeStringLiteral[], addresses: AddressTable): void {
     const entries = this.entries.get('readOnly') || [];
-    for (const literal of literals) {
-      const key = `readOnly-string-${literal.address}`;
+    literals.forEach((literal, index) => {
+      // C gives a literal storage but no identifier. A short synthetic name
+      // keeps that absence explicit without repeating the whole value in the
+      // name column, and source order keeps it stable across steps.
+      const name = `_unnamed_cs_${index}`;
+      const key = `readOnly-string-${literal.displayAddress}`;
       const typeCell = cell(`const char[${literal.size}]`, key, 'type');
       typeCell.size = literal.size;
       const addressCell = cell(
-        `&"${literal.text}"(${formatAddress(literal.displayAddress)}) `,
+        `&${name}(${formatAddress(literal.displayAddress)}) `,
         key,
         'address'
       );
       addressCell.address = literal.displayAddress;
+      const valueCell = cell(`${literal.text}\\0`, key, 'value');
+      valueCell.maxWidth = UNNAMED_CONSTANT_VALUE_WIDTH;
       const rows = [
-        [
-          typeCell,
-          cell(`"${literal.text}"`, key, 'name'),
-          cell(`${literal.text}\\0`, key, 'value'),
-          addressCell,
-        ],
+        [typeCell, cell(name, key, 'name'), valueCell, addressCell],
       ];
       addresses.declare(literal.displayAddress, addressCell.key);
       entries.push({
@@ -467,7 +466,7 @@ class MemoryCollector {
         synthetic: false,
         owner: 'string',
       });
-    }
+    });
     this.entries.set('readOnly', entries);
   }
 

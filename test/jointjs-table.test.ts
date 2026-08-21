@@ -53,6 +53,7 @@ const segment = (): MemorySegmentGeometry => ({
         {
           key: 'x-value',
           text: '3',
+          tooltip: 'the complete value',
           kind: 'value',
           x: 224,
           y: 97,

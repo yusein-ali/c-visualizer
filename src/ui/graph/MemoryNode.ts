@@ -174,6 +174,7 @@ function entryRow(
         y: isAddress ? row.y : bandY,
         width: column.width,
         height: isAddress ? row.height : row.bandHeight,
+        ...(typeof cell.tooltip === 'undefined' ? {} : { title: cell.tooltip }),
         fill:
           cell.colors.length === 0 && isAddress
             ? ADDRESS_FILL

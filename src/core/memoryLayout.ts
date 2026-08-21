@@ -300,7 +300,10 @@ function columnWidths(
           column,
           Math.max(
             widths.get(column) as number,
-            measure(textOf(column, cell)) + (column === 'name' ? gutter : 0)
+            Math.min(
+              cell.maxWidth ?? Number.POSITIVE_INFINITY,
+              measure(textOf(column, cell))
+            ) + (column === 'name' ? gutter : 0)
           )
         );
       }
@@ -385,10 +388,12 @@ const cellGeometry = (
   kind: CellModel['kind'],
   text: string,
   x: number,
-  width: number
+  width: number,
+  tooltip?: string
 ): CellGeometry => ({
   key,
   text,
+  ...(typeof tooltip === 'undefined' ? {} : { tooltip }),
   kind,
   x,
   // Filled in once the row's place in the node is settled.
@@ -601,12 +606,15 @@ export function layoutMemory(
           );
         }
         const room = column.width - (column.key === 'name' ? gutter : 0);
+        const fullText = textOf(column.key, cellModel);
+        const shown = ellipsize(fullText, room);
         const cell = cellGeometry(
           cellModel.key,
           cellModel.kind,
-          ellipsize(textOf(column.key, cellModel), room),
+          shown,
           column.x,
-          column.width
+          column.width,
+          shown === fullText ? undefined : fullText
         );
         visibleCells.set(cell.key, cell);
         cellAnchor.set(cell.key, {

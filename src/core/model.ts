@@ -47,6 +47,8 @@ export interface CellModel {
   kind: CellKind;
   /** The cell's own width. The layout widens it to square off a column. */
   width: number;
+  /** Optional presentation cap: this cell may be shortened, but not widened. */
+  maxWidth?: number;
   /** For a pointer's value cell: the key of the cell it points at. */
   pointerTarget?: string;
   /**

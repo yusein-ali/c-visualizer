@@ -29,6 +29,8 @@ export interface Point {
 export interface CellGeometry {
   key: string;
   text: string;
+  /** Complete text when `text` was shortened to fit its cell. */
+  tooltip?: string;
   kind: CellKind;
   x: number;
   y: number;

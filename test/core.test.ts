@@ -704,13 +704,15 @@ int main(void) {
     // `const char *p = "hello"` is written into memory by the engine; the
     // format string of a `printf` is passed as bytes and never given an
     // address, and in C both are objects in read-only memory.
-    expect(texts.some((row) => row.includes('"hello"'))).toBe(true);
-    expect(texts.some((row) => row.includes('"%s!\\n"'))).toBe(true);
+    expect(texts.some((row) => row.includes('_unnamed_cs_0'))).toBe(true);
+    expect(texts.some((row) => row.includes('_unnamed_cs_1'))).toBe(true);
+    expect(texts.some((row) => row.includes('hello\\0'))).toBe(true);
+    expect(texts.some((row) => row.includes('%s!\\n\\0'))).toBe(true);
   });
 
   it('counts the terminator in what a literal occupies', () => {
     const hello = readOnly.rows.find((row) =>
-      row.some((cell) => cell.text === '"hello"')
+      row.some((cell) => cell.text === 'hello\\0')
     )!;
     const type = hello.find((cell) => cell.kind === 'type')!;
 
@@ -720,7 +722,7 @@ int main(void) {
 
   it('points the pointer that names one at it', () => {
     const address = readOnly.rows
-      .find((row) => row.some((cell) => cell.text === '"hello"'))!
+      .find((row) => row.some((cell) => cell.text === 'hello\\0'))!
       .find((cell) => cell.kind === 'address')!;
 
     expect(model.pointers.some((pointer) => pointer.to === address.key)).toBe(
