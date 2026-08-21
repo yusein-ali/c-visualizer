@@ -15,17 +15,21 @@ const mount = () => {
     onTheme: (dark) => themes.push(dark),
     onHelp: () => (helped += 1),
   });
-  const buttons = Array.from(
-    parent.querySelectorAll<HTMLButtonElement>('.plivet-controls__button')
-  );
+  const inGroup = (name: string) =>
+    Array.from(
+      parent.querySelectorAll<HTMLButtonElement>(
+        `.plivet-controls__group--${name} .plivet-controls__button`
+      )
+    );
   return {
     bar,
     parent,
     commands,
     zooms,
     themes,
-    debug: buttons.slice(0, 6),
-    zoom: buttons.slice(6),
+    files: inGroup('files'),
+    debug: inGroup('debug'),
+    zoom: inGroup('zoom'),
     status: parent.querySelector('.plivet-controls__status') as HTMLElement,
     theme: parent.querySelector('select') as HTMLSelectElement,
     help: parent.querySelector('.plivet-controls__help') as HTMLButtonElement,

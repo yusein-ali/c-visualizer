@@ -18,9 +18,10 @@ const mounted = () => {
   return { host };
 };
 
+/* The two are pictures now, so what names them is the accessible name. */
 const buttonNamed = (root: HTMLElement, text: string): HTMLButtonElement =>
   Array.from(root.querySelectorAll('button')).find(
-    (button) => button.textContent === text
+    (button) => button.getAttribute('aria-label') === text
   )!;
 
 describe('opening a program', () => {
@@ -117,5 +118,34 @@ describe('saving a program', () => {
     expect(clicks).toHaveLength(1);
     (document.createElement as jest.Mock).mockRestore();
     (URL as any).createObjectURL = original;
+  });
+});
+
+describe('the file buttons', () => {
+  it('are pictures that keep a name and say what they do', () => {
+    const { host } = mounted();
+    const bar = new ControlBar(host, {});
+    const buttons = Array.from(
+      bar.root.querySelectorAll<HTMLButtonElement>(
+        '.plivet-controls__group--files .plivet-controls__button'
+      )
+    );
+
+    expect(buttons).toHaveLength(2);
+    expect(buttons.map((button) => button.getAttribute('aria-label'))).toEqual([
+      strings.openCode,
+      strings.saveCode,
+    ]);
+    // The tooltip is the sentence, for a reader the picture did not reach.
+    expect(buttons[0].title).toContain(strings.openCodeHint);
+    expect(buttons[1].title).toContain(strings.saveCodeHint);
+    // Nothing is spelled out: the label would be back to taking the room.
+    expect(buttons.map((button) => button.textContent)).toEqual(['', '']);
+    for (const button of buttons) {
+      const icon = button.querySelector('svg')!;
+      expect(icon.getAttribute('aria-hidden')).toBe('true');
+    }
+    bar.destroy();
+    host.remove();
   });
 });

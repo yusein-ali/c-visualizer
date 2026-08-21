@@ -22,7 +22,9 @@ export type IconName =
   | 'zoomReset'
   | 'zoomIn'
   | 'download'
-  | 'remove';
+  | 'remove'
+  | 'open'
+  | 'save';
 
 /*
  * The magnifier, in pieces: an outer circle and an inner one, which the
@@ -52,6 +54,11 @@ const paths: Record<IconName, string> = {
     'M7.5 1h1v6.8l2.3-2.3.7.7L8 9.7 4.5 6.2l.7-.7 2.3 2.3zM2 11h12v3H2z',
   remove:
     'M6 1h4v1h4v1H2V2h4zM3.5 4h9l-.7 10H4.2zm2 2 .3 6h1l-.3-6zm5 0h-1l-.3 6h1z',
+  // A folder for the program that comes in, a floppy disk for the one that
+  // goes out: the two pictures a file menu has used since before the readers
+  // of this were born, and the pair the reader will look for.
+  open: 'M1.5 3h4.5l1.5 1.5h7v9h-13z',
+  save: 'M2 2h9.5L14 4.5V14H2zM5.5 2.5h5v3.5h-5zM4.5 9h7v4.5h-7z',
 };
 
 const SVG = 'http://www.w3.org/2000/svg';

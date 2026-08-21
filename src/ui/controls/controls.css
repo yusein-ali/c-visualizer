@@ -1,6 +1,7 @@
 /*
- * The debug controls: two button groups, the step counter, the theme switch
- * and the button that opens the instructions.
+ * The debug controls: three button groups - files, the run, the text size -
+ * with the step counter, the theme switch and the button that opens the
+ * instructions.
  *
  * This replaces `src/css/ctrlbuttons.css` and the Bootstrap `ButtonToolbar`,
  * `ButtonGroup` and `Button` around it. The three icon colours are the ones
@@ -12,13 +13,31 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.5rem;
+  /* Wide enough that a group reads as a group and not as the next one. */
+  gap: 0.75rem;
   margin: 1vh 1px;
   font-size: 14px;
 }
 
 .plivet-controls__group {
   display: flex;
+  /* The six run controls are six decisions, not one dial: they are set apart
+   * from each other so a hurried click lands on the one it was aimed at. */
+  gap: 0.35rem;
+}
+
+/*
+ * What separates a kind of control from the next kind. The run controls are
+ * the only ones that change the program's state, so they are the ones fenced
+ * off: a reader who means to save a file should not be able to stop a session
+ * by missing.
+ */
+.plivet-controls__divider {
+  align-self: stretch;
+  width: 1px;
+  min-height: 2rem;
+  background: var(--plivet-line, #333333);
+  opacity: 0.35;
 }
 
 .plivet-controls__button {
@@ -29,22 +48,10 @@
   min-height: 2rem;
   padding: 0.25rem 0.6rem;
   border: 1px solid var(--plivet-line, #333333);
+  border-radius: 0.25rem;
   background: var(--plivet-button-bg, #f6f6f6);
   color: var(--plivet-button-color, #333333);
   cursor: pointer;
-}
-
-/* One group reads as one control: only its ends are rounded. */
-.plivet-controls__group .plivet-controls__button + .plivet-controls__button {
-  margin-left: -1px;
-}
-
-.plivet-controls__group .plivet-controls__button:first-child {
-  border-radius: 0.25rem 0 0 0.25rem;
-}
-
-.plivet-controls__group .plivet-controls__button:last-child {
-  border-radius: 0 0.25rem 0.25rem 0;
 }
 
 .plivet-controls__button:hover:not(:disabled),

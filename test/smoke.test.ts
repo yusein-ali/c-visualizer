@@ -110,7 +110,7 @@ const RUN = 5;
 const buttonsOf = (parent: HTMLElement) =>
   Array.from(
     parent.querySelectorAll<HTMLButtonElement>(
-      '.plivet-controls__group:first-of-type .plivet-controls__button'
+      '.plivet-controls__group--debug .plivet-controls__button'
     )
   );
 
