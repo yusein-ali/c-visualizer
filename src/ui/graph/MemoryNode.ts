@@ -33,19 +33,20 @@ export const MemoryNode = dia.Element.define('plivet.MemoryNode');
 const MONOSPACE = "Consolas, 'Courier New', monospace";
 const SANS = "system-ui, -apple-system, 'Segoe UI', sans-serif";
 
-const TITLE_FILL = '#26384a';
-const TITLE_TEXT = '#ffffff';
-const TITLE_ADDRESS = '#a9c2da';
-const BORDER = '#26384a';
-const GRID = '#cfd8e1';
-const HEADER_FILL = '#eef2f6';
-const HEADER_TEXT = '#4a5b6c';
-const CAPTION_FILL = '#f7f9fb';
-const CAPTION_TEXT = '#6b7b8c';
-const GROUP_FILL = '#f5f8fb';
-const ADDRESS_FILL = '#fbfcfd';
-const TEXT = '#111111';
-const MUTED = '#8494a4';
+const TITLE_FILL = 'var(--plivet-graph-title, #26384a)';
+const TITLE_TEXT = 'var(--plivet-graph-title-text, #ffffff)';
+const TITLE_ADDRESS = 'var(--plivet-graph-title-address, #a9c2da)';
+const BORDER = 'var(--plivet-graph-border, #26384a)';
+const GRID = 'var(--plivet-graph-grid, #cfd8e1)';
+const HEADER_FILL = 'var(--plivet-graph-header, #eef2f6)';
+const HEADER_TEXT = 'var(--plivet-graph-header-text, #4a5b6c)';
+const CAPTION_FILL = 'var(--plivet-graph-caption, #f7f9fb)';
+const CAPTION_TEXT = 'var(--plivet-graph-caption-text, #6b7b8c)';
+const GROUP_FILL = 'var(--plivet-graph-group, #f5f8fb)';
+const ADDRESS_FILL = 'var(--plivet-graph-address, #fbfcfd)';
+const SURFACE = 'var(--plivet-graph-surface, #ffffff)';
+const TEXT = 'var(--plivet-graph-ink, #111111)';
+const MUTED = 'var(--plivet-graph-muted, #8494a4)';
 
 /** The same pair the rows fold with, so one gesture reads as one gesture. */
 const SEGMENT_OPEN = '▼';
@@ -90,7 +91,7 @@ function labelRow(
     y: row.y,
     width: segment.width,
     height: row.height,
-    fill: isGroup ? GROUP_FILL : '#ffffff',
+    fill: isGroup ? GROUP_FILL : SURFACE,
     stroke: GRID,
     strokeWidth: 1,
   });
@@ -221,7 +222,7 @@ function entryRow(
       y: bandY,
       width: fold.width,
       height: row.bandHeight,
-      fill: '#ffffff',
+      fill: SURFACE,
       fillOpacity: 0,
       stroke: 'none',
     },
@@ -262,7 +263,7 @@ export function memoryNodeOf(segment: MemorySegmentGeometry): dia.Element {
     y: 0,
     width: segment.width,
     height: segment.height,
-    fill: '#ffffff',
+    fill: SURFACE,
     stroke: BORDER,
     strokeWidth: 1.5,
     rx: 6,

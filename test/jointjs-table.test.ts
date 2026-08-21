@@ -93,6 +93,9 @@ describe('MemoryNode', () => {
     expect(value.fontFamily).toContain('Consolas');
     expect(value.textAnchor).toBe('end');
     expect(value.x).toBe(300 - 8);
+    expect(attr(node, 'cell-0-2-body').title).toBe('the complete value');
+    expect(name.fill).toContain('--plivet-graph-ink');
+    expect(attr(node, 'body').fill).toContain('--plivet-graph-surface');
   });
 
   it('spans the address across both bands and marks the pointer cell', () => {

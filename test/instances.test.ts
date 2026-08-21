@@ -9,11 +9,18 @@ import { Plivet } from '../src/index';
  */
 jest.mock('../src/ui/graph', () => ({
   PlivetGraph: class {
-    constructor(private readonly container: HTMLElement) {
+    constructor(
+      private readonly container: HTMLElement,
+      options: { dark?: boolean } = {}
+    ) {
       this.container.classList.add('plivet-graph');
+      this.setDark(options.dark ?? false);
     }
     render(): void {}
     setScale(): void {}
+    setDark(dark: boolean): void {
+      this.container.classList.toggle('plivet-graph--dark', dark);
+    }
     destroy(): void {
       this.container.classList.remove('plivet-graph');
     }
@@ -71,6 +78,8 @@ describe('two instances on one page', () => {
     expect(second.textContent).not.toContain('return 1;');
     expect(isDark(first)).toBe(false);
     expect(isDark(second)).toBe(true);
+    expect(first.querySelector('.plivet-graph--dark')).toBeNull();
+    expect(second.querySelector('.plivet-graph--dark')).not.toBeNull();
 
     a.destroy();
     b.destroy();
@@ -89,6 +98,8 @@ describe('two instances on one page', () => {
 
     expect(isDark(first)).toBe(true);
     expect(isDark(second)).toBe(false);
+    expect(first.querySelector('.plivet-graph--dark')).not.toBeNull();
+    expect(second.querySelector('.plivet-graph--dark')).toBeNull();
     expect(themeSwitchOf(second).value).toBe('light');
 
     a.destroy();

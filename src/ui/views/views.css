@@ -3,8 +3,8 @@
   max-height: 30%;
   margin: 0 24px 8px;
   overflow: auto;
-  background: var(--plivet-surface, #fff);
-  color: var(--plivet-ink, #222);
+  background: var(--plivet-graph-surface, var(--plivet-surface, #fff));
+  color: var(--plivet-graph-ink, var(--plivet-ink, #222));
   font-size: 0.85rem;
 }
 

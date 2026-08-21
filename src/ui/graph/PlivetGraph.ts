@@ -204,6 +204,10 @@ export class PlivetGraph {
     this.zoomLabel.className = 'plivet-graph__status';
     this.zoomLabel.setAttribute('role', 'status');
     this.container.classList.add('plivet-graph');
+    this.container.classList.toggle(
+      'plivet-graph--dark',
+      options.dark ?? false
+    );
     this.container.appendChild(this.toolbar());
     // The bar is the frame of the window rather than something floating in
     // it: the paper scrolls inside the box below it, so the bar - and the
@@ -231,7 +235,9 @@ export class PlivetGraph {
       frozen: true,
       sorting: dia.Paper.sorting.EXACT,
       interactive: false,
-      background: { color: '#ffffff' },
+      background: {
+        color: 'var(--plivet-graph-canvas, #ffffff)',
+      },
     });
     this.paper.on('element:pointerclick', (_view, event) => {
       const target = event.target as Element | null;
@@ -411,6 +417,15 @@ export class PlivetGraph {
     this.resize();
   }
 
+  setDark(dark: boolean): void {
+    this.container.classList.toggle('plivet-graph--dark', dark);
+    // Cells inherit the palette through CSS variables. Redrawing the paper
+    // background makes the switch immediate in browsers that cache it.
+    this.paper.drawBackground({
+      color: 'var(--plivet-graph-canvas, #ffffff)',
+    });
+  }
+
   destroy(): void {
     if (this.resizeObserver !== null) {
       this.resizeObserver.disconnect();
@@ -420,6 +435,7 @@ export class PlivetGraph {
     this.mutations.destroy();
     this.container.replaceChildren();
     this.container.classList.remove('plivet-graph');
+    this.container.classList.remove('plivet-graph--dark');
   }
 
   /** Which object the pointer is over, from the row it is inside. */
@@ -513,8 +529,8 @@ export class PlivetGraph {
     heading.resize(width, HEADING_HEIGHT);
     heading.attr({
       body: {
-        fill: '#26384a',
-        stroke: '#26384a',
+        fill: 'var(--plivet-graph-title, #26384a)',
+        stroke: 'var(--plivet-graph-title, #26384a)',
         rx: 4,
         ry: 4,
         class: 'plivet-section-heading',
@@ -522,7 +538,8 @@ export class PlivetGraph {
       },
       label: {
         text: `${collapsed ? '▶' : '▼'}  ${text}`,
-        fill: '#ffffff',
+        fill: 'var(--plivet-graph-title-text, #ffffff)',
+        class: 'plivet-section-heading__label',
         fontFamily: 'system-ui, sans-serif',
         fontSize: 14,
         fontWeight: 'bold',
@@ -634,15 +651,19 @@ export class PlivetGraph {
       cell.resize(COLUMN_WIDTH, height);
       cell.attr({
         body: {
-          fill: row.current ? '#e8f2ff' : '#ffffff',
-          stroke: row.current ? '#4f81bd' : '#cfd8e1',
+          fill: row.current
+            ? 'var(--plivet-graph-current, #e8f2ff)'
+            : 'var(--plivet-graph-surface, #ffffff)',
+          stroke: row.current
+            ? 'var(--plivet-graph-current-line, #4f81bd)'
+            : 'var(--plivet-graph-grid, #cfd8e1)',
           strokeWidth: row.current ? 2 : 1,
           rx: 3,
           ry: 3,
         },
         label: {
           text,
-          fill: '#26384a',
+          fill: 'var(--plivet-graph-ink, #26384a)',
           fontFamily: "Consolas, 'Courier New', monospace",
           fontSize: 13,
           ...leftAlignedLabel(10, height),
@@ -704,9 +725,9 @@ export class PlivetGraph {
 
     cells.push(
       this.cardCell(card.title, originX, y, COLUMN_WIDTH, CARD_TITLE_HEIGHT, {
-        fill: '#e8f2ff',
-        stroke: '#9fbfe5',
-        color: '#234b73',
+        fill: 'var(--plivet-graph-current, #e8f2ff)',
+        stroke: 'var(--plivet-graph-accent-line, #9fbfe5)',
+        color: 'var(--plivet-graph-accent-text, #234b73)',
         bold: true,
         fontSize: 15,
       })
@@ -721,9 +742,9 @@ export class PlivetGraph {
       );
       cells.push(
         this.cardCell(card.context, originX, y, COLUMN_WIDTH, contextHeight, {
-          fill: '#f7f9fb',
-          stroke: '#cfd8e1',
-          color: '#5d6b78',
+          fill: 'var(--plivet-graph-caption, #f7f9fb)',
+          stroke: 'var(--plivet-graph-grid, #cfd8e1)',
+          color: 'var(--plivet-graph-context-text, #5d6b78)',
           fontSize: 12,
         })
       );
@@ -744,9 +765,9 @@ export class PlivetGraph {
           COLUMN_WIDTH,
           descriptionHeight,
           {
-            fill: '#ffffff',
-            stroke: '#cfd8e1',
-            color: '#26384a',
+            fill: 'var(--plivet-graph-surface, #ffffff)',
+            stroke: 'var(--plivet-graph-grid, #cfd8e1)',
+            color: 'var(--plivet-graph-ink, #26384a)',
             fontSize: 13,
           }
         )
@@ -763,9 +784,9 @@ export class PlivetGraph {
           COLUMN_WIDTH,
           CARD_SECTION_HEIGHT,
           {
-            fill: '#eef2f6',
-            stroke: '#cfd8e1',
-            color: '#4a5b6c',
+            fill: 'var(--plivet-graph-header, #eef2f6)',
+            stroke: 'var(--plivet-graph-grid, #cfd8e1)',
+            color: 'var(--plivet-graph-header-text, #4a5b6c)',
             bold: true,
             fontSize: 12,
           }
@@ -797,9 +818,9 @@ export class PlivetGraph {
       return {
         cells: [
           this.cardCell(row.label, originX, originY, COLUMN_WIDTH, height, {
-            fill: '#fff8e1',
-            stroke: '#e2d3a4',
-            color: '#5c5130',
+            fill: 'var(--plivet-graph-note, #fff8e1)',
+            stroke: 'var(--plivet-graph-note-line, #e2d3a4)',
+            color: 'var(--plivet-graph-note-text, #5c5130)',
             code: row.labelCode,
             fontSize: 13,
           }),
@@ -816,9 +837,9 @@ export class PlivetGraph {
     return {
       cells: [
         this.cardCell(row.label, originX, originY, CARD_LABEL_WIDTH, height, {
-          fill: '#eef2f6',
-          stroke: '#cfd8e1',
-          color: '#4a5b6c',
+          fill: 'var(--plivet-graph-header, #eef2f6)',
+          stroke: 'var(--plivet-graph-grid, #cfd8e1)',
+          color: 'var(--plivet-graph-header-text, #4a5b6c)',
           bold: !row.labelCode,
           code: row.labelCode,
           fontSize: 12,
@@ -830,9 +851,9 @@ export class PlivetGraph {
           valueWidth,
           height,
           {
-            fill: '#ffffff',
-            stroke: '#cfd8e1',
-            color: '#26384a',
+            fill: 'var(--plivet-graph-surface, #ffffff)',
+            stroke: 'var(--plivet-graph-grid, #cfd8e1)',
+            color: 'var(--plivet-graph-ink, #26384a)',
             code: row.valueCode,
             fontSize: 13,
           }
@@ -909,7 +930,7 @@ export class PlivetGraph {
       body: { fill: 'none', stroke: 'none' },
       label: {
         text,
-        fill: '#3c4a58',
+        fill: 'var(--plivet-graph-message, #3c4a58)',
         fontFamily: 'system-ui, sans-serif',
         fontSize: 14,
         ...leftAlignedLabel(2, height),
@@ -960,11 +981,11 @@ export class PlivetGraph {
         body: {
           fill:
             node.kind === 'assignment'
-              ? '#fff0c2'
+              ? 'var(--plivet-graph-expression-assignment, #fff0c2)'
               : node.kind === 'operator'
-                ? '#dcecff'
-                : '#f4f4f4',
-          stroke: '#202020',
+                ? 'var(--plivet-graph-expression-operator, #dcecff)'
+                : 'var(--plivet-graph-expression-operand, #f4f4f4)',
+          stroke: 'var(--plivet-graph-expression-border, #202020)',
           strokeWidth: node.kind === 'operand' ? 1 : 2,
           rx: 5,
           ry: 5,
@@ -976,7 +997,7 @@ export class PlivetGraph {
           // empty line says that better than a sentence about it does.
           text:
             node.value === null ? node.text : `${node.text}\n= ${node.value}`,
-          fill: '#111111',
+          fill: 'var(--plivet-graph-ink, #111111)',
           fontFamily: "Consolas, 'Courier New', monospace",
           fontSize: 13,
           textWrap: { width: -12, height: -8, ellipsis: true },
@@ -1008,7 +1029,7 @@ export class PlivetGraph {
           link.connector('rounded', { radius: 5 });
           link.attr({
             line: {
-              stroke: '#5c6773',
+              stroke: 'var(--plivet-graph-expression-link, #5c6773)',
               strokeWidth: 1.5,
               targetMarker: { type: 'none' },
             },

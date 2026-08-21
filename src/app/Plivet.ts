@@ -317,6 +317,7 @@ export class Plivet {
     this.controls.setDark(isDark(theme));
     this.editor.setDark(isDark(theme));
     this.console.setDark(isDark(theme));
+    this.graph.setDark(isDark(theme));
     this.preprocessed?.setDark(isDark(theme));
   }
 

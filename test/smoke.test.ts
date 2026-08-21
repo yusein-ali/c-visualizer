@@ -82,6 +82,7 @@ jest.mock('../src/ui/graph', () => ({
       explained.push(explanation);
     }
     setScale(): void {}
+    setDark(): void {}
     destroy(): void {}
   },
 }));

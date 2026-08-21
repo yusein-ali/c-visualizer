@@ -21,8 +21,8 @@
   width: 100%;
   height: var(--plivet-graph-height, 95vh);
   min-height: 200px;
-  border: 1px solid #000;
-  background: #fff;
+  border: 1px solid var(--plivet-graph-border, #26384a);
+  background: var(--plivet-graph-canvas, #ffffff);
 }
 
 /* The scrolling window. `min-height: 0` is what lets it shrink to the box
@@ -145,15 +145,86 @@
  * kept in step in one direction.
  */
 .plivet-graph {
+  --plivet-graph-canvas: #ffffff;
+  --plivet-graph-surface: #ffffff;
   --plivet-graph-title: #26384a;
   --plivet-graph-title-text: #ffffff;
+  --plivet-graph-title-address: #a9c2da;
+  --plivet-graph-border: #26384a;
   --plivet-graph-grid: #cfd8e1;
   --plivet-graph-header: #eef2f6;
   --plivet-graph-header-text: #4a5b6c;
+  --plivet-graph-caption: #f7f9fb;
+  --plivet-graph-caption-text: #6b7b8c;
+  --plivet-graph-group: #f5f8fb;
+  --plivet-graph-address: #fbfcfd;
+  --plivet-graph-muted: #8494a4;
   --plivet-graph-hover: #f7f9fb;
   --plivet-graph-ink: #111111;
   --plivet-graph-focus: #fff3bf;
   --plivet-graph-focus-line: #d9a400;
+  --plivet-graph-current: #e8f2ff;
+  --plivet-graph-current-line: #4f81bd;
+  --plivet-graph-accent-line: #9fbfe5;
+  --plivet-graph-accent-text: #234b73;
+  --plivet-graph-context-text: #5d6b78;
+  --plivet-graph-note: #fff8e1;
+  --plivet-graph-note-line: #e2d3a4;
+  --plivet-graph-note-text: #5c5130;
+  --plivet-graph-message: #3c4a58;
+  --plivet-graph-expression-assignment: #fff0c2;
+  --plivet-graph-expression-operator: #dcecff;
+  --plivet-graph-expression-operand: #f4f4f4;
+  --plivet-graph-expression-border: #202020;
+  --plivet-graph-expression-link: #5c6773;
+  --plivet-graph-stack-header: #f3f5f7;
+  --plivet-graph-stack-border: #000000;
+}
+
+.plivet-graph--dark {
+  --plivet-surface: #272e35;
+  --plivet-ink: #f3f5f7;
+  --plivet-line: #73808c;
+  --plivet-button-bg: #3a434c;
+  --plivet-button-hover-bg: #4a5661;
+  --plivet-button-color: #f3f5f7;
+  --plivet-graph-canvas: #1d2329;
+  --plivet-graph-surface: #272e35;
+  /* Distinct from the canvas at 3:1, while its white text remains above 4.5:1. */
+  --plivet-graph-title: #526f89;
+  --plivet-graph-title-text: #f5f8fb;
+  --plivet-graph-title-address: #e8f0f7;
+  --plivet-graph-border: #73808c;
+  --plivet-graph-grid: #4b5966;
+  --plivet-graph-header: #34414d;
+  --plivet-graph-header-text: #d2dde7;
+  --plivet-graph-caption: #2d3740;
+  --plivet-graph-caption-text: #b6c3cf;
+  --plivet-graph-group: #303b45;
+  --plivet-graph-address: #222b33;
+  --plivet-graph-muted: #9aa8b6;
+  --plivet-graph-hover: #303a44;
+  --plivet-graph-ink: #f3f5f7;
+  --plivet-graph-focus: #5f531f;
+  --plivet-graph-focus-line: #e0bc3a;
+  --plivet-graph-current: #263f59;
+  --plivet-graph-current-line: #6fa8dc;
+  --plivet-graph-accent-line: #5f8fbd;
+  --plivet-graph-accent-text: #dbeeff;
+  --plivet-graph-context-text: #bac7d2;
+  --plivet-graph-note: #493e20;
+  --plivet-graph-note-line: #7f6a2c;
+  --plivet-graph-note-text: #f1dda0;
+  --plivet-graph-message: #c4ced7;
+  --plivet-graph-expression-assignment: #5a491d;
+  --plivet-graph-expression-operator: #27445e;
+  --plivet-graph-expression-operand: #323b44;
+  --plivet-graph-expression-border: #a7b2bc;
+  --plivet-graph-expression-link: #8794a0;
+  --plivet-graph-stack-header: #34414d;
+  --plivet-graph-stack-border: #73808c;
+
+  color-scheme: dark;
 }
 
 /* The far end of the bar: the panel hangs from this edge. */
@@ -176,7 +247,7 @@
   overflow: hidden;
   border: 1px solid var(--plivet-graph-title);
   border-radius: 0.25rem;
-  background: #fff;
+  background: var(--plivet-graph-surface, #ffffff);
   box-shadow: 0 2px 8px rgb(38 56 74 / 25%);
   color: var(--plivet-graph-ink);
   font:
@@ -226,6 +297,21 @@
 .plivet-graph .plivet-collapse-cell,
 .plivet-graph .plivet-section-heading {
   cursor: pointer;
+}
+
+/*
+ * Keep section-band paint in the stylesheet as well as in the JointJS model.
+ * In particular, this makes the text's `fill` a CSS declaration, where theme
+ * custom properties are resolved reliably instead of depending on a browser
+ * resolving `var()` from an SVG presentation attribute.
+ */
+.plivet-graph .plivet-section-heading {
+  fill: var(--plivet-graph-title, #26384a);
+  stroke: var(--plivet-graph-title, #26384a);
+}
+
+.plivet-graph .plivet-section-heading__label {
+  fill: var(--plivet-graph-title-text, #ffffff);
 }
 
 /* The bounded write history is the final collapsible region in the canvas
