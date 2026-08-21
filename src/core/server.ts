@@ -68,12 +68,25 @@ export interface Response {
   /** What the teaching rules found in a program that parses. Checks only. */
   lints?: LintDiagnostic[];
   /**
+   * How often the run has arrived at each line so far. Counted here rather
+   * than by the editor because a run reports two responses and takes
+   * thousands of steps between them: everything the editor could count is
+   * the handful of steps it was shown.
+   */
+  coverage?: LineCount[];
+  /**
    * What has gone wrong in the run so far. Sent with every step rather than
    * once, because a session is only ever shown one response at a time and the
    * editor's linter holds one set: the list is what the run has said, not what
    * this step added.
    */
   runtime?: RuntimeDiagnostic[];
+}
+
+/** How many times the run has reached one line. Lines are 1-based. */
+export interface LineCount {
+  line: number;
+  count: number;
 }
 
 /**
@@ -138,6 +151,12 @@ export class Server {
    * run was started under, and the run reads that before every step.
    */
   private runToken: number = 0;
+  /**
+   * How often each line has been arrived at, over the session rather than
+   * over one step. It is what shades the coverage gutter, and what makes a
+   * loop body and a branch nobody took visible without reading either.
+   */
+  private readonly coverage = new Map<number, number>();
   private interpreter: Interpreter | null = null;
   private readonly history: StepHistory;
 
@@ -171,6 +190,7 @@ export class Server {
     // A restart retires a run still in flight, the same way stopping does.
     this.runToken += 1;
     this.count = 0;
+    this.coverage.clear();
     const interpreter = await this.createInterpreter();
     interpreter.setFileList(this.files);
     this.interpreter = interpreter;
@@ -241,6 +261,7 @@ export class Server {
       step: result.step,
       errors: [],
       runtime: this.runtimeDiagnostics(),
+      coverage: this.lineCounts(),
     };
   }
 
@@ -280,6 +301,8 @@ export class Server {
   private Stop(): StepResult {
     this.runToken += 1;
     this.interpreter = null;
+    // A stopped session has run nothing, which is what takes the shading off.
+    this.coverage.clear();
     return { output: '', debugState: 'Stop', step: this.count };
   }
 
@@ -463,6 +486,29 @@ export class Server {
 
   private record(execState: ExecState, output: string) {
     this.history.push(execState, output);
+    this.recordArrival(execState);
+  }
+
+  /**
+   * One more arrival at the line about to run. `getNextExpr` is what the
+   * breakpoint check already asks of every step, so this costs a lookup
+   * rather than a model.
+   */
+  private recordArrival(execState: ExecState) {
+    const next = execState.getNextExpr();
+    const range = next === null ? null : next.codeRange;
+    if (!range || !range.begin) {
+      return;
+    }
+    const line = range.begin.y;
+    this.coverage.set(line, (this.coverage.get(line) ?? 0) + 1);
+  }
+
+  private lineCounts(): LineCount[] {
+    return [...this.coverage.entries()].map(([line, count]) => ({
+      line,
+      count,
+    }));
   }
 
   private report(event: RUN_EVENT, result: StepResult, sourcecode: string) {

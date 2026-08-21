@@ -20,6 +20,11 @@ import {
 } from './diagnostics';
 import { expansionField, showExpansions as markExpansions } from './expansions';
 import { focusField, showFocus as markFocus } from './focus';
+import {
+  LineCoverage,
+  coverageField,
+  showCoverage as markCoverage,
+} from './coverage';
 import { inlineValueField } from './inlineValues';
 import {
   showStep as markStep,
@@ -78,6 +83,7 @@ export class DebugExtensions {
       errorLineField,
       focusField,
       watchField,
+      coverageField,
       // The gutter is what makes a warning visible without hovering for one.
       // A reader who does not know a rule exists never hovers to find out.
       lintGutter(),
@@ -122,6 +128,15 @@ export class DebugExtensions {
    */
   showFocus(view: EditorView, range: SourceRange | null): void {
     markFocus(view, range);
+  }
+
+  /**
+   * How often the run has been to each line. It shades the gutter, so a loop
+   * body, a branch nobody took and a line after a `return` are told apart at
+   * a glance rather than by stepping and remembering.
+   */
+  showCoverage(view: EditorView, counts: LineCoverage[]): void {
+    markCoverage(view, counts);
   }
 
   /** The names the reader has pinned, in the order they pinned them. */

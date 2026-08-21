@@ -30,6 +30,10 @@ export { cSnippets } from './snippets';
 export type { LibraryFunction } from './completion';
 export { expansionAt } from './expansions';
 export { focusField, setFocusRange } from './focus';
+export { coverageField, setCoverage } from './coverage';
+export type { LineCoverage } from './coverage';
+export { excludedRegionFolding } from './folding';
+export { expansionListField } from './expansions';
 export {
   setWatchRecords,
   toggleWatch,

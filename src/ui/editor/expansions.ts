@@ -45,6 +45,27 @@ const decorationsFor = (
     true
   );
 
+/**
+ * The expansions themselves, beside the marks made from them.
+ *
+ * The marks are what the reader sees; the list is what has to be asked
+ * questions - which lines a conditional kept out of the program, so they can
+ * be folded away. Recording it here rather than recovering it from the
+ * decorations keeps one effect as the one way expansions arrive.
+ */
+export const expansionListField = StateField.define<Expansion[]>({
+  create: () => [],
+  update(expansions, transaction) {
+    let updated = expansions;
+    for (const effect of transaction.effects) {
+      if (effect.is(setExpansions)) {
+        updated = effect.value;
+      }
+    }
+    return updated;
+  },
+});
+
 export const expansionField = StateField.define<DecorationSet>({
   create: () => Decoration.none,
   update(marks, transaction) {

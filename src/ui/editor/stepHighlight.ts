@@ -1,6 +1,7 @@
 import { EditorState, StateEffect, StateField } from '@codemirror/state';
 import { Decoration, DecorationSet, EditorView } from '@codemirror/view';
 import { SourceRange } from './positions';
+import strings from '../../strings';
 
 /**
  * Where execution stands. Ace showed this by moving the selection, which meant
@@ -74,5 +75,29 @@ export const showStep = (
   if (mark !== null && scroll) {
     effects.push(EditorView.scrollIntoView(mark.range.from, { y: 'center' }));
   }
+  if (mark !== null) {
+    effects.push(EditorView.announce.of(announcement(view, mark)));
+  }
   view.dispatch({ effects });
+};
+
+/**
+ * What a screen reader is told at each step.
+ *
+ * A highlight and a scroll say where the program is to a reader who can see
+ * the page. Everything else PLIVET does is narrated by the control bar's live
+ * regions - the step counter, the console - and the one thing that was not
+ * was the statement itself, which is the thing the run is about. The line is
+ * read out with what its variables hold, because that is what the reader
+ * would otherwise hover every name on the line to learn.
+ */
+const announcement = (view: EditorView, mark: StepMark): string => {
+  const line = view.state.doc.lineAt(mark.range.from);
+  const said = mark.values
+    .map((value) => `${value.name} ${value.display}`)
+    .join(', ');
+  const statement = line.text.trim();
+  return said === ''
+    ? `${strings.announceStep} ${line.number}: ${statement}`
+    : `${strings.announceStep} ${line.number}: ${statement}. ${said}`;
 };

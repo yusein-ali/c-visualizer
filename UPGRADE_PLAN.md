@@ -962,7 +962,7 @@ and 10.
 
 ## Phase 12: teaching features
 
-**Status: items 1 to 8 done.** Items 1 to 4 are the phase proper; the rest are
+**Status: items 1 to 9 done.** Items 1 to 4 are the phase proper; the rest are
 independent of it and of each other, and can be taken in any order or dropped.
 
 Everything before this phase is parity work: the same application on a stack
@@ -1262,18 +1262,33 @@ it, and can be taken in any order or dropped.
    name cannot disagree. A pinned name the current frame has no object for
    says so instead of vanishing, which is a lesson about scope rather than a
    pin that seems to have come loose.
-9. **Editor affordances**, worth one pull request together:
-   `highlightSelectionMatches` to light up every occurrence of the identifier
+9. **Editor affordances**, worth one pull request together. **Done.**
+   `highlightSelectionMatches` lights up every occurrence of the identifier
    under the cursor (`@codemirror/search`, so standalone only); `foldGutter`
-   plus a fold service for function bodies and for the `#if 0` regions already
-   tracked as `Expansion`s; a coverage gutter using `gutterLineClass` to shade
+   plus a fold service folds function bodies and the `#if 0` regions already
+   tracked as `Expansion`s; a coverage gutter using `gutterLineClass` shades
    lines by execution count, which makes loop behaviour and dead branches
-   visible at a glance; `selectParentSyntax` on a key, which is a direct lesson
-   in nesting; `EditorView.announce` per step so a screen reader follows the
-   run; and the pieces missing from `PlivetEditor`'s extension list today -
-   `drawSelection`, `dropCursor`, `rectangularSelection`, `placeholder` and
-   `highlightSpecialChars`, the last of which turns a pasted non-breaking space
-   from a mystery into a visible character.
+   visible at a glance; `selectParentSyntax` sits on Mod-i, which is a direct
+   lesson in nesting; `EditorView.announce` fires per step so a screen reader
+   follows the run; and the pieces missing from `PlivetEditor`'s extension
+   list are there - `drawSelection`, `dropCursor`, `rectangularSelection`,
+   `placeholder` and `highlightSpecialChars`, the last of which turns a pasted
+   non-breaking space from a mystery into a visible character.
+
+   Two of them needed a decision rather than a line. The counting is the
+   interpreter's, in `Server`, not the editor's: a run reports two responses
+   and takes thousands of steps between them, so anything counted on this side
+   would be a count of what the reader happened to be shown. It is four bands
+   rather than a gradient, because the questions a gutter is asked are whether
+   a line ran, whether it ran often and whether it ran far more often than its
+   neighbours - not what the exact count was. And the fold service answers for
+   the first line of a run of excluded lines only, since a service that
+   answered for every line of the run would offer a fold on each of them;
+   function bodies need no service at all, because `lang-cpp` already marks
+   their blocks. What the announcement says is the statement and what its
+   variables hold - the same values item 1 prints at the end of the line -
+   because that is what a reader who cannot see the marker would otherwise
+   hover every name on the line to learn.
 10. **Protected regions.** A `transactionFilter` rejecting edits outside marked
     spans turns a program into a fill-in-the-blank exercise, which is the shape
     an A+ task usually takes. No new package, and it composes with the read-only

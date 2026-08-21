@@ -238,11 +238,15 @@ export class EditorController {
 
   recieve(response: Response) {
     try {
-      const { debugState, model, output, step, runtime } = response;
+      const { debugState, model, output, step, runtime, coverage } = response;
       this.setDebugging(debugState !== 'Stop');
       this.hover.setStep(model);
       this.showWatches();
       this.setRuntimeDiagnostics(typeof runtime === 'undefined' ? [] : runtime);
+      this.editor.debug.showCoverage(
+        this.editor.view,
+        typeof coverage === 'undefined' ? [] : coverage
+      );
       if (debugState === 'Executing') {
         return;
       }

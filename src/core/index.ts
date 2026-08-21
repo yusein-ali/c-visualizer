@@ -13,6 +13,7 @@ export type { Request, Response } from './server';
 export type {
   CONTROL_EVENT,
   DEBUG_STATE,
+  LineCount,
   RUN_EVENT,
   SyntaxErrorModel,
 } from './server';

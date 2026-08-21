@@ -321,6 +321,21 @@ export const debugTheme = EditorView.baseTheme({
     opacity: '0.85',
     whiteSpace: 'normal',
   },
+  // How often the run has been to a line, in four bands. The colour is the
+  // step marker's, thinned: it is the same fact - where the program goes -
+  // said about the whole run rather than about this step.
+  '.plivet-coverage': {
+    backgroundColor: 'var(--plivet-coverage-1, rgba(120, 150, 70, 0.1))',
+  },
+  '.plivet-coverage--2': {
+    backgroundColor: 'var(--plivet-coverage-2, rgba(120, 150, 70, 0.22))',
+  },
+  '.plivet-coverage--3': {
+    backgroundColor: 'var(--plivet-coverage-3, rgba(120, 150, 70, 0.38))',
+  },
+  '.plivet-coverage--4': {
+    backgroundColor: 'var(--plivet-coverage-4, rgba(120, 150, 70, 0.55))',
+  },
   // A pinned watch. It is the hover tooltip's twin and deliberately looks
   // like it - the same table saying the same things - with a line down its
   // left edge to say that this one stays.

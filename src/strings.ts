@@ -65,6 +65,9 @@ const strings = {
   // also how the user learns that the program is waiting for one.
   consoleInputHint: 'Enter to submit, Shift+Enter for another line',
   atAddress: 'address',
+  // Read out at every step, for a reader who is not watching the marker.
+  announceStep: 'line',
+  editorPlaceholder: 'Write a C program here',
   constructIf: 'if statement',
   constructFor: 'for loop',
   constructWhile: 'while loop',

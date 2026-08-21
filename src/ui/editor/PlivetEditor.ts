@@ -1,16 +1,24 @@
 import { EditorState, Extension } from '@codemirror/state';
 import {
+  drawSelection,
+  dropCursor,
   EditorView,
   highlightActiveLine,
   highlightActiveLineGutter,
+  highlightSpecialChars,
   keymap,
   lineNumbers,
+  placeholder as placeholderExtension,
+  rectangularSelection,
 } from '@codemirror/view';
 import {
   bracketMatching,
+  foldGutter,
+  foldKeymap,
   indentOnInput,
   indentUnit,
 } from '@codemirror/language';
+import { highlightSelectionMatches } from '@codemirror/search';
 import {
   defaultKeymap,
   history,
@@ -20,6 +28,8 @@ import {
 import { autocompletion, CompletionSource } from '@codemirror/autocomplete';
 import { cpp } from '@codemirror/lang-cpp';
 import { DebugExtensions, DebugExtensionOptions } from './debugExtensions';
+import { excludedRegionFolding } from './folding';
+import strings from '../../strings';
 import { ThemeControl } from './theme';
 
 /**
@@ -55,6 +65,8 @@ export interface PlivetEditorOptions extends DebugExtensionOptions {
   matchBrackets?: boolean;
   /** `line_numbers` */
   lineNumbers?: boolean;
+  /** The text an empty editor shows. Defaults to the sample's own prompt. */
+  placeholder?: string;
   /** `autocomplete`: offer the names the program declares while typing. */
   autocomplete?: boolean;
   /**
@@ -90,12 +102,43 @@ export class PlivetEditor {
 
     const extensions: Extension[] = [
       cpp(),
+      // The pieces a CodeMirror editor is usually built with and this one was
+      // not. Each is a small thing on its own; together they are the
+      // difference between an editor and a textarea with colours.
+      drawSelection(),
+      dropCursor(),
+      rectangularSelection(),
+      // A pasted non-breaking space is a mystery that costs a beginner an
+      // afternoon. Drawn as a character, it is a typo.
+      highlightSpecialChars(),
+      // Every other occurrence of the name under the cursor. Reading a loop
+      // means finding where its counter is touched, and this answers that
+      // without a search.
+      highlightSelectionMatches(),
+      placeholderExtension(
+        typeof options.placeholder === 'undefined'
+          ? strings.editorPlaceholder
+          : options.placeholder
+      ),
+      // Function bodies fold because `lang-cpp` marks their blocks; what a
+      // conditional directive kept out of the program folds because PLIVET's
+      // own preprocessor says which lines those are.
+      foldGutter(),
+      excludedRegionFolding,
       // Syntax highlighting comes with the theme: which style is readable
       // depends on what colour is behind it. See `ThemeControl`.
       highlightActiveLine(),
       highlightActiveLineGutter(),
       history(),
-      keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
+      // `defaultKeymap` carries `selectParentSyntax` on Mod-i, which is a
+      // direct lesson in nesting: press it and the selection grows to the
+      // expression, the statement, the block, the function.
+      keymap.of([
+        ...defaultKeymap,
+        ...historyKeymap,
+        ...foldKeymap,
+        indentWithTab,
+      ]),
       this.theme.extension(config.dark, config.fontSize),
       // Gutters are drawn in the order their extensions appear, so the debug
       // array coming before `lineNumbers()` is what puts the breakpoint column
