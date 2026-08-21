@@ -6,6 +6,10 @@
 const strings = {
   howToUse: 'How to use',
   close: 'Close',
+  preprocessedButton: 'Preprocessed',
+  preprocessedTitle: 'The source the compiler sees',
+  preprocessedHint:
+    'What you wrote, beside what #define and #if left of it. Nothing here is editable.',
   debugStatus: 'DebugStatus',
   step: 'Step',
   theme: 'theme',

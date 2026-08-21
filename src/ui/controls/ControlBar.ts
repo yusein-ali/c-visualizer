@@ -32,6 +32,8 @@ export interface ControlBarOptions {
   onZoom?: (command: ZOOM_COMMAND) => void;
   onTheme?: (dark: boolean) => void;
   onHelp?: () => void;
+  /** Show the source the compiler actually sees, beside the one written. */
+  onPreprocessed?: () => void;
   dark?: boolean;
 }
 
@@ -63,6 +65,15 @@ export class ControlBar {
     help.textContent = strings.howToUse;
     help.addEventListener('click', () => this.options.onHelp?.());
 
+    const preprocessed = document.createElement('button');
+    preprocessed.type = 'button';
+    preprocessed.className = 'plivet-controls__help';
+    preprocessed.textContent = strings.preprocessedButton;
+    preprocessed.title = strings.preprocessedHint;
+    preprocessed.addEventListener('click', () =>
+      this.options.onPreprocessed?.()
+    );
+
     this.status = document.createElement('span');
     this.status.className = 'plivet-controls__status';
     // The counter is the only thing on the page that says a step happened, so
@@ -74,6 +85,7 @@ export class ControlBar {
 
     this.root.append(
       help,
+      preprocessed,
       this.debugGroup(),
       this.zoomGroup(),
       this.theme,

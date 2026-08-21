@@ -14,6 +14,7 @@ import { PlivetConsole } from '../ui/console';
 import { PlivetGraph } from '../ui/graph';
 import { FilePanel } from '../ui/files';
 import { HowToDialog } from '../ui/help';
+import type { PreprocessedDialog } from '../ui/preprocessed';
 import strings from '../strings';
 import { EditorController } from './EditorController';
 import { Bus } from './emitter';
@@ -59,6 +60,12 @@ export class Plivet {
   private readonly graph: PlivetGraph;
   private readonly files: FilePanel;
   private readonly help: HowToDialog;
+  /**
+   * Built on the first press and kept after it. `@codemirror/merge` and the
+   * preprocessor are a chunk of their own: a reader who never asks what the
+   * preprocessor did never downloads the answer.
+   */
+  private preprocessed: PreprocessedDialog | null = null;
   private theme: Theme;
 
   constructor(parent: HTMLElement, options: PlivetOptions = {}) {
@@ -76,6 +83,7 @@ export class Plivet {
       onZoom: (command: ZOOM_COMMAND) => bus.signal('zoom', command),
       onTheme: (dark) => bus.signal('changeTheme', dark ? 'dark' : 'light'),
       onHelp: () => this.help.open(),
+      onPreprocessed: () => void this.showPreprocessed(),
       dark: isDark(this.theme),
     });
 
@@ -135,12 +143,36 @@ export class Plivet {
     );
   }
 
+  /**
+   * The program beside the text the compiler is given.
+   *
+   * The pass runs here rather than in the Worker because it is a
+   * source-to-source pass over one file, and asking the interpreter for it
+   * would mean a round trip and a new message for an answer this side can
+   * work out while the dialog is opening.
+   */
+  private async showPreprocessed(): Promise<void> {
+    const source = this.editor.code();
+    // prettier-ignore
+    const [{ PreprocessedDialog }, { preprocess }] = await Promise.all([
+      import(/* webpackChunkName: "preprocessed" */ '../ui/preprocessed'),
+      import(/* webpackChunkName: "preprocessed" */ '../interpreter/preprocess'),
+    ]);
+    if (this.preprocessed === null) {
+      this.preprocessed = new PreprocessedDialog(this.shell.root, {
+        dark: isDark(this.theme),
+      });
+    }
+    this.preprocessed.open(source, preprocess(source));
+  }
+
   destroy(): void {
     // The interpreter first: its Worker is the one thing that goes on running
     // after the widgets it reports to have gone.
     this.client.destroy();
     this.bus.destroy();
     this.help.destroy();
+    this.preprocessed?.destroy();
     this.files.destroy();
     this.graph.destroy();
     this.console.destroy();
@@ -155,6 +187,7 @@ export class Plivet {
     this.controls.setDark(isDark(theme));
     this.editor.setDark(isDark(theme));
     this.console.setDark(isDark(theme));
+    this.preprocessed?.setDark(isDark(theme));
   }
 
   private async upload(files: FileList): Promise<void> {

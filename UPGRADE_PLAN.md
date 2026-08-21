@@ -962,7 +962,7 @@ and 10.
 
 ## Phase 12: teaching features
 
-**Status: items 1 to 10 done.** Items 1 to 4 are the phase proper; the rest are
+**Status: items 1 to 11 done.** Items 1 to 4 are the phase proper; the rest are
 independent of it and of each other, and can be taken in any order or dropped.
 
 Everything before this phase is parity work: the same application on a stack
@@ -1309,10 +1309,21 @@ it, and can be taken in any order or dropped.
     program: a host handing PLIVET a new file is not a student typing outside
     the blank, and it says so with an annotation rather than by turning the
     filter off.
-11. **The preprocessed source, side by side.** `@codemirror/merge` against the
-    output of `src/interpreter/preprocess.ts`, showing what `#define` and
-    `#include` actually did. The merge view is a second editor, so it is not
-    part of the debug array and does not travel to a host page.
+11. **The preprocessed source, side by side.** **Done.** `@codemirror/merge`
+    against the output of `src/interpreter/preprocess.ts`, showing what
+    `#define` and `#if` actually did. The merge view is a second editor, so it
+    is not part of the debug array and does not travel to a host page.
+
+    It answers the question the hover cannot. The editor marks each
+    replacement and says what it became, one at a time; an absence has nothing
+    to hover, so the only way to read what a conditional kept out is to see
+    the two texts beside each other. Both halves are read-only - neither is
+    the document being edited: the left is a copy of it and the right is the
+    compiler's own input, which nobody types - and the comparison is rebuilt
+    at every opening, because the source changes while the dialog is closed
+    and a merge view holding a stale half is worse than none. The dialog and
+    the preprocessor arrive together in a chunk of their own, so a reader who
+    never asks what the preprocessor did never downloads the answer.
 12. **Session serialisation.** -- not strictly required -- `EditorState.toJSON` and `fromJSON`, plus the
     breakpoint set, so a session can be saved, handed in, or replayed by a
     teacher looking at how a student got where they are.

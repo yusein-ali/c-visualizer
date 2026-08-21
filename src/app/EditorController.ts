@@ -189,6 +189,11 @@ export class EditorController {
     this.editor.setDark(dark);
   }
 
+  /** The program as it stands, for whoever needs to read it rather than run it. */
+  code(): string {
+    return this.sourcecode;
+  }
+
   destroy(): void {
     this.editor.destroy();
   }

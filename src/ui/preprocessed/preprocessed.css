@@ -1,0 +1,57 @@
+/*
+ * The dialog holding the before-and-after. It is the help dialog's shape - a
+ * `dialog` element with its own backdrop - sized for two columns of code
+ * rather than for a paragraph.
+ */
+.plivet-preprocessed {
+  width: min(1100px, 92vw);
+  max-height: 86vh;
+  padding: 1rem 1.2rem;
+  border: 1px solid var(--plivet-line, #ccc);
+  border-radius: 6px;
+  background: var(--plivet-surface, #fff);
+  color: var(--plivet-ink, #222);
+}
+
+.plivet-preprocessed__title {
+  margin: 0 0 0.2rem;
+  font-size: 1.1rem;
+}
+
+.plivet-preprocessed__hint {
+  margin: 0 0 0.6rem;
+  opacity: 0.75;
+  font-size: 0.85rem;
+}
+
+.plivet-preprocessed__body {
+  overflow: auto;
+  max-height: 64vh;
+  border: 1px solid var(--plivet-line, #ccc);
+  border-radius: 4px;
+}
+
+.plivet-preprocessed__footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.7rem;
+}
+
+.plivet-preprocessed__close {
+  padding: 0.3rem 0.9rem;
+  border: 1px solid var(--plivet-line, #ccc);
+  border-radius: 4px;
+  background: var(--plivet-button-bg, #f5f5f5);
+  color: inherit;
+  cursor: pointer;
+}
+
+.plivet-preprocessed .cm-mergeView {
+  height: auto;
+}
+
+.plivet-preprocessed--dark {
+  --plivet-surface: #2b2b2b;
+  --plivet-ink: #f0f0f0;
+  --plivet-line: #555;
+}
