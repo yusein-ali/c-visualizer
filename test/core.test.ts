@@ -596,6 +596,27 @@ int main(void) {
     );
   });
 
+  it('keeps every function in text memory when the session steps', async () => {
+    const server = new Server();
+    const request = (controlEvent: CONTROL_EVENT) =>
+      quiet(() =>
+        server.send({ controlEvent, sourcecode: strings.sourceCode })
+      );
+    const started = await request('Start');
+    const stepped = await request('Step');
+    for (const response of [started, stepped]) {
+      expect(response.model.functions).toEqual([
+        { name: 'recursiveToThree', address: 0x1000 },
+        { name: 'main', address: 0x1004 },
+      ]);
+      expect(
+        response.model.memory
+          .find(({ key }) => key === 'text')!
+          .rows.flatMap((row) => row.map(({ text }) => text))
+      ).toEqual(expect.arrayContaining(['recursiveToThree', 'main']));
+    }
+  });
+
   it('steps back through every step to the first one', async () => {
     const server = new Server();
     await send(server, 'Start');

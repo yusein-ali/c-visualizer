@@ -148,6 +148,11 @@ interface StepResult {
   step: number;
 }
 
+interface StartResult {
+  step: StepResult;
+  constructs: Construct[];
+}
+
 /** Implemented by interpreters that can describe their source. */
 interface ExpansionSource {
   getExpansions(code: string): Expansion[];
@@ -254,7 +259,7 @@ export class Server {
     switch (controlEvent) {
       case 'Start': {
         const started = await this.Start(sourcecode);
-        return this.respond(started, sourcecode, this.constructs(sourcecode));
+        return this.respond(started.step, sourcecode, started.constructs);
       }
       case 'Stop': {
         return this.respond(this.Stop(), sourcecode);
@@ -338,16 +343,24 @@ export class Server {
     };
   }
 
-  private async Start(sourcecode: string): Promise<StepResult> {
+  private async Start(sourcecode: string): Promise<StartResult> {
     await this.reset();
     if (this.interpreter === null) {
       throw new Error('interpreter is not found');
     }
+    // Reading constructs prepares the interpreter too. Do it before arming
+    // the run: doing it after `startStepExecution` resets the engine's cached
+    // global scope and function addresses, so the entry point disappears from
+    // text memory on the next step.
+    const constructs = this.constructs(sourcecode);
     const execState = this.interpreter.startStepExecution(sourcecode);
     const output = this.interpreter.getStdout();
     this.record(execState, output);
     this.isExecuting = true;
-    return { execState, output, debugState: 'First', step: this.count };
+    return {
+      step: { execState, output, debugState: 'First', step: this.count },
+      constructs,
+    };
   }
 
   private Stop(): StepResult {
