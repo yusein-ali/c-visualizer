@@ -33,7 +33,8 @@ export interface PlivetShellOptions {
   dark?: boolean;
 }
 
-const REPOSITORY = 'https://github.com/RYOSKATE/PLIVET';
+const REPOSITORY = 'https://github.com/yusein-ali/c-visualizer';
+const UPSTREAM = 'https://github.com/RYOSKATE/PLIVET';
 const LICENSES = './licenses.html';
 
 /**
@@ -230,11 +231,13 @@ export class PlivetShell {
 
     const version = options.version === undefined ? '' : ` v${options.version}`;
     const copyright = document.createElement('span');
-    copyright.textContent = `PLIVET${version} © ${copyrightYears(options.fromYear)} @RYOSKATE`;
+    copyright.textContent = `c-visualizer${version} © ${copyrightYears(options.fromYear)} Yusein R. Ali`;
 
     const links = document.createElement('span');
     links.append(
       this.link(REPOSITORY, 'GitHub'),
+      document.createTextNode(' '),
+      this.link(UPSTREAM, 'PLIVET upstream'),
       document.createTextNode(' '),
       this.link(LICENSES, 'LICENSES')
     );

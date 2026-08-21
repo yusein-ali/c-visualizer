@@ -1435,7 +1435,9 @@ export class PlivetCPP14Engine extends CPP14Engine {
       transcript === '' || transcript.endsWith('\n') ? '' : '\n';
     const line = this.currentLine();
     const where = line === null ? '' : ` on line ${line}`;
-    this.stdout(`${separator}PLIVET stopped the program${where}: ${message}\n`);
+    this.stdout(
+      `${separator}c-visualizer stopped the program${where}: ${message}\n`
+    );
     this.record(rule, 'error', message, true, this.currentRange());
     throw new UniRuntimeError(message);
   }

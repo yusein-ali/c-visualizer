@@ -40,7 +40,7 @@ int main(){
   return 0;
 }`)
     ).toBe(
-      'before\nPLIVET stopped the program on line 5: ' +
+      'before\nc-visualizer stopped the program on line 5: ' +
         'assignment of a read-only variable\n'
     );
   });
@@ -56,7 +56,7 @@ int main(){
   return 0;
 }`)
     ).toBe(
-      'start \nPLIVET stopped the program on line 5: ' +
+      'start \nc-visualizer stopped the program on line 5: ' +
         'assignment of a read-only variable\n'
     );
   });
@@ -73,7 +73,7 @@ int main(){
   return 0;
 }`)
     ).toBe(
-      'PLIVET stopped the program on line 7: assignment of a record ' +
+      'c-visualizer stopped the program on line 7: assignment of a record ' +
         'with the read-only member reading.raw\n'
     );
   });
@@ -88,7 +88,7 @@ int main(){
   return 0;
 }`)
     ).toBe(
-      'PLIVET stopped the program on line 5: ' +
+      'c-visualizer stopped the program on line 5: ' +
         'index 5 is outside the array, which holds 2\n'
     );
   });
@@ -102,7 +102,7 @@ int main(){
   return 0;
 }`)
     ).toBe(
-      'PLIVET stopped the program on line 4: ' +
+      'c-visualizer stopped the program on line 4: ' +
         'cannot take the address of a register variable\n'
     );
   });

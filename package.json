@@ -1,9 +1,9 @@
 {
-  "name": "plivet",
+  "name": "c-visualizer",
   "version": "1.0.0",
-  "description": "",
+  "description": "Browser-only C program visualizer and step debugger",
   "main": "index.js",
-  "author": "",
+  "author": "Yusein R. Ali",
   "license": "MIT",
   "engines": {
     "node": ">=24 <25",

@@ -234,7 +234,7 @@ export function linkerDiagnostics(root: UniNode): LintDiagnostic[] {
       severity: 'error',
       message:
         'This program defines no `main`. Execution begins there, so a linker ' +
-        'has nowhere to start and PLIVET has nothing to run.',
+        'has nowhere to start and c-visualizer has nothing to run.',
       ...first.range,
       endLine: first.range.line,
       endColumn: first.range.column + 1,

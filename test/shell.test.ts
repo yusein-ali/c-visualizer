@@ -83,7 +83,7 @@ describe('the shell', () => {
     const thisYear = new Date().getFullYear();
 
     const footer = parent.querySelector('.plivet__footer') as HTMLElement;
-    expect(footer.textContent).toContain('PLIVET v1.0.0');
+    expect(footer.textContent).toContain('c-visualizer v1.0.0');
     expect(footer.textContent).toContain(`2018 - ${thisYear}`);
   });
 });

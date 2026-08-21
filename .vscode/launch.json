@@ -2,7 +2,7 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "PLIVET: start and debug",
+      "name": "c-visualizer: start and debug",
       "type": "node",
       "request": "launch",
       "runtimeExecutable": "npm",
@@ -18,7 +18,7 @@
       }
     },
     {
-      "name": "PLIVET: attach to running server",
+      "name": "c-visualizer: attach to running server",
       "type": "pwa-chrome",
       "request": "launch",
       "url": "http://localhost:8088",

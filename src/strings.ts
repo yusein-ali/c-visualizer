@@ -1,5 +1,5 @@
 /**
- * Every piece of text the interface shows, in one table. PLIVET is
+ * Every piece of text the interface shows, in one table. c-visualizer is
  * English-only: there is no locale to select and no translation layer to go
  * through, so a widget reads the string it needs straight off this object.
  */
@@ -132,7 +132,7 @@ const strings = {
       title: 'Work with files',
       items: [
         'Opening more than one source file adds tabs. The filled triangle marks the entry file that runs; choose a hollow triangle to make another tab the entry file. Save downloads the active tab as a C file.',
-        'Open can also restore a valid PLIVET session supplied by an embedding page, including its source, cursor, breakpoints, and pinned values.',
+        'Open can also restore a valid c-visualizer session supplied by an embedding page, including its source, cursor, breakpoints, and pinned values.',
         'File Upload is for data that the running C program opens with functions such as fopen. Uploaded files can be downloaded or removed and are separate from source tabs.',
       ],
     },
@@ -270,17 +270,17 @@ int main(){
   //File Output
   {
     FILE* fp=NULL;
-    fp = fopen("PLIVET.txt", "w");
-    fputs("PLIVET", fp);
+    fp = fopen("c-visualizer.txt", "w");
+    fputs("c-visualizer", fp);
     fclose(fp);
   }
 
   //File Input
   {
     FILE* fp=NULL;
-    char buf[7];
-    fp = fopen("PLIVET.txt", "r");
-    while(fgets(buf,10,fp) != NULL) {
+    char buf[13];
+    fp = fopen("c-visualizer.txt", "r");
+    while(fgets(buf,13,fp) != NULL) {
       printf("%s",buf);
     }
     fclose(fp);

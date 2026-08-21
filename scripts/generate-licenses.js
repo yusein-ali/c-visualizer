@@ -11,7 +11,8 @@ const path = require('path');
 const checker = require('license-checker-rseidelsohn');
 
 const OUT = path.resolve(__dirname, '..', 'dist', 'licenses.html');
-const AUTHOR = 'RYOSKATE';
+const AUTHOR = 'Yusein R. Ali';
+const UPSTREAM = 'https://github.com/RYOSKATE/PLIVET';
 
 const escapeHtml = (s) =>
   String(s).replace(
@@ -67,7 +68,7 @@ checker.init(
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PLIVET — third-party licences</title>
+<title>c-visualizer — third-party licences</title>
 <style>
   body { font-family: system-ui, -apple-system, sans-serif; margin: 2rem auto; max-width: 60rem; padding: 0 1rem; line-height: 1.5; }
   h1 { border-bottom: 1px solid #ccc; padding-bottom: .5rem; }
@@ -81,7 +82,8 @@ checker.init(
 </head>
 <body>
 <h1>Third-party licences</h1>
-<p>PLIVET is distributed by ${escapeHtml(AUTHOR)} under the MIT licence. It bundles the
+<p>c-visualizer is developed by ${escapeHtml(AUTHOR)} and is a fork of
+<a href="${UPSTREAM}">PLIVET</a> by RYOSKATE. It is distributed under the MIT licence and bundles
 ${names.length} packages listed below, each under its own licence.</p>
 ${sections.join('\n')}
 </body>
