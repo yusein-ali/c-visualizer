@@ -1,6 +1,9 @@
 import './help.css';
 import strings from '../../strings';
 
+const PLIVET_REPOSITORY = 'https://github.com/RYOSKATE/PLIVET';
+const THESIS = 'https://urn.fi/URN:NBN:fi:aalto-202309035541';
+
 /**
  * What PLIVET is and how to drive it, in a modal dialog.
  *
@@ -41,6 +44,30 @@ export class HowToDialog {
       body.append(heading, list);
     }
 
+    const attribution = document.createElement('section');
+    attribution.className = 'plivet-help__attribution';
+    const attributionTitle = document.createElement('h3');
+    attributionTitle.textContent = strings.howToAttribution.title;
+
+    const plivet = document.createElement('p');
+    plivet.append(
+      document.createTextNode(strings.howToAttribution.plivetBefore),
+      this.link(PLIVET_REPOSITORY, strings.howToAttribution.plivetLink),
+      document.createTextNode(strings.howToAttribution.plivetAfter)
+    );
+
+    const thesis = document.createElement('p');
+    thesis.append(
+      document.createTextNode(strings.howToAttribution.thesisBefore),
+      this.link(THESIS, strings.howToAttribution.thesisLink),
+      document.createTextNode(strings.howToAttribution.thesisAfter)
+    );
+
+    const current = document.createElement('p');
+    current.textContent = strings.howToAttribution.current;
+    attribution.append(attributionTitle, plivet, thesis, current);
+    body.appendChild(attribution);
+
     const footer = document.createElement('div');
     footer.className = 'plivet-help__footer';
     const close = document.createElement('button');
@@ -75,5 +102,12 @@ export class HowToDialog {
 
   destroy(): void {
     this.root.remove();
+  }
+
+  private link(href: string, text: string): HTMLAnchorElement {
+    const anchor = document.createElement('a');
+    anchor.href = href;
+    anchor.textContent = text;
+    return anchor;
   }
 }

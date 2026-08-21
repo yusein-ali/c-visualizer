@@ -92,15 +92,38 @@ const strings = {
     'C reads the evaluated expression as false because it is zero',
   statementValuesHeading: 'Values produced so far',
   howToIntro:
-    'PLIVET runs and visualizes C programs entirely in your browser. Start with the editor, then use the controls to move through the program and inspect what each statement does.',
+    'c-visualizer runs and visualizes C programs entirely in your browser. Start with the editor, then use the controls to move through the program and inspect what each statement does.',
+  howToAttribution: {
+    title: 'Attribution and disclaimer',
+    plivetBefore: 'c-visualizer is an independently developed fork of ',
+    plivetLink: 'PLIVET',
+    plivetAfter:
+      ' by RYOSKATE, distributed under the MIT License. It is not an official PLIVET release.',
+    thesisBefore: 'Its educational and research context includes ',
+    thesisLink: "Veli-Matti Rantanen's 2023 Aalto University master's thesis",
+    thesisAfter:
+      ', “An Interactive C Code Execution and Visualization Tool for Online Learning,” supervised by Prof. Riku Jäntti and advised by Dr. Yusein Ali.',
+    current:
+      'The current version is developed by Yusein R. Ali at Aalto University. These references state the project’s provenance and do not imply endorsement by Aalto University or the original PLIVET maintainers.',
+  },
   howToSections: [
     {
       title: 'Write and understand the program',
       items: [
         'Write C in the editor or choose Open to add a C file. The editor checks the entry file after you pause typing and marks syntax errors, runtime problems, and teaching suggestions; some suggestions include a one-click fix.',
-        'Completions offer C constructs, names in the program, and common library functions. Hover over highlighted code or a name to see what it means and, while debugging, its current value. Alt-click a name to pin or unpin its live value.',
+        'Completions offer C constructs, names in the program, and common library functions.',
         'Use the fold gutter to collapse blocks. Macro expansions, directives, and code excluded by conditional compilation are marked in the editor; choose Preprocessed to compare your source with the source produced by preprocessing.',
-        'In an exercise, only the regions chosen by its author may be editable. PLIVET keeps the rest of the program fixed.',
+        'In an exercise, only the regions chosen by its author may be editable. c-visualizer keeps the rest of the program fixed.',
+      ],
+    },
+    {
+      title: 'Use editor tooltips',
+      items: [
+        'Pause the pointer over a name or marked part of the source to open its tooltip. A tooltip describes the smallest relevant item under the pointer, so hovering an operator or subexpression can give a more specific answer than hovering the surrounding statement.',
+        'Before a run, tooltips explain declarations and C constructs. They can show types, qualifiers, storage classes, parameters, control-flow clauses, conversions, and where break, continue, or return transfers control. Common library functions show their signature and purpose.',
+        'While stopped on a debug step, a variable tooltip shows its current type, value, and address; a pointer also shows the object and value it points to. Tooltips on the current expression show values already produced, and control-flow tooltips explain conditions, selected branches, loop iterations, arguments, and return values for that step.',
+        'Preprocessor tooltips show macro-expansion chains and definition lines, whether a conditional branch was compiled or skipped, and which source was excluded. Hover over an error or teaching marker to read the diagnostic and any available library help or suggested fix.',
+        'Hovering a live variable also highlights the matching declaration and memory row on the canvas. Alt-click a name to pin its tooltip as a live watch; Alt-click it again to remove the watch. A pinned watch updates at every step and says when the name is outside the currently executing scope.',
       ],
     },
     {
@@ -122,9 +145,17 @@ const strings = {
     {
       title: 'Explore the visualization',
       items: [
-        'The canvas explains the current statement and expression, shows the call stack, and lays out registers, program memory, the heap, and stack frames. Pointer arrows connect addresses to the objects they name.',
-        'Click a section heading, memory-region heading, or aggregate row to collapse or expand it. Open View to show or hide the statement, call stack, expression, memory, mutation history, or individual memory regions.',
-        'Hover over a variable in either the editor or canvas to highlight the matching declaration and memory row. Variables over time lists writes newest first, including the frame, old value, new value, and source line.',
+        'The canvas is arranged from cause to state: Statement and Call stack appear first, Expression expansion follows them, Memory shows the resulting program state, and Variables over time records the writes that produced it.',
+        'Statement names the current C construct and source line, then explains what the statement is doing. Depending on the step, it shows clauses, condition results, the selected branch, assignments, arguments, return values, conversions, and values produced so far.',
+        'Call stack lists every active function call with the current call first. Each entry can show the line it was called from, the argument value assigned to each parameter, and how many times a recursive function has been entered.',
+        'Expression expansion draws the active expression as a tree of operands and operators. Values appear on names and on subexpressions as they become available, making the evaluation order and intermediate results visible.',
+        'Memory is a map of the program’s address space. Every object row shows its address, name, value, type, and size when available. Pointer arrows start at pointer values and end at the addressed object; arrays, structures, unions, and pointed-to objects can be expanded into their parts.',
+        'Registers contains variables declared with the register storage class. Stack contains parameters and automatic local variables grouped by active function frame, while Heap contains storage obtained dynamically with functions such as malloc.',
+        'Initialized data contains initialized writable global and static objects, and Zero-initialized data (BSS) contains global and static objects that begin as zero. Read-only memory contains constants and string literals, while Text contains the program’s functions and their addresses.',
+        'Variables over time lists writes newest first. Its columns identify the function frame and object, the value before and after the write, and the source line responsible, which helps trace where an unexpected value came from.',
+        'Hover over a variable in either the editor or canvas to highlight the matching declaration and memory row. Pointer arrows and matching highlights connect the source-level name to the object represented in memory.',
+        'Click a section heading to collapse or expand that whole component. A memory-region heading folds one address-space region, and an aggregate row folds or expands the array, structure, union, or pointed-to object beneath it.',
+        'Open View to control what occupies the canvas workspace. Under Sections, show or hide Statement, Call stack, Expression expansion, Memory, and Variables over time; under Memory regions, show or hide Registers, Stack, Heap, Zero-initialized data, Initialized data, Read-only memory, and Text independently.',
         'Use the canvas magnifiers to zoom its drawing, and scroll the canvas when the visualization is larger than its window.',
       ],
     },
@@ -140,7 +171,22 @@ const strings = {
       title: 'Adjust the workspace',
       items: [
         'The text-size buttons change the editor font, and the theme menu switches between light and dark. Canvas zoom is controlled separately in the canvas toolbar.',
-        'Drag the handles between the editor, console, columns, and canvas to resize them. With a handle focused, use the arrow keys to resize; press Enter or double-click it to restore the default size.',
+        'Drag the handles between the editor, console, columns, and canvas to resize them, or double-click a handle to restore its default size.',
+      ],
+    },
+    {
+      title: 'Keyboard and mouse shortcuts',
+      items: [
+        'Ctrl stands for Command on macOS. During a session the editor is read-only, so the editing shortcuts apply before a run starts and after it stops.',
+        'Editing follows the usual conventions: Ctrl+Z undoes, Ctrl+Y redoes (Command+Shift+Z on macOS), Ctrl+A selects the whole program, Ctrl+/ comments or uncomments the selected lines, and Tab and Shift+Tab indent and unindent.',
+        'Ctrl+I grows the selection to the enclosing expression, then the statement, the block, and the function, which shows how the program nests. Alt+Up and Alt+Down move the current line, adding Shift copies it, and Ctrl+Shift+K deletes it.',
+        'Ctrl+Space opens the completion list; Up and Down choose a completion, Enter accepts it, and Escape dismisses the list.',
+        'Ctrl+Shift+[ folds the block at the cursor and Ctrl+Shift+] unfolds it; on macOS these are Command+Alt+[ and Command+Alt+]. Ctrl+Alt+[ and Ctrl+Alt+] fold and unfold the whole file.',
+        'F12 goes to the declaration of the name at the cursor. Ctrl-click a name does the same with the pointer, and holding the key underlines the names that can be followed.',
+        'Alt-click a name pins its tooltip as a live watch, and Alt-click it again removes the watch. Clicking the breakpoint gutter sets or removes a breakpoint.',
+        'In the console input field, Enter submits the line and Shift+Enter adds another line before submitting.',
+        'Resize handles take keyboard focus: with a handle focused, the arrow keys resize the panes it separates and Enter restores the default size.',
+        'Escape closes this dialog.',
       ],
     },
   ],

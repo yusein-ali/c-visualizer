@@ -95,7 +95,7 @@ describe('the instructions', () => {
     dialog.open();
 
     const intro = dialog.root.querySelector('.plivet-help__intro');
-    const headings = dialog.root.querySelectorAll('.plivet-help__body h3');
+    const headings = dialog.root.querySelectorAll('.plivet-help__body > h3');
     const items = dialog.root.querySelectorAll('.plivet-help__body li');
     expect(intro?.textContent).toBe(strings.howToIntro);
     expect(headings).toHaveLength(strings.howToSections.length);
@@ -104,6 +104,12 @@ describe('the instructions', () => {
     );
     expect(headings[0].textContent).toBe(strings.howToSections[0].title);
     expect(items[0].textContent).toBe(strings.howToSections[0].items[0]);
+    expect(dialog.root.textContent).toContain(strings.howToAttribution.current);
+    expect(
+      dialog.root.querySelector<HTMLAnchorElement>(
+        '.plivet-help__attribution a'
+      )?.href
+    ).toBe('https://github.com/RYOSKATE/PLIVET');
   });
 
   it('closes from the button', () => {
