@@ -77,3 +77,4 @@ typings/
 .cache-loader/
 
 dist/
+**/.DS_Store
