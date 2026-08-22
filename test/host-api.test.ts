@@ -79,6 +79,28 @@ describe('the host integration API', () => {
     plivet.destroy();
   });
 
+  it('reports the final source snapshot when its window is closing', () => {
+    const parent = document.createElement('div');
+    document.body.appendChild(parent);
+    const onWindowClose = jest.fn();
+    const plivet = new Plivet(parent, {
+      files: FILES,
+      entry: 'main.c',
+      onWindowClose,
+    });
+    const view = editorView(plivet);
+    view.dispatch({ changes: { from: 0, insert: '// final\n' } });
+
+    window.dispatchEvent(new Event('pagehide'));
+
+    expect(onWindowClose).toHaveBeenCalledTimes(1);
+    expect(onWindowClose).toHaveBeenCalledWith(plivet.sourceSnapshot());
+
+    plivet.destroy();
+    window.dispatchEvent(new Event('pagehide'));
+    expect(onWindowClose).toHaveBeenCalledTimes(1);
+  });
+
   it('updates the complete file set and refuses invalid replacements', async () => {
     const parent = document.createElement('div');
     document.body.appendChild(parent);
@@ -88,7 +110,7 @@ describe('the host integration API', () => {
       plivet.updateFiles(
         [
           { path: 'one.c', text: 'int one;' },
-          { path: 'two.c', text: 'int two;' },
+          { path: 'two.c', text: 'int main(void) { return 0; }' },
         ],
         'two.c'
       )

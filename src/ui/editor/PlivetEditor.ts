@@ -26,7 +26,7 @@ import {
   indentWithTab,
 } from '@codemirror/commands';
 import { autocompletion, CompletionSource } from '@codemirror/autocomplete';
-import { cpp } from '@codemirror/lang-cpp';
+import { cpp, cppLanguage } from '@codemirror/lang-cpp';
 import { DebugExtensions, DebugExtensionOptions } from './debugExtensions';
 import { excludedRegionFolding } from './folding';
 import { unprotected } from './protected';
@@ -89,6 +89,29 @@ const defaults = {
   autocomplete: true,
   dark: false,
   fontSize: 14,
+};
+
+/** True only when the C/C++ syntax tree contains a definition of `main`. */
+export const containsMainDefinition = (code: string): boolean => {
+  let found = false;
+  cppLanguage.parser.parse(code).iterate({
+    enter(node) {
+      if (node.name !== 'FunctionDefinition') {
+        return;
+      }
+      const declarator = node.node.getChild('FunctionDeclarator');
+      const identifier = declarator?.getChild('Identifier');
+      if (
+        identifier !== null &&
+        typeof identifier !== 'undefined' &&
+        code.slice(identifier.from, identifier.to) === 'main' &&
+        node.node.getChild('CompoundStatement') !== null
+      ) {
+        found = true;
+      }
+    },
+  });
+  return found;
 };
 
 export class PlivetEditor {

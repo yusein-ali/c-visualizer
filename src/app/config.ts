@@ -129,6 +129,7 @@ const viewsOf = (value: unknown): ViewSelection | undefined => {
     'statement',
     'callStack',
     'expression',
+    'variables',
     'memory',
     'mutations',
   ] as const) {

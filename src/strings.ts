@@ -59,6 +59,7 @@ const strings = {
   graphViewSections: 'Sections',
   // The state views consolidated into the canvas workspace.
   viewCallStack: 'Call stack',
+  viewVariables: 'Variables',
   viewMutations: 'Object writes over time',
   viewNothingRunning: 'no function invocation is active',
   viewNothingWritten: 'no object has been written yet',
@@ -80,6 +81,11 @@ const strings = {
   memoryColumnName: 'Name',
   memoryColumnValue: 'Value',
   memoryEmptySegment: 'empty at this step',
+  variableContextFile: 'File',
+  variableContextFunction: 'Function',
+  variableColumnSegment: 'Memory segment',
+  variableNoContext: 'none',
+  variableNoneActive: 'no active variables in this context',
   // The JointJS sections, read as cause then state: the operation and active
   // call, its expression, and what the program holds after it.
   graphMemoryHeading: 'Memory',
@@ -164,18 +170,19 @@ const strings = {
     {
       title: 'Explore the visualization',
       items: [
-        'The canvas is arranged from operation to state: Statement and Call stack appear first, Expression expansion follows them, Memory shows the resulting program state, and Object writes over time records the stores that produced it.',
+        'The canvas is arranged from operation to state: Statement and Call stack appear first, Expression expansion follows them, Variables summarizes the active file and function context, Memory shows the resulting program state, and Object writes over time records the stores that produced it.',
         'Statement names the current C language construct and source line, then explains what it is doing. Depending on the step, it shows clauses, controlling-expression results, the selected branch, assignment expressions, arguments, return values, conversions, and expression results produced so far. A switch statement lists its case and default labels; after its controlling expression is evaluated, the explanation identifies the matching label and reports observed fall-through from an earlier label.',
         'Call stack lists active function invocations with the current invocation first. Each entry can show the source line containing the call, each argument value assigned to its corresponding parameter, and the number of active invocations of a recursive function.',
         'Expression expansion draws the active expression as a tree of operands and operators. Each available result appears in its own Current value strip, making the interpreter’s evaluation order and intermediate results visible.',
         'Each argument expression is drawn beneath its function-call operator and annotated with the corresponding parameter. When a statement contains a nested call with a computed argument, that call is also drawn below the main expansion, rooted at the function-call operator and headed by the function declaration. These sections follow the Expression expansion switch and each collapses on its own heading.',
+        'Variables is a debugger-style table for the current file and function. It lists file-scope objects and objects in the executing function by name and value, together with each object’s implementation-model memory segment and address. Variables in suspended caller frames remain visible in Memory and Call stack rather than appearing in the current function’s table.',
         'Memory is the visualizer’s implementation model of the program’s address space; C does not require these regions. Every object row shows its address, identifier, stored value, type, and size when available. Pointer arrows start at pointer values and end at the objects they point to; array elements, structure and union members, and pointed-to objects can be expanded as subobjects.',
         'The register-class objects region contains objects declared with the register storage-class specifier; C does not require such an object to occupy a processor register. Automatic storage (stack) contains parameters and other objects with automatic storage duration, grouped by active function invocation. Allocated storage (heap) contains storage returned by allocation functions such as malloc.',
         'Initialized static storage and Zero-initialized static storage (BSS) are implementation-model regions for writable objects with static storage duration. Read-only storage model contains const-qualified objects with static storage duration and string literals. Function code (text) represents program function definitions, the supported stdio routines referenced by the program, and their illustrative addresses. Program-function sizes are estimates of 16 bytes per parsed expression, with a 16-byte minimum per function; runtime-backed stdio routines use the 16-byte minimum. These are not compiled object-code sizes.',
         'Object writes over time lists stores newest first. Its columns identify the function invocation and object, the stored values before and after the write, and the responsible source line.',
         'Hover over an object identifier in either the editor or canvas to highlight the matching declaration and object row. Pointer arrows and matching highlights connect a source-level identifier to the object represented in memory.',
         'Click a section heading to collapse or expand that component. An implementation-memory-region heading folds one region, and an expandable row folds or expands the array elements, structure or union members, or pointed-to object beneath it.',
-        'Open View to control what occupies the canvas workspace. Under Sections, show or hide Statement, Call stack, Expression expansion, Memory, and Object writes over time; under Implementation memory regions, show or hide each modeled region independently.',
+        'Open View to control what occupies the canvas workspace. Under Sections, show or hide Statement, Call stack, Expression expansion, Variables, Memory, and Object writes over time; under Implementation memory regions, show or hide each modeled region independently.',
         'Use the canvas magnifiers to zoom its drawing, and scroll the canvas when the visualization is larger than its window.',
       ],
     },
@@ -315,58 +322,6 @@ const strings = {
   branchSkipped: 'this conditional-inclusion group is inactive',
   definedOnLine: 'defined on line',
   excludedLine: 'excluded by conditional inclusion',
-  sourceCode: String.raw`#include <stdio.h>
-#include <stdlib.h>
-int recursiveToThree(int n){
-  printf("%d th\n", n + 1);
-  if(n < 3){
-      int r = recursiveToThree(n + 1);
-      n = r;
-  }
-  return n;
-}
-int main(void){
-  int n = 0;//object declaration
-
-  n = recursiveToThree(0);//recursive function call
-
-  int arr[5] = {1, 2, 3};//array object
-
-  int* ptr = &arr[2];//object with pointer type
-  *ptr = 5;
-
-  //allocated storage
-  int* d_arry = malloc(sizeof(int) * 3);
-
-  //array of pointers to allocated storage
-  int* pd_arr[2];
-  pd_arr[0] = malloc(sizeof(int) * 2);
-  pd_arr[1] = malloc(sizeof(int) * 2);
-
-  printf("Hello,world!\n");//write to the standard output stream
-
-  free(pd_arr[0]);//pd_arr[1] still points to allocated storage
-
-  //File output
-  {
-    FILE* fp=NULL;
-    fp = fopen("c-visualizer.txt", "w");
-    fputs("c-visualizer", fp);
-    fclose(fp);
-  }
-
-  //File input
-  {
-    FILE* fp=NULL;
-    char buf[13];
-    fp = fopen("c-visualizer.txt", "r");
-    while(fgets(buf,13,fp) != NULL) {
-      printf("%s",buf);
-    }
-    fclose(fp);
-  }
-  return 0;
-}`,
 };
 
 export default strings;

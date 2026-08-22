@@ -23,7 +23,12 @@ export type {
 export type { LintDiagnostic as LintDiagnosticModel } from '../interpreter/TeachingLint';
 export type { RuntimeDiagnostic as RuntimeDiagnosticModel } from '../interpreter/RuntimeDiagnostic';
 export { extractModel } from './extractModel';
-export { extractVariables, formatAddress, narrowToType } from './variables';
+export {
+  extractVariables,
+  formatAddress,
+  memoryRegionOf,
+  narrowToType,
+} from './variables';
 export { layout, connectionColor } from './layout';
 export {
   MEMORY_CAPTION_HEIGHT,
@@ -95,5 +100,6 @@ export type {
   PointerModel,
   StackModel,
   StepModel,
+  StepContextModel,
   VariableModel,
 } from './model';

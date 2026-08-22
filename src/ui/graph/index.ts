@@ -23,3 +23,5 @@ export type {
 export { statementCard } from './statementCard';
 export type { StatementCardModel, StatementCardRow } from './statementCard';
 export { viewPanel } from './ViewPanel';
+export { variableContextLabel, variableTableRows } from './variableTable';
+export type { VariableTableRow } from './variableTable';

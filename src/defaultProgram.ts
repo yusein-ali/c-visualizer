@@ -1,133 +1,29 @@
-/*
- * PLIVET C construct tour
+import type { SourceFile } from './core';
+
+/**
+ * The construct tour opened by a standalone visualizer.
  *
- * Paste this file into the editor, choose Start, and use Step/Step All.
- * Useful places for breakpoints are marked with "BREAKPOINT" below.
+ * A function returns fresh objects so editing one visualizer's tabs can never
+ * change what a later instance opens with.
+ */
+export const defaultProgram = (): {
+  files: SourceFile[];
+  entry: string;
+} => ({
+  entry: 'main.c',
+  files: [
+    {
+      path: 'main.c',
+      text: String.raw`/*
+ * c-visualizer C construct tour
  *
- * The program deliberately exercises every source construct currently named
- * by the editor/canvas, plus every major runtime shape:
- *
- *   declarations: variables, functions, typedefs, enum constants, and fields
- *   control flow: if/else, for, while, do-while, switch, break, continue,
- *                 calls, recursion, and return
- *   expressions: assignment, compound assignment, cast, and ternary
- *   memory: globals, static/const/register objects, stack frames, arrays,
- *           structs, unions, enums, strings, pointers, and heap allocations
- *   callable data: direct calls, callbacks, typedef'd function pointers,
- *                  arrays of function pointers, and a function-pointer field
- *   input/output: scanf plus a write/read round trip through a virtual file
- *   preprocessing: object/function macros, nested expansion, stringification,
- *                  token pasting, variadics, conditionals, and __LINE__
+ * Choose Start, then Step or Continue. The program pauses at scanf; type an
+ * integer in the Console and press Enter. Useful breakpoints are marked below.
  */
 
-#include <stdio.h>
-#include <stdlib.h>
+#include "tour.h"
 
-#define ITEM_COUNT 3
-#define DOUBLE(x) ((x) * 2)
-#define SCALED_COUNT DOUBLE(ITEM_COUNT)
-#define STRINGIFY_RAW(x) #x
-#define STRINGIFY(x) STRINGIFY_RAW(x)
-#define JOIN_RAW(a, b) a##b
-#define JOIN(a, b) JOIN_RAW(a, b)
-#define LOG(fmt, ...) printf(fmt, ##__VA_ARGS__)
-#define TOUR_LEVEL 2
-#define ENABLE_CALLBACKS
-#define MULTILINE_VALUE \
-  (1 + 3)
-
-#ifdef ENABLE_CALLBACKS
-#define CALLBACKS_AVAILABLE 1
-#endif
-
-#ifndef DISABLED_FEATURE
-#define FALLBACK_VALUE 0
-#endif
-
-#if TOUR_LEVEL > 1 && defined(ENABLE_CALLBACKS)
-#define SELECTED_BONUS 5
-#elif TOUR_LEVEL == 1
-#define SELECTED_BONUS 2
-#else
-#define SELECTED_BONUS 0
-#endif
-
-#if 0
-This intentionally invalid C is removed before parsing.
-#endif
-
-enum Mode {
-  MODE_IDLE,
-  MODE_RUN = 3,
-  MODE_DONE
-};
-
-typedef enum Mode Mode;
-
-union Number {
-  int whole;
-  char byte;
-};
-
-struct Pair {
-  int left;
-  int right;
-};
-
-typedef int (*BinaryOperation)(int, int);
-
-struct Calculator {
-  BinaryOperation operation;
-  int accumulator;
-};
-
-typedef struct Snapshot {
-  struct Pair pair;
-  union Number number;
-  Mode mode;
-  int samples[ITEM_COUNT];
-} Snapshot;
-
-int zero_global;
-int initialized_global = 7;
-static int file_static = 8;
-const int read_only_global = 9;
-volatile int signal_flag = 0;
-_Atomic(int) atomic_count = 0;
-
-static int add(int a, int b) {
-  return a + b;
-}
-
-int subtract(int a, int b) {
-  return a - b;
-}
-
-int multiply(int a, int b) {
-  return a * b;
-}
-
-int apply(BinaryOperation operation, int a, int b) {
-  return operation(a, b);
-}
-
-struct Pair make_pair(int left, int right) {
-  struct Pair result = {0, 0};
-  result.left = left;
-  result.right = right;
-  return result;
-}
-
-int factorial(int n) {
-  if (n <= 1) {
-    return 1;
-  }
-  return n * factorial(n - 1);
-}
-
-BinaryOperation global_operation = add;
-
-int main() {
+int main(void) {
   auto int automatic = 1;
   register int fast = 2;
   static int visits = 0;
@@ -218,6 +114,7 @@ int main() {
   int snapshot_left = snapshot.pair.left;
   int heap_left = heap_pair->left;
   int heap_right = heap_pair->right;
+  int file_static_display = file_static_value();
 
   /* scanf pauses Continue until a line is submitted in the Console. */
   int entered = 0;
@@ -251,8 +148,9 @@ int main() {
   printf("calls=%d/%d/%d recursive=%d\n",
          direct_result, callback_result, member_result, recursive_result);
   printf("memory=%d/%d/%d/%d/%d/%d/%d text=%s grid=%d union=%d/%c\n",
-         automatic, fast, visits, zero_global, initialized_global, file_static,
-         read_only_global, word, grid[1][1], number.whole, number.byte);
+         automatic, fast, visits, zero_global, initialized_global,
+         file_static_display, read_only_global, word, grid[1][1],
+         number.whole, number.byte);
   printf("aggregate=%d/%d/%d product=%d enum=%d heap=%d->%d macro=%d/%d\n",
          snapshot_left, copied.right, member_display, product, mode,
          heap_left, heap_right, named_value, macro_flags);
@@ -263,4 +161,144 @@ int main() {
 
 #undef ENABLE_CALLBACKS
   return 0;
+}`,
+    },
+    {
+      path: 'tour.h',
+      text: String.raw`#ifndef C_VISUALIZER_TOUR_H
+#define C_VISUALIZER_TOUR_H
+
+#include <stdio.h>
+#include <stdlib.h>
+
+#define ITEM_COUNT 3
+#define DOUBLE(x) ((x) * 2)
+#define SCALED_COUNT DOUBLE(ITEM_COUNT)
+#define STRINGIFY_RAW(x) #x
+#define STRINGIFY(x) STRINGIFY_RAW(x)
+#define JOIN_RAW(a, b) a##b
+#define JOIN(a, b) JOIN_RAW(a, b)
+#define LOG(fmt, ...) printf(fmt, ##__VA_ARGS__)
+#define TOUR_LEVEL 2
+#define ENABLE_CALLBACKS
+#define MULTILINE_VALUE \
+  (1 + 3)
+
+#ifdef ENABLE_CALLBACKS
+#define CALLBACKS_AVAILABLE 1
+#endif
+
+#ifndef DISABLED_FEATURE
+#define FALLBACK_VALUE 0
+#endif
+
+#if TOUR_LEVEL > 1 && defined(ENABLE_CALLBACKS)
+#define SELECTED_BONUS 5
+#elif TOUR_LEVEL == 1
+#define SELECTED_BONUS 2
+#else
+#define SELECTED_BONUS 0
+#endif
+
+#if 0
+This intentionally invalid C is removed before parsing.
+#endif
+
+enum Mode {
+  MODE_IDLE,
+  MODE_RUN = 3,
+  MODE_DONE
+};
+
+typedef enum Mode Mode;
+
+union Number {
+  int whole;
+  char byte;
+};
+
+struct Pair {
+  int left;
+  int right;
+};
+
+typedef int (*BinaryOperation)(int, int);
+
+struct Calculator {
+  BinaryOperation operation;
+  int accumulator;
+};
+
+typedef struct Snapshot {
+  struct Pair pair;
+  union Number number;
+  Mode mode;
+  int samples[ITEM_COUNT];
+} Snapshot;
+
+extern int zero_global;
+extern int initialized_global;
+extern const int read_only_global;
+extern volatile int signal_flag;
+extern _Atomic(int) atomic_count;
+extern BinaryOperation global_operation;
+
+int add(int a, int b);
+int subtract(int a, int b);
+int multiply(int a, int b);
+int apply(BinaryOperation operation, int a, int b);
+struct Pair make_pair(int left, int right);
+int factorial(int n);
+int file_static_value(void);
+
+#endif`,
+    },
+    {
+      path: 'tour.c',
+      text: String.raw`#include "tour.h"
+
+int zero_global;
+int initialized_global = 7;
+static int file_static = 8;
+const int read_only_global = 9;
+volatile int signal_flag = 0;
+_Atomic(int) atomic_count = 0;
+
+int add(int a, int b) {
+  return a + b;
 }
+
+int subtract(int a, int b) {
+  return a - b;
+}
+
+int multiply(int a, int b) {
+  return a * b;
+}
+
+int apply(BinaryOperation operation, int a, int b) {
+  return operation(a, b);
+}
+
+struct Pair make_pair(int left, int right) {
+  struct Pair result = {0, 0};
+  result.left = left;
+  result.right = right;
+  return result;
+}
+
+int factorial(int n) {
+  if (n <= 1) {
+    return 1;
+  }
+  return n * factorial(n - 1);
+}
+
+int file_static_value(void) {
+  return file_static;
+}
+
+BinaryOperation global_operation = add;`,
+    },
+  ],
+});

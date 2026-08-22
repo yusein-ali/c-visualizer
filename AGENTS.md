@@ -188,8 +188,8 @@ total on purpose; the comment in that file says what went wrong when it was not.
   to another's programs.
 - **UI text** — one English table in [src/strings.ts](src/strings.ts), read
   directly (`strings.howToUse`). Keys assembled at runtime — `construct${kind}`,
-  `${signal}${command}` — go through `stringFor(key)`. The starter program is
-  the `sourceCode` entry in that same table.
+  `${signal}${command}` — go through `stringFor(key)`. The three-file starter
+  program is returned by [src/defaultProgram.ts](src/defaultProgram.ts).
 - **Theming** — `'light' | 'dark'`, chosen from a `select` in the control bar and
   broadcast over `changeTheme`. The shell flips `plivet--dark` on its root, where
   `--plivet-surface`, `--plivet-ink`, `--plivet-line` and the three

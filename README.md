@@ -257,17 +257,22 @@ builds anything:
 An element with no `config` attribute is read for its own text instead, so the
 JSON may be written as the element's content where that is easier.
 
+With no source configuration, the standalone visualizer opens the S9 construct
+tour as three tabs: `main.c`, `tour.h`, and `tour.c`. It pauses for one integer
+through `scanf`, then writes and reads `c-visualizer.txt` in the browser-side
+virtual file system.
+
 | Field             | What it says                                                                                                                                                                                                               |
 | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `theme`           | `"light"` or `"dark"`. The switch in the control bar still changes it afterwards.                                                                                                                                          |
 | `sourceCode`      | The program the editor opens with.                                                                                                                                                                                         |
 | `files`           | `{ "path", "text" }` objects, drawn as tabs over the editor.                                                                                                                                                               |
-| `entry`           | Which source file is placed first in the interpreter's combined input. Defaults to the first.                                                                                                                              |
+| `entry`           | Which source file opens as the runnable entry. Headers are composed before it, followed by the remaining implementation files. Defaults to the first.                                                                      |
 | `editableRegions` | `{ "from", "to" }` offsets the reader may type in. Everything outside them is fixed.                                                                                                                                       |
 | `features`        | `preprocessor` - the button showing the preprocessed source; `loadFile` - the upload panel of data files a program can `fopen`.                                                                                            |
 | `support-build`   | Whether to construct the host-backed Build button. A programmatic host must also provide at least one `diagnosticProviders` callback; JSON cannot contain callbacks.                                                       |
 | `licenses`        | Where the footer's third-party licence report is. The deployed bundle points at its own copy; a host that publishes one elsewhere names it here.                                                                           |
-| `views`           | Which canvas sections start visible: `statement`, `callStack`, `expression`, `memory`, `mutations`, and `regions` for each implementation-memory region (`text`, `readOnly`, `data`, `bss`, `heap`, `stack`, `registers`). |
+| `views`           | Which canvas sections start visible: `statement`, `callStack`, `expression`, `variables`, `memory`, `mutations`, and `regions` for each implementation-memory region (`text`, `readOnly`, `data`, `bss`, `heap`, `stack`, `registers`). |
 
 Everything is optional, and a feature or a view left out is on. The View panel
 over the canvas still holds every switch, so `views` says where a reader
@@ -329,15 +334,17 @@ automatically. Providers may also be added later with
 
 For host-side Save/Update controls, `sourceSnapshot()` returns every modified
 file, `onSourcesChanged(callback)` subscribes to changes, and
-`updateFiles(files, entry)` replaces the editor's complete source set. The
-callbacks and provider registry belong to each visualizer instance, so two
-blocks on one page remain independent.
+`updateFiles(files, entry)` replaces the editor's complete source set. A popup
+or other independently closing visualizer can pass `onWindowClose(snapshot)`
+to synchronously receive its final source during the window's `pagehide`
+lifecycle. The callbacks and provider registry belong to each visualizer
+instance, so two blocks on one page remain independent.
 
 During browser execution, all named source files are concatenated into one
-interpreter input, with `entry` first; unicoen parses the resulting source as a
-single translation unit. Step and step-back
-locations are mapped to file-local lines, and the matching editor tab opens
-automatically. This supports ordinary teaching examples whose functions are
-split across files. It does not translate the files as separate translation
-units or link object files, so separate-translation-unit
-features such as duplicate file-local `static` names are not isolated.
+interpreter input: headers first, then `entry`, then the remaining
+implementations. unicoen parses the result as a single translation unit. Step
+and step-back locations are mapped to file-local lines, and the matching editor
+tab opens automatically. This supports ordinary teaching examples whose
+functions are split across files. It does not translate the files as separate
+translation units or link object files, so separate-translation-unit features
+such as duplicate file-local `static` names are not isolated.

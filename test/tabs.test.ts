@@ -66,6 +66,24 @@ describe('the tab strip', () => {
     host.remove();
   });
 
+  it('does not draw an entry triangle for an ineligible file', () => {
+    const { host, tabs } = mounted();
+    tabs.setTabs([
+      { path: 'main.c', entry: true, active: true },
+      {
+        path: 'values.h',
+        entry: false,
+        active: false,
+        canBeEntry: false,
+      },
+    ]);
+    const header = tabsOf(tabs)[1];
+    expect(header.querySelector('.plivet-tabs__entry')).toBeNull();
+    expect(selectIn(header).title).toBe('');
+    tabs.destroy();
+    host.remove();
+  });
+
   it('reports the file a reader picked', () => {
     const picked: string[] = [];
     const { host, tabs } = mounted({
@@ -120,6 +138,20 @@ describe('the tab strip', () => {
 });
 
 describe('the protocol', () => {
+  it('returns inactive preprocessing regions without waiting for a syntax check', async () => {
+    const response = await new Server().send({
+      controlEvent: 'Preprocess',
+      sourcecode: '#if 0\nthis need not parse ;;;\n#endif\nint main(void) {}',
+    });
+
+    expect(response.expansions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'excluded', line: 2 }),
+      ])
+    );
+    expect(response.constructs).toBeUndefined();
+  });
+
   it('compiles the entry file rather than the first thing it is handed', () => {
     const server = new Server();
     const log = console.log;
@@ -155,5 +187,56 @@ describe('the protocol', () => {
         console.log = log;
         expect(response.errors).toEqual([]);
       });
+  });
+
+  it('keeps the composed macro definition map during a syntax check', async () => {
+    const response = await new Server().send({
+      controlEvent: 'SyntaxCheck',
+      sourcecode: '#include "values.h"\nint main(void) { return VALUE; }',
+      files: [
+        {
+          path: 'main.c',
+          text: '#include "values.h"\nint main(void) { return VALUE; }',
+        },
+        { path: 'values.h', text: '#define VALUE 7' },
+      ],
+      entry: 'main.c',
+      active: 'main.c',
+    });
+
+    expect(response.programExpansions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'macro',
+          name: 'VALUE',
+          definedAt: 1,
+        }),
+      ])
+    );
+  });
+
+  it('keeps composed enum declarations during a syntax check', async () => {
+    const response = await new Server().send({
+      controlEvent: 'SyntaxCheck',
+      sourcecode: '#include "mode.h"\nint main(void) { return MODE_RUN; }',
+      files: [
+        {
+          path: 'main.c',
+          text: '#include "mode.h"\nint main(void) { return MODE_RUN; }',
+        },
+        { path: 'mode.h', text: 'enum Mode { MODE_IDLE, MODE_RUN = 3 };' },
+      ],
+      entry: 'main.c',
+      active: 'main.c',
+    });
+
+    expect(response.programConstructs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'enumerator',
+          enumerator: expect.objectContaining({ identifier: 'MODE_RUN' }),
+        }),
+      ])
+    );
   });
 });

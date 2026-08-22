@@ -159,6 +159,105 @@ describe('preprocessor marks', () => {
     }).state;
     expect(state.field(expansionField).size).toBe(2);
   });
+
+  it('gives source excluded by preprocessing its inactive class', () => {
+    const state = stateWith(expansionField).update({
+      effects: [
+        setExpansions.of([
+          {
+            kind: 'excluded',
+            line: 2,
+            column: 0,
+            length: '  int n = 0;'.length,
+            name: '#if',
+            text: '',
+          },
+        ]),
+      ],
+    }).state;
+    const classes: string[] = [];
+    state
+      .field(expansionField)
+      .between(0, state.doc.length, (_from, _to, decoration) => {
+        classes.push(decoration.spec.class);
+      });
+
+    expect(classes).toHaveLength(2);
+    expect(classes).toEqual(
+      expect.arrayContaining(['plivet-excluded-region', 'plivet-inactive-line'])
+    );
+  });
+
+  it('gives directives inside an excluded branch the same inactive marks', () => {
+    const state = stateWith(expansionField).update({
+      effects: [
+        setExpansions.of([
+          {
+            kind: 'directive',
+            line: 2,
+            column: 0,
+            length: '  int n = 0;'.length,
+            name: '#define',
+            text: 'N 1',
+            active: false,
+          },
+        ]),
+      ],
+    }).state;
+    const classes: string[] = [];
+    state
+      .field(expansionField)
+      .between(0, state.doc.length, (_from, _to, decoration) => {
+        classes.push(decoration.spec.class);
+      });
+
+    expect(classes).toHaveLength(2);
+    expect(classes).toEqual(
+      expect.arrayContaining(['plivet-excluded-region', 'plivet-inactive-line'])
+    );
+  });
+
+  it('marks conditional arguments with expression token roles', () => {
+    const source = '#if LEVEL > 1 && defined(FEATURE)';
+    const state = EditorState.create({
+      doc: source,
+      extensions: [expansionField],
+    }).update({
+      effects: [
+        setExpansions.of([
+          {
+            kind: 'directive',
+            line: 1,
+            column: 0,
+            length: source.length,
+            name: '#if',
+            text: 'LEVEL > 1 && defined(FEATURE)',
+            active: true,
+            taken: false,
+          },
+        ]),
+      ],
+    }).state;
+    const tokens: [string, string][] = [];
+    state
+      .field(expansionField)
+      .between(0, state.doc.length, (from, to, decoration) => {
+        if (decoration.spec.class.startsWith('plivet-preprocessor-')) {
+          tokens.push([state.sliceDoc(from, to), decoration.spec.class]);
+        }
+      });
+
+    expect(tokens).toEqual([
+      ['LEVEL', 'plivet-preprocessor-macro'],
+      ['>', 'plivet-preprocessor-operator'],
+      ['1', 'plivet-preprocessor-number'],
+      ['&&', 'plivet-preprocessor-operator'],
+      ['defined', 'plivet-preprocessor-keyword'],
+      ['(', 'plivet-preprocessor-punctuation'],
+      ['FEATURE', 'plivet-preprocessor-macro'],
+      [')', 'plivet-preprocessor-punctuation'],
+    ]);
+  });
 });
 
 describe('step highlight', () => {

@@ -401,8 +401,22 @@ export interface VariableModel {
   type: string;
   value: string;
   address: number;
+  /** The implementation-model memory band holding this object. */
+  region: MemoryRegion;
+  /** The interpreter frame that owns it (`GLOBAL` for file-scope objects). */
+  frame: string;
+  /** Whether its function frame is the one currently executing. */
+  active: boolean;
   /** For a pointer, the variable it points at. */
   target?: { name: string; value: string };
+}
+
+/** The source and function whose next statement is being shown. */
+export interface StepContextModel {
+  /** The visible source path, filled when the composed source is mapped back. */
+  file: string | null;
+  /** The innermost active function, or null before/after execution. */
+  function: string | null;
 }
 
 /**
@@ -434,6 +448,8 @@ export interface StepModel {
   callExpansions: CallExpansionModel[];
   /** Every variable in scope, innermost frame last. */
   variables: VariableModel[];
+  /** The file and function context that gives those variables meaning. */
+  context: StepContextModel;
   /** What the statement about to run reads or assigns, in source order. */
   inlineValues: InlineValueModel[];
   /** What the constructs the step is inside are doing, for the tooltips. */
@@ -459,6 +475,7 @@ export const emptyStepModel = (): StepModel => ({
   expression: null,
   callExpansions: [],
   variables: [],
+  context: { file: null, function: null },
   inlineValues: [],
   constructStates: [],
   frames: [],

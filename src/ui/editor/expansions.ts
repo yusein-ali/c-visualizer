@@ -13,37 +13,116 @@ export const setExpansions = StateEffect.define<Expansion[]>();
 
 // `enum` falls to the same grey as an excluded region, which is where Ace's
 // three-way choice of style left it. The tooltip still names what it became.
-const markFor = (kind: Expansion['kind']) =>
+const isInactive = (expansion: Expansion): boolean =>
+  expansion.kind === 'excluded' ||
+  (expansion.kind === 'directive' && expansion.active === false);
+
+const markFor = (expansion: Expansion) =>
   Decoration.mark({
     class:
-      kind === 'macro'
+      expansion.kind === 'macro'
         ? 'plivet-macro-expansion'
-        : kind === 'directive'
+        : expansion.kind === 'directive' && !isInactive(expansion)
           ? 'plivet-directive-line'
           : 'plivet-excluded-region',
   });
 
+const preprocessorToken = {
+  macro: Decoration.mark({ class: 'plivet-preprocessor-macro' }),
+  number: Decoration.mark({ class: 'plivet-preprocessor-number' }),
+  operator: Decoration.mark({ class: 'plivet-preprocessor-operator' }),
+  keyword: Decoration.mark({ class: 'plivet-preprocessor-keyword' }),
+  punctuation: Decoration.mark({ class: 'plivet-preprocessor-punctuation' }),
+  literal: Decoration.mark({ class: 'plivet-preprocessor-literal' }),
+  comment: Decoration.mark({ class: 'plivet-preprocessor-comment' }),
+};
+
+/**
+ * `@codemirror/lang-cpp` treats a conditional directive's whole argument as
+ * generic metadata. The preprocessor knows that it is an integer expression,
+ * so mark its tokens with the roles a C expression normally receives.
+ */
+const conditionalTokenMarks = (
+  state: EditorState,
+  expansion: Expansion
+): { from: number; to: number; mark: Decoration }[] => {
+  if (
+    expansion.kind !== 'directive' ||
+    !['#if', '#elif', '#ifdef', '#ifndef'].includes(expansion.name) ||
+    expansion.line < 1 ||
+    expansion.line > state.doc.lines
+  ) {
+    return [];
+  }
+  const line = state.doc.line(expansion.line);
+  const source = line.text.slice(expansion.column);
+  const prefix = /^\s*#\s*(?:if|elif|ifdef|ifndef)\b\s*/.exec(source);
+  if (prefix === null) {
+    return [];
+  }
+  const argument = source.slice(prefix[0].length);
+  const base = line.from + expansion.column + prefix[0].length;
+  const tokens: { from: number; to: number; mark: Decoration }[] = [];
+  const pattern =
+    /\/\*.*?\*\/|\/\/.*|'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|[A-Za-z_][A-Za-z0-9_]*|0[xX][0-9a-fA-F]+[uUlL]*|[0-9]+[uUlL]*|&&|\|\||==|!=|<=|>=|<<|>>|[!~+\-*/%<>&^|?:]|[()[\],]/g;
+  for (const match of argument.matchAll(pattern)) {
+    const text = match[0];
+    const from = base + (match.index ?? 0);
+    const mark =
+      text.startsWith('//') || text.startsWith('/*')
+        ? preprocessorToken.comment
+        : text.startsWith("'") || text.startsWith('"')
+          ? preprocessorToken.literal
+          : text === 'defined'
+            ? preprocessorToken.keyword
+            : /^[A-Za-z_]/.test(text)
+              ? preprocessorToken.macro
+              : /^[0-9]/.test(text)
+                ? preprocessorToken.number
+                : /^[()[\],]$/.test(text)
+                  ? preprocessorToken.punctuation
+                  : preprocessorToken.operator;
+    tokens.push({ from, to: from + text.length, mark });
+  }
+  return tokens;
+};
+
 const decorationsFor = (
   state: EditorState,
   expansions: Expansion[]
-): DecorationSet =>
-  Decoration.set(
+): DecorationSet => {
+  const marks = expansions
+    .map((expansion) => {
+      const from = offsetAt(state.doc, expansion.line, expansion.column);
+      const to = offsetAt(
+        state.doc,
+        expansion.line,
+        expansion.column + expansion.length
+      );
+      return { from, to, expansion };
+    })
+    // A zero-length mark is not a decoration CodeMirror will accept, and a
+    // replacement that fell off the end of an edited line has no width.
+    .filter((span) => span.to > span.from)
+    .map((span) => markFor(span.expansion).range(span.from, span.to));
+  const inactiveLines = new Set(
     expansions
-      .map((expansion) => {
-        const from = offsetAt(state.doc, expansion.line, expansion.column);
-        const to = offsetAt(
-          state.doc,
-          expansion.line,
-          expansion.column + expansion.length
-        );
-        return { from, to, kind: expansion.kind };
-      })
-      // A zero-length mark is not a decoration CodeMirror will accept, and a
-      // replacement that fell off the end of an edited line has no width.
-      .filter((span) => span.to > span.from)
-      .map((span) => markFor(span.kind).range(span.from, span.to)),
-    true
+      .filter(isInactive)
+      .map((expansion) => expansion.line)
+      .filter((line) => 1 <= line && line <= state.doc.lines)
   );
+  const lineMarks = Array.from(inactiveLines).map((line) =>
+    Decoration.line({ class: 'plivet-inactive-line' }).range(
+      state.doc.line(line).from
+    )
+  );
+  const tokenMarks = expansions.flatMap((expansion) =>
+    conditionalTokenMarks(state, expansion).map(({ from, to, mark }) =>
+      mark.range(from, to)
+    )
+  );
+  return Decoration.set(marks.concat(lineMarks, tokenMarks), true);
+};
 
 /**
  * The expansions themselves, beside the marks made from them.

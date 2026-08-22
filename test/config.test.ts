@@ -139,6 +139,7 @@ describe('what a configuration may say', () => {
             statement: false,
             callStack: true,
             expression: false,
+            variables: true,
             memory: true,
             mutations: false,
             regions: { heap: false, registers: true },
@@ -150,6 +151,7 @@ describe('what a configuration may say', () => {
         statement: false,
         callStack: true,
         expression: false,
+        variables: true,
         memory: true,
         mutations: false,
         regions: { heap: false, registers: true },
@@ -206,6 +208,36 @@ describe('what the configuration decides', () => {
     bar.destroy();
   });
 
+  it('shows included header content in the preprocessed comparison', async () => {
+    const parent = parentOf();
+    const plivet = new Plivet(parent, {
+      files: [
+        {
+          path: 'main.c',
+          text: '#include "values.h"\nint main(void) { return VALUE; }',
+        },
+        {
+          path: 'values.h',
+          text: '#define VALUE 7\nint header_declaration;',
+        },
+      ],
+      entry: 'main.c',
+    });
+
+    await (plivet as any).showPreprocessed();
+
+    const halves = parent.querySelectorAll<HTMLElement>(
+      '.plivet-preprocessed .cm-content'
+    );
+    expect(halves).toHaveLength(2);
+    expect(halves[0].textContent).toContain('#include "values.h"');
+    expect(halves[0].textContent).not.toContain('int header_declaration;');
+    expect(halves[1].textContent).toContain('int header_declaration;');
+    expect(halves[1].textContent).toContain('return 7;');
+    expect(halves[1].textContent).not.toContain('#include "values.h"');
+    plivet.destroy();
+  });
+
   it('opens without the upload panel, and without the room it took', () => {
     const parent = parentOf();
     const plivet = new Plivet(parent, { features: { loadFile: false } });
@@ -246,6 +278,7 @@ describe('a view selection applied to the canvas state', () => {
     expect(view.isExpressionShown()).toBe(false);
     expect(view.isStatementShown()).toBe(true);
     expect(view.isCallStackShown()).toBe(true);
+    expect(view.areVariablesShown()).toBe(true);
     expect(view.isMemoryShown()).toBe(true);
     expect(view.areMutationsShown()).toBe(true);
     expect(view.isRegionShown('heap')).toBe(false);

@@ -1,11 +1,12 @@
 import { ExecState } from 'unicoen.ts/dist/interpreter/Engine/ExecState';
 import { PlivetCPP14Interpreter } from '../src/interpreter/CPP14';
-import strings from '../src/strings';
+import { defaultProgram } from '../src/defaultProgram';
 import {
   CELL_HEIGHT,
   CONTROL_EVENT,
   CellModel,
   ExpressionNodeModel,
+  ExecutionSource,
   FoldState,
   Response,
   Server,
@@ -149,6 +150,7 @@ describe('extractModel', () => {
       expression: null,
       callExpansions: [],
       variables: [],
+      context: { file: null, function: null },
       inlineValues: [],
       constructStates: [],
       frames: [],
@@ -222,6 +224,15 @@ int main(void) {
     expect(texts('stack')).toEqual(
       expect.arrayContaining(['local', 'dynamic'])
     );
+    expect(
+      model.variables.find((variable) => variable.name === 'cached')
+    ).toMatchObject({ region: 'registers', frame: 'main', active: true });
+    expect(
+      model.variables.find(
+        (variable) => variable.name === 'zeroInitializedValue'
+      )
+    ).toMatchObject({ region: 'bss', frame: 'GLOBAL', active: false });
+    expect(model.context.function).toBe('main');
     expect(
       new Set(model.memory.map((segment) => segment.startAddress)).size
     ).toBe(model.memory.length);
@@ -722,19 +733,26 @@ int main(void) {
   };
   const send = (server: Server, controlEvent: CONTROL_EVENT) =>
     quiet(() => server.send({ controlEvent, sourcecode: code }));
-
-  it('sends the parsed statement map with the first execution state', async () => {
-    const started = await quiet(() =>
-      new Server().send({
-        controlEvent: 'Start',
-        sourcecode: strings.sourceCode,
+  const sendDefault = (server: Server, controlEvent: CONTROL_EVENT) => {
+    const program = defaultProgram();
+    const entry = program.files.find((file) => file.path === program.entry)!;
+    return quiet(() =>
+      server.send({
+        controlEvent,
+        sourcecode: entry.text,
+        files: program.files,
+        entry: program.entry,
       })
     );
+  };
+
+  it('sends the parsed statement map with the first execution state', async () => {
+    const started = await sendDefault(new Server(), 'Start');
 
     expect(started.constructs).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ kind: 'call', line: 4 }),
-        expect.objectContaining({ kind: 'variableDec', line: 12 }),
+        expect.objectContaining({ kind: 'call', detail: 'scanf' }),
+        expect.objectContaining({ kind: 'variableDec' }),
       ])
     );
   });
@@ -742,41 +760,66 @@ int main(void) {
   it('keeps every function in text memory when the session steps', async () => {
     const server = new Server();
     const request = (controlEvent: CONTROL_EVENT) =>
-      quiet(() =>
-        server.send({ controlEvent, sourcecode: strings.sourceCode })
-      );
+      sendDefault(server, controlEvent);
     const started = await request('Start');
     const stepped = await request('Step');
     for (const response of [started, stepped]) {
-      const [recursive, main] = response.model.functions;
-      expect(recursive).toMatchObject({
-        name: 'recursiveToThree',
-        address: 0x1000,
-      });
-      expect(recursive.size).toBeGreaterThan(0);
-      expect(recursive.size % 16).toBe(0);
-      expect(main).toMatchObject({
-        name: 'main',
-        address: recursive.address + recursive.size,
-      });
-      expect(main.size).toBeGreaterThan(0);
-      expect(main.size % 16).toBe(0);
-      const stdioNames = ['printf', 'fopen', 'fgets', 'fputs', 'fclose'];
-      expect(response.model.functions.slice(-stdioNames.length)).toEqual(
-        stdioNames.map((name, index) => ({
-          name,
-          address: main.address + main.size + index * 16,
-          size: 16,
-        }))
+      const userNames = [
+        'main',
+        'add',
+        'subtract',
+        'multiply',
+        'apply',
+        'make_pair',
+        'factorial',
+      ];
+      const libraryNames = [
+        'printf',
+        'scanf',
+        'fopen',
+        'fgets',
+        'fputs',
+        'fclose',
+      ];
+      const functions = response.model.functions;
+      expect(functions.map(({ name }) => name)).toEqual(
+        expect.arrayContaining([...userNames, ...libraryNames])
       );
+      expect(functions[0].address).toBe(0x1000);
+      for (const [index, current] of functions.entries()) {
+        expect(current.size).toBeGreaterThan(0);
+        expect(current.size % 16).toBe(0);
+        if (index !== 0) {
+          const previous = functions[index - 1];
+          expect(current.address).toBe(previous.address + previous.size);
+        }
+      }
       const text = response.model.memory
         .find(({ key }) => key === 'text')!
         .rows.flatMap((row) => row.map(({ text }) => text));
       expect(text).toEqual(
-        expect.arrayContaining(['recursiveToThree', 'main', ...stdioNames])
+        expect.arrayContaining([...userNames, ...libraryNames])
       );
-      expect(text).not.toContain('scanf');
     }
+  });
+
+  it('composes the default header before the runnable entry', () => {
+    const program = defaultProgram();
+    const source = new ExecutionSource(
+      program.files,
+      program.entry,
+      program.files[0].text
+    );
+
+    expect(source.code.indexOf('#ifndef C_VISUALIZER_TOUR_H')).toBeLessThan(
+      source.code.indexOf('int main(void)')
+    );
+    expect(
+      source.locate({
+        begin: { x: 0, y: source.globalLine('main.c', 10)! },
+        end: { x: 1, y: source.globalLine('main.c', 10)! },
+      })
+    ).toMatchObject({ path: 'main.c', range: { begin: { y: 10 } } });
   });
 
   it('puts only referenced stdio routines in text memory', async () => {

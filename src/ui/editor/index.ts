@@ -18,7 +18,7 @@
  * imported by `PlivetEditor` alone, because an embedded editor gets its
  * language from the host.
  */
-export { PlivetEditor } from './PlivetEditor';
+export { containsMainDefinition, PlivetEditor } from './PlivetEditor';
 export type { PlivetEditorOptions } from './PlivetEditor';
 export { DebugExtensions, attachDebugExtensions } from './debugExtensions';
 export type { DebugExtensionOptions } from './debugExtensions';
@@ -31,7 +31,12 @@ export type { LibraryFunction } from './completion';
 export { expansionAt } from './expansions';
 export { focusField, setFocusRange } from './focus';
 export { goTo, gotoDeclaration } from './gotoDeclaration';
-export type { DeclarationRequest, DeclarationSource } from './gotoDeclaration';
+export type {
+  DeclarationDestination,
+  DeclarationNavigation,
+  DeclarationRequest,
+  DeclarationSource,
+} from './gotoDeclaration';
 export { coverageField, setCoverage } from './coverage';
 export { isSession, restoreSession, sessionOf } from './session';
 export type { SessionJSON } from './session';

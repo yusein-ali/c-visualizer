@@ -31,13 +31,15 @@
  * The execution group follows VS Code's floating debug toolbar: a compact
  * raised surface over the editor, flat icon buttons, and a dotted grip that
  * moves it without turning a debugging gesture into an editor gesture.
- * Its opening position is centred over the editor column. JavaScript only
- * changes the two translations, so reset can hand that position back to CSS.
+ * Its opening position is centred over the editor column, below any file tabs.
+ * JavaScript supplies the tab strip's rendered height because tabs can wrap;
+ * it only changes the two translations after a drag, so reset can hand that
+ * position back to CSS.
  */
 .plivet-controls__group--debug {
   position: absolute;
   z-index: 4;
-  top: calc(100% + 0.35rem);
+  top: calc(100% + var(--plivet-debug-tabs-height, 0px) + 0.35rem);
   left: 50%;
   gap: 0;
   padding: 0.2rem 0.25rem 0.2rem 0.15rem;

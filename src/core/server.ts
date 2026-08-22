@@ -19,6 +19,7 @@ export type CONTROL_EVENT =
   | 'Step'
   | 'StepOver'
   | 'StepAll'
+  | 'Preprocess'
   | 'SyntaxCheck';
 export type DEBUG_STATE =
   | 'First'
@@ -51,9 +52,10 @@ export interface Request {
   /**
    * Every file the reader has open, and which of them is the one that runs.
    *
-   * unicoen has no linker, so PLIVET composes these into one interpreter input
-   * with the entry first. Step locations are mapped back to the named file,
-   * which lets the editor follow a call into another tab.
+   * unicoen has no linker, so PLIVET composes these into one interpreter input:
+   * headers first, then the entry and the remaining implementations. Step
+   * locations are mapped back to the named file, which lets the editor follow
+   * a call into another tab.
    */
   files?: SourceFile[];
   /** The `path` of the file in `files` that is the translation unit. */
@@ -98,10 +100,18 @@ export interface Response {
   model: StepModel;
   /** The current interpreter range mapped back to one visible source tab. */
   location?: SourceLocation;
-  /** Preprocessor replacements, for the editor to mark. Syntax checks only. */
+  /** Preprocessor replacements, for the editor to mark. Editor checks only. */
   expansions?: Expansion[];
+  /**
+   * Replacements in the complete composed program. Editor checks keep this
+   * second map so a macro use in one tab can navigate to its definition in a
+   * header tab without waiting for Start.
+   */
+  programExpansions?: Expansion[];
   /** Parsed statements, for the editor and canvas to explain. Checks/Start. */
   constructs?: Construct[];
+  /** Parsed statements in the complete composed program. Syntax checks only. */
+  programConstructs?: Construct[];
   /** What the teaching rules found in a program that parses. Checks only. */
   lints?: LintDiagnostic[];
   /**
@@ -194,6 +204,7 @@ interface InterpreterRange {
 interface StartResult {
   step: StepResult;
   constructs: Construct[];
+  expansions: Expansion[];
 }
 
 /** Implemented by interpreters that can describe their source. */
@@ -320,7 +331,8 @@ export class Server {
         return this.respond(
           started.step,
           requestedExecution,
-          started.constructs
+          started.constructs,
+          started.expansions
         );
       }
       case 'Stop': {
@@ -364,11 +376,16 @@ export class Server {
           return refused;
         }
         this.execution = requestedExecution;
-        await this.Start(requestedExecution.code);
+        const started = await this.Start(requestedExecution.code);
         return this.respond(
           this.StepAll(requestedExecution, lineNumOfBreakpoint),
-          requestedExecution
+          requestedExecution,
+          started.constructs,
+          started.expansions
         );
+      }
+      case 'Preprocess': {
+        return this.Preprocess(activeTextOf(request), requestedExecution);
       }
       case 'SyntaxCheck': {
         return this.SyntaxCheck(
@@ -381,6 +398,35 @@ export class Server {
   }
 
   /**
+   * The cheap half of a syntax check, returned separately so editor marks do
+   * not wait for the parser, construct outline and teaching rules. It remains
+   * in the Worker: preprocessing a large source set must not hold typing up.
+   */
+  private async Preprocess(
+    code: string,
+    execution: ExecutionSource
+  ): Promise<Response> {
+    // Keep this in the interpreter chunk even though the fast path needs only
+    // the preprocessor. A reader still downloads one lazy C-language chunk.
+    // prettier-ignore
+    const module = await import(/* webpackChunkName: "CPP14" */ '../interpreter/preprocess');
+    const expansions = module.preprocessSource(code).expansions;
+    return {
+      errors: [],
+      expansions,
+      programExpansions:
+        execution.code === code
+          ? expansions
+          : module.preprocessSource(execution.code).expansions,
+      sourcecode: code,
+      model: emptyStepModel(),
+      debugState: 'Stop',
+      output: '',
+      step: this.count,
+    };
+  }
+
+  /**
    * A step spelled out for the caller. This is where the interpreter's own
    * objects are left behind and the model that crosses the Worker boundary is
    * built, so it is the only place a `Response` is made.
@@ -388,10 +434,12 @@ export class Server {
   private respond(
     result: StepResult,
     execution: ExecutionSource,
-    constructs?: Construct[]
+    constructs?: Construct[],
+    expansions?: Expansion[]
   ): Response {
     const model = extractModel(result.execState);
     const location = execution.locate(model.codeRange);
+    model.context.file = location?.path ?? null;
     return {
       model,
       output: result.output,
@@ -403,6 +451,7 @@ export class Server {
       coverage:
         location === null ? [] : this.lineCounts(execution, location.path),
       constructs,
+      expansions,
       ...(location === null ? {} : { location }),
     };
   }
@@ -411,6 +460,13 @@ export class Server {
   private constructs(sourcecode: string): Construct[] {
     return this.interpreter !== null && reportsExpansions(this.interpreter)
       ? this.interpreter.getConstructs(sourcecode)
+      : [];
+  }
+
+  /** The preprocessing map belonging to the source Start just prepared. */
+  private expansions(sourcecode: string): Expansion[] {
+    return this.interpreter !== null && reportsExpansions(this.interpreter)
+      ? this.interpreter.getExpansions(sourcecode)
       : [];
   }
 
@@ -445,6 +501,7 @@ export class Server {
     // global scope and function addresses, so the entry point disappears from
     // text memory on the next step.
     const constructs = this.constructs(sourcecode);
+    const expansions = this.expansions(sourcecode);
     const execState = this.interpreter.startStepExecution(sourcecode);
     const output = this.interpreter.getStdout();
     this.record(execState, output);
@@ -452,6 +509,7 @@ export class Server {
     return {
       step: { execState, output, debugState: 'First', step: this.count },
       constructs,
+      expansions,
     };
   }
 
@@ -742,8 +800,14 @@ export class Server {
       expansions: reportsExpansions(interpreter)
         ? interpreter.getExpansions(code)
         : [],
+      programExpansions: reportsExpansions(interpreter)
+        ? interpreter.getExpansions(execution.code)
+        : [],
       constructs: reportsExpansions(interpreter)
         ? interpreter.getConstructs(code)
+        : [],
+      programConstructs: reportsExpansions(interpreter)
+        ? interpreter.getConstructs(execution.code)
         : [],
       // A program that does not parse has syntax errors to fix first, and a
       // teaching rule reading a broken tree would only add noise to them.

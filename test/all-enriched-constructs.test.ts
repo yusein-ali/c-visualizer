@@ -53,6 +53,9 @@ describe('the all-enriched-constructs teaching program', () => {
       interpreter.startStepExecution(source);
       let steps = 0;
       while (interpreter.isStepExecutionRunning() && steps < 20000) {
+        if (interpreter.getIsWaitingForStdin()) {
+          interpreter.stdin('7');
+        }
         interpreter.stepExecute();
         steps += 1;
       }
@@ -62,11 +65,14 @@ describe('the all-enriched-constructs teaching program', () => {
       expect(interpreter.getRuntimeDiagnostics()).toEqual([]);
       expect(interpreter.getStdout()).toContain('count=3 scaled=6');
       expect(interpreter.getStdout()).toContain(
-        'flow=17 once=1 larger=20 widened=17\n'
+        'flow=17 once=1 larger=20 widened=17 input=7\n'
       );
       expect(interpreter.getStdout()).toContain('calls=5/20/5 recursive=24\n');
       expect(interpreter.getStdout()).toContain(
         'aggregate=10/20/5 product=12 enum=3 heap=11->22 macro=5/5\n'
+      );
+      expect(interpreter.getStdout()).toContain(
+        'file=written by the construct tour\n'
       );
     } finally {
       console.log = log;

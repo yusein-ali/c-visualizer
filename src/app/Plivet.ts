@@ -71,17 +71,17 @@ export interface PlivetFeatures {
  * everything below it, and `destroy()` takes it all back down again.
  */
 export interface PlivetOptions {
-  /** The program the editor opens with. Defaults to the sample in `strings`. */
+  /** One program instead of the default three-file construct tour. */
   sourceCode?: string;
   /**
-   * Several files instead of one, drawn as tabs over the editor. Exactly one
-   * of them is the translation unit - `entry`, or the first - and it is the
-   * one that runs; the rest are open beside it. This is the shape a block of
-   * the interactive-code directive has, and the reason the Worker protocol
-   * carries a named set of files rather than a string.
+   * Several files instead of one, drawn as tabs over the editor and composed
+   * into the interpreter's teaching translation unit. `entry`, or the first,
+   * is the tab that opens and contains `main`. This is the shape a block of the
+   * interactive-code directive has, and the reason the Worker protocol carries
+   * a named set of files rather than a string.
    */
   files?: SourceFile[];
-  /** Which of `files` runs. Defaults to the first. */
+  /** Which of `files` opens as the runnable entry. Defaults to the first. */
   entry?: string;
   /** Which theme to open in. The switch in the control bar changes it after. */
   theme?: Theme;
@@ -109,6 +109,8 @@ export interface PlivetOptions {
   licenses?: string;
   /** Called after any file text, file set or entry-file change. */
   onSourceChange?: (snapshot: SourceSnapshot) => void;
+  /** Called with the final source when the visualizer's window is closing. */
+  onWindowClose?: (snapshot: SourceSnapshot) => void;
   /** Called when the visible source tab changes. */
   onActiveFileChange?: (path: string) => void;
   /** Add the host-backed Build button. Requires `diagnosticProviders`. */
@@ -141,6 +143,9 @@ export class Plivet {
   /** Null where the page has switched the upload panel off. */
   private readonly files: FilePanel | null;
   private readonly help: HowToDialog;
+  /** The browsing context this instance belongs to, if it has one. */
+  private readonly lifecycleWindow: Window | null;
+  private readonly onWindowClose?: (snapshot: SourceSnapshot) => void;
   /**
    * Built on the first press and kept after it. `@codemirror/merge` and the
    * preprocessor are a chunk of their own: a reader who never asks what the
@@ -153,6 +158,8 @@ export class Plivet {
 
   constructor(parent: HTMLElement, options: PlivetOptions = {}) {
     this.theme = options.theme ?? 'light';
+    this.lifecycleWindow = parent.ownerDocument.defaultView;
+    this.onWindowClose = options.onWindowClose;
     const features = options.features ?? {};
     const { bus, client } = this;
     for (const [source, provider] of Object.entries(
@@ -207,6 +214,7 @@ export class Plivet {
       onSourceChange: options.onSourceChange,
       onActiveFileChange: options.onActiveFileChange,
     });
+    this.controls.setDebugToolbarTabs(this.editor.tabBarElement);
 
     this.console = new PlivetConsole(this.shell.console, {
       dark: isDark(this.theme),
@@ -266,6 +274,12 @@ export class Plivet {
       }
     );
     this.shell.root.addEventListener('keydown', this.debugShortcut);
+    if (typeof this.onWindowClose !== 'undefined') {
+      // Unlike `unload`, `pagehide` also works when the page enters the
+      // back-forward cache. The callback must remain synchronous: browsers do
+      // not wait for asynchronous work while a browsing context is leaving.
+      this.lifecycleWindow?.addEventListener('pagehide', this.windowClosing);
+    }
   }
 
   /**
@@ -423,14 +437,17 @@ export class Plivet {
    * The program beside the text the compiler is given.
    *
    * The pass runs here rather than in the Worker because it is a
-   * source-to-source pass over one file, and asking the interpreter for it
-   * would mean a round trip and a new message for an answer this side can
-   * work out while the dialog is opening.
+   * source-to-source pass over the named source set, and asking the interpreter
+   * for it would mean a round trip and a new message for an answer this side
+   * can work out while the dialog is opening.
    */
   private async showPreprocessed(): Promise<void> {
-    const source = this.editor.code();
+    const snapshot = this.editor.sourceSnapshot();
+    const source =
+      snapshot.files.find((file) => file.path === snapshot.entry)?.text ??
+      this.editor.code();
     // prettier-ignore
-    const [{ PreprocessedDialog }, { preprocess }] = await Promise.all([
+    const [{ PreprocessedDialog }, { preprocessFiles }] = await Promise.all([
       import(/* webpackChunkName: "preprocessed" */ '../ui/preprocessed'),
       import(/* webpackChunkName: "preprocessed" */ '../interpreter/preprocess'),
     ]);
@@ -439,13 +456,17 @@ export class Plivet {
         dark: isDark(this.theme),
       });
     }
-    this.preprocessed.open(source, preprocess(source));
+    this.preprocessed.open(
+      source,
+      preprocessFiles(snapshot.files, snapshot.entry, source)
+    );
   }
 
   destroy(): void {
     // The interpreter first: its Worker is the one thing that goes on running
     // after the widgets it reports to have gone.
     this.client.destroy();
+    this.lifecycleWindow?.removeEventListener('pagehide', this.windowClosing);
     this.shell.root.removeEventListener('keydown', this.debugShortcut);
     this.diagnosticProviders.clear();
     this.bus.destroy();
@@ -458,6 +479,11 @@ export class Plivet {
     this.controls.destroy();
     this.shell.destroy();
   }
+
+  /** Hand the host one coherent, final view before this window goes away. */
+  private windowClosing = (): void => {
+    this.onWindowClose?.(this.sourceSnapshot());
+  };
 
   private setTheme(theme: Theme): void {
     this.theme = theme;

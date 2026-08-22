@@ -41,10 +41,17 @@ export interface DeclarationRequest {
   isCall: boolean;
 }
 
+/** A declaration the owning application must reveal outside this document. */
+export interface DeclarationNavigation {
+  navigate: () => void;
+}
+
 /** Where that name was declared, or null when nothing here declares it. */
+export type DeclarationDestination = SourceRange | DeclarationNavigation;
+
 export type DeclarationSource = (
   request: DeclarationRequest
-) => SourceRange | null;
+) => DeclarationDestination | null;
 
 /** How long the declaration stays marked after the jump, in milliseconds. */
 const FLASH = 1400;
@@ -204,6 +211,18 @@ export const goTo = (view: EditorView, range: SourceRange): void => {
   }, FLASH);
 };
 
+/** Follow a declaration in this document or let its owner reveal another. */
+const follow = (
+  view: EditorView,
+  destination: DeclarationDestination
+): void => {
+  if ('navigate' in destination) {
+    destination.navigate();
+  } else {
+    goTo(view, destination);
+  }
+};
+
 /**
  * A resolvable identifier becomes a link while Ctrl/Command and the pointer
  * are both over it. The modifier-click follows that link, and F12 does the
@@ -273,7 +292,7 @@ export const gotoDeclaration = (find: DeclarationSource): Extension => {
           return false;
         }
         event.preventDefault();
-        goTo(view, found);
+        follow(view, found);
         showLink(view, null);
         return true;
       },
@@ -295,7 +314,7 @@ export const gotoDeclaration = (find: DeclarationSource): Extension => {
           if (found === null) {
             return false;
           }
-          goTo(view, found);
+          follow(view, found);
           return true;
         },
       },

@@ -10,7 +10,7 @@ export interface ViewPanelHandle {
 }
 
 /**
- * The switches that decide what the canvas workspace draws: its five
+ * The switches that decide what the canvas workspace draws: its six
  * sections, and one per memory region inside the memory section.
  *
  * It is a disclosure rather than a row of checkboxes because the toolbar sits
@@ -88,6 +88,10 @@ export function viewPanel(
     view.showExpression(shown);
     onChange();
   });
+  const variables = checkbox(strings.viewVariables, (shown) => {
+    view.showVariables(shown);
+    onChange();
+  });
   const memory = checkbox(strings.graphMemoryHeading, (shown) => {
     view.showMemory(shown);
     onChange();
@@ -101,6 +105,7 @@ export function viewPanel(
     statement.label,
     callStack.label,
     expression.label,
+    variables.label,
     memory.label,
     mutations.label
   );
@@ -118,6 +123,7 @@ export function viewPanel(
     statement.input.checked = view.isStatementShown();
     callStack.input.checked = view.isCallStackShown();
     expression.input.checked = view.isExpressionShown();
+    variables.input.checked = view.areVariablesShown();
     memory.input.checked = view.isMemoryShown();
     mutations.input.checked = view.areMutationsShown();
   };

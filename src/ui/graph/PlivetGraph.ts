@@ -22,6 +22,7 @@ import { expressionNodeOf } from './ExpressionNode';
 import { ViewPanelHandle, viewPanel } from './ViewPanel';
 import { callStackRows } from './callStack';
 import { callHeading } from './callSection';
+import { variableContextLabel, variableTableRows } from './variableTable';
 import { emptyStatementExplanation, StatementExplanation } from '../records';
 import { MemoryNode, memoryNodeOf } from './MemoryNode';
 import { StackTable, stackTableOf } from './StackTable';
@@ -49,11 +50,11 @@ export interface PlivetGraphOptions {
    * and what the editor can mark the declaration of.
    */
   onFocus?: (object: string | null) => void;
-  /** Follow a memory row back to the source that declared what it shows. */
+  /** Follow a variable or memory row back to its source declaration. */
   onNavigate?: (target: MemoryNavigationTarget) => void;
 }
 
-/** What a double-clicked row in the memory view names in the source. */
+/** What a double-clicked variable or memory row names in the source. */
 export type MemoryNavigationTarget =
   | { kind: 'object'; key: string }
   | { kind: 'function'; name: string };
@@ -76,10 +77,10 @@ const FOCUS_CLASS = 'plivet-object--focus';
 
 /**
  * The canvas is read from cause to state. Statement and Call stack share its
- * first row; Expression expansion spans both columns beneath them, and Memory
- * follows. The write history is the final DOM section under the paper. Each
- * major section has one disclosure heading and one switch in the shared View
- * panel.
+ * first row; Expression expansion spans both columns beneath them, Variables
+ * bridges the source expression and the complete Memory map, and the write
+ * history is the final DOM section under the paper. Each major section has one
+ * disclosure heading and one switch in the shared View panel.
  */
 const HEADING_HEIGHT = 26;
 /** The room between a heading and the section it names. */
@@ -90,7 +91,7 @@ const CARD_DESCRIPTION_HEIGHT = 58;
 const CARD_ROW_HEIGHT = 38;
 const CARD_SECTION_HEIGHT = 28;
 const CARD_LABEL_WIDTH = 164;
-/** The room between the statement and memory sections. */
+/** The room between successive canvas sections. */
 const SECTION_GAP = 36;
 const COLUMN_GAP = 24;
 const COLUMN_WIDTH = 480;
@@ -101,6 +102,10 @@ const ORIGIN_Y = 24;
 /** What the map has to come down by to leave its own heading room. */
 const MEMORY_DROP = HEADING_HEIGHT + HEADING_GAP;
 const CALL_ROW_GAP = 5;
+const VARIABLE_CONTEXT_HEIGHT = 30;
+const VARIABLE_HEADER_HEIGHT = 28;
+const VARIABLE_ROW_HEIGHT = 34;
+const VARIABLE_COLUMN_WIDTHS = [220, 340, 300, 124] as const;
 
 /** JointJS rectangles center labels unless both axes are overridden. */
 export const leftAlignedLabel = (x: number, height: number) => ({
@@ -133,7 +138,7 @@ export const expressionSectionIsCollapsed = (
 ): boolean => expression === null || manuallyCollapsed;
 
 /**
- * The disclosure bands on the canvas. The four fixed ones are the layout; the
+ * The disclosure bands on the canvas. The five fixed ones are the layout; the
  * `call:` keys are one per call expanded at the current step, and they carry
  * the call site's own key so a reader who collapses one keeps it collapsed
  * while the program runs rather than having it reopen under them every time
@@ -143,6 +148,7 @@ type CanvasSection =
   | 'statement'
   | 'callStack'
   | 'expression'
+  | 'variables'
   | 'memory'
   | `call:${string}`;
 
@@ -150,6 +156,7 @@ const isCanvasSection = (value: string): value is CanvasSection =>
   value === 'statement' ||
   value === 'callStack' ||
   value === 'expression' ||
+  value === 'variables' ||
   value === 'memory' ||
   value.startsWith('call:');
 
@@ -428,6 +435,14 @@ export class PlivetGraph {
       }
     }
 
+    // The compact current-scope table bridges the source-level expression and
+    // the complete implementation memory map below it.
+    if (this.view.areVariablesShown()) {
+      cells.push(...this.variableTableCells(model, ORIGIN_X, nextY));
+      nextY =
+        Math.max(this.contentHeight, nextY + HEADING_HEIGHT) + SECTION_GAP;
+    }
+
     const baseMemory = memoryGeometry(model, this.folds, this.view);
     if (this.view.isMemoryShown()) {
       const memoryDrop = nextY + MEMORY_DROP - ORIGIN_Y;
@@ -535,7 +550,7 @@ export class PlivetGraph {
     this.report(object === null ? null : decodeURIComponent(object));
   }
 
-  /** Follow any box in a memory row; non-memory canvas cells carry no key. */
+  /** Follow any box in a variable or memory row; other cells carry no key. */
   private navigateFromMemory(event: MouseEvent): void {
     if (event.button !== 0 || typeof this.onNavigate === 'undefined') {
       return;
@@ -852,6 +867,121 @@ export class PlivetGraph {
         originY + HEADING_HEIGHT + HEADING_GAP
       )
     );
+    return cells;
+  }
+
+  /** A conventional debugger table for names visible in the current frame. */
+  private variableTableCells(
+    model: StepModel,
+    originX: number,
+    originY: number
+  ): dia.Cell[] {
+    const cells: dia.Cell[] = [
+      this.sectionHeading(
+        strings.viewVariables,
+        originX,
+        originY,
+        'variables',
+        TWO_COLUMN_WIDTH
+      ),
+    ];
+    if (this.collapsed.has('variables')) {
+      return cells;
+    }
+
+    let y = originY + HEADING_HEIGHT + HEADING_GAP;
+    cells.push(
+      this.cardCell(
+        variableContextLabel(model),
+        originX,
+        y,
+        TWO_COLUMN_WIDTH,
+        VARIABLE_CONTEXT_HEIGHT,
+        {
+          fill: 'var(--plivet-graph-caption, #f7f9fb)',
+          stroke: 'var(--plivet-graph-grid, #cfd8e1)',
+          color: 'var(--plivet-graph-context-text, #5d6b78)',
+          fontSize: 12,
+        }
+      )
+    );
+    y += VARIABLE_CONTEXT_HEIGHT;
+
+    const headings = [
+      strings.memoryColumnName,
+      strings.memoryColumnValue,
+      strings.variableColumnSegment,
+      strings.memoryColumnAddress,
+    ];
+    let x = originX;
+    headings.forEach((heading, index) => {
+      const width = VARIABLE_COLUMN_WIDTHS[index];
+      cells.push(
+        this.cardCell(heading, x, y, width, VARIABLE_HEADER_HEIGHT, {
+          fill: 'var(--plivet-graph-header, #eef2f6)',
+          stroke: 'var(--plivet-graph-grid, #cfd8e1)',
+          color: 'var(--plivet-graph-header-text, #4a5b6c)',
+          bold: true,
+          fontSize: 12,
+        })
+      );
+      x += width;
+    });
+    y += VARIABLE_HEADER_HEIGHT;
+
+    const rows = variableTableRows(model);
+    if (rows.length === 0) {
+      cells.push(
+        this.cardCell(
+          strings.variableNoneActive,
+          originX,
+          y,
+          TWO_COLUMN_WIDTH,
+          VARIABLE_ROW_HEIGHT,
+          {
+            fill: 'var(--plivet-graph-surface, #ffffff)',
+            stroke: 'var(--plivet-graph-grid, #cfd8e1)',
+            color: 'var(--plivet-graph-muted, #8494a4)',
+            fontSize: 13,
+          }
+        )
+      );
+      y += VARIABLE_ROW_HEIGHT;
+    } else {
+      for (const row of rows) {
+        const values = [row.name, row.value, row.segment, row.address];
+        x = originX;
+        values.forEach((value, index) => {
+          const width = VARIABLE_COLUMN_WIDTHS[index];
+          const cell = this.cardCell(value, x, y, width, VARIABLE_ROW_HEIGHT, {
+            fill:
+              index === 3
+                ? 'var(--plivet-graph-address, #fbfcfd)'
+                : 'var(--plivet-graph-surface, #ffffff)',
+            stroke: 'var(--plivet-graph-grid, #cfd8e1)',
+            color: 'var(--plivet-graph-ink, #26384a)',
+            code: index !== 2,
+            fontSize: 13,
+          });
+          cell.attr({
+            body: {
+              'data-object-key': encodeURIComponent(row.key),
+              class: 'plivet-object-cell plivet-variable-cell',
+            },
+            label: { pointerEvents: 'none' },
+          });
+          cells.push(cell);
+          x += width;
+        });
+        y += VARIABLE_ROW_HEIGHT;
+      }
+    }
+
+    this.contentWidth = Math.max(
+      this.contentWidth,
+      originX + TWO_COLUMN_WIDTH + ORIGIN_X
+    );
+    this.contentHeight = Math.max(this.contentHeight, y + ORIGIN_X);
     return cells;
   }
 

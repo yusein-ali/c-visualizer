@@ -1,12 +1,15 @@
 import { Bus } from '../src/app/emitter';
 import { EditorController } from '../src/app/EditorController';
 import {
+  ExecutionSource,
   InterpreterClient,
   Request,
   Response,
   emptyStepModel,
 } from '../src/core';
+import { defaultProgram } from '../src/defaultProgram';
 import { stepHighlightField } from '../src/ui/editor/stepHighlight';
+import { expansionField } from '../src/ui/editor/expansions';
 import { diagnosticCount } from '@codemirror/lint';
 
 /**
@@ -58,6 +61,165 @@ const FILES = [
 ];
 
 describe('the editor with several files', () => {
+  it('opens the three-file construct tour by default', () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const bus = new Bus();
+    const { client } = fakeClient();
+    const controller = new EditorController(host, { bus, client });
+
+    expect(controller.active()).toBe('main.c');
+    expect(controller.entry()).toBe('main.c');
+    expect(controller.openFiles().map((file) => file.path)).toEqual([
+      'main.c',
+      'tour.h',
+      'tour.c',
+    ]);
+    expect(controller.code()).toContain('scanf("%d", &entered)');
+    expect(controller.code()).toContain('fopen("c-visualizer.txt", "w")');
+
+    controller.destroy();
+    host.remove();
+  });
+
+  it('maps composed header offsets back to main.c', () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const bus = new Bus();
+    const { client } = fakeClient();
+    const controller = new EditorController(host, { bus, client });
+    const program = defaultProgram();
+    const source = new ExecutionSource(
+      program.files,
+      program.entry,
+      program.files[0].text
+    );
+    const line = source.globalLine('main.c', 10)!;
+    const model = emptyStepModel();
+    model.codeRange = {
+      begin: { x: 0, y: line },
+      end: { x: 15, y: line },
+    };
+    model.constructStates = [
+      {
+        kind: 'functionDec',
+        range: model.codeRange,
+        facts: [],
+      },
+    ];
+    (controller as any).executionConstructs = [
+      {
+        kind: 'functionDec',
+        detail: 'main',
+        line,
+        column: 0,
+        endLine: line,
+        endColumn: 15,
+      },
+    ];
+
+    (controller as any).showExecutionSourceFor('main.c');
+    const local = (controller as any).editorStep(model, {
+      path: 'main.c',
+      range: {
+        begin: { x: 0, y: 10 },
+        end: { x: 15, y: 10 },
+      },
+    });
+
+    expect((controller as any).constructs[0]).toMatchObject({ line: 10 });
+    expect(local.codeRange.begin.y).toBe(10);
+    expect(local.constructStates[0].range.begin.y).toBe(10);
+
+    controller.destroy();
+    host.remove();
+  });
+
+  it('draws the statement with the entry file line rather than the composed line', () => {
+    const files = [
+      { path: 'main.c', text: '#include "defs.h"\nreturn 0;' },
+      { path: 'defs.h', text: '#define VALUE 7\nint declaration;' },
+    ];
+    const { host, bus, controller } = mounted(files, 'main.c');
+    const source = new ExecutionSource(files, 'main.c', files[0].text);
+    const globalLine = source.globalLine('main.c', 2)!;
+    const model = emptyStepModel();
+    model.codeRange = {
+      begin: { x: 0, y: globalLine },
+      end: { x: 8, y: globalLine },
+    };
+    let drawn = emptyStepModel();
+    bus.slot('draw', (step) => {
+      drawn = step;
+    });
+
+    controller.recieve({
+      output: '',
+      sourcecode: source.code,
+      debugState: 'Debugging',
+      step: 1,
+      errors: [],
+      model,
+      location: {
+        path: 'main.c',
+        range: {
+          begin: { x: 0, y: 2 },
+          end: { x: 8, y: 2 },
+        },
+      },
+      constructs: [
+        {
+          kind: 'return',
+          detail: '',
+          line: globalLine,
+          column: 0,
+          endLine: globalLine,
+          endColumn: 8,
+        },
+      ],
+      expansions: [],
+    });
+
+    expect(drawn.codeRange?.begin.y).toBe(2);
+    controller.destroy();
+    host.remove();
+  });
+
+  it('keeps preprocessing marks in a macro-only header during a run', () => {
+    const files = [
+      { path: 'main.c', text: '#include "defs.h"\nint main(void) {}' },
+      { path: 'defs.h', text: '#define VALUE 7' },
+    ];
+    const { host, controller } = mounted(files, 'main.c');
+    const source = new ExecutionSource(files, 'main.c', files[0].text);
+
+    controller.recieve({
+      output: '',
+      sourcecode: source.code,
+      debugState: 'First',
+      step: 0,
+      errors: [],
+      model: emptyStepModel(),
+      constructs: [],
+      expansions: [
+        {
+          kind: 'directive',
+          line: 1,
+          column: 0,
+          length: '#define VALUE 7'.length,
+          name: '#define',
+          text: 'VALUE = 7',
+        },
+      ],
+    });
+    tabButtons(host)[1].click();
+
+    const editor = (controller as any).editor;
+    expect(editor.view.state.field(expansionField).size).toBe(1);
+    controller.destroy();
+    host.remove();
+  });
+
   it('opens the entry file and lists them all', () => {
     const { host, controller } = mounted(FILES);
     expect(controller.active()).toBe('main.c');
@@ -272,11 +434,92 @@ describe('the editor with several files', () => {
   });
 
   it('changes which file runs when the reader asks', () => {
-    const { host, controller, sent } = mounted(FILES);
+    const files = [
+      FILES[0],
+      { path: 'other.c', text: 'int main(void) { return 1; }' },
+    ];
+    const { host, controller, sent } = mounted(files);
     host.querySelectorAll<HTMLButtonElement>('.plivet-tabs__entry')[1].click();
-    expect(controller.entry()).toBe('notes.c');
+    expect(controller.entry()).toBe('other.c');
     controller.send('Start');
-    expect(sent[sent.length - 1].sourcecode).toBe('int unused = 1;');
+    expect(sent[sent.length - 1].sourcecode).toBe(
+      'int main(void) { return 1; }'
+    );
+    controller.destroy();
+    host.remove();
+  });
+
+  it('offers the entry triangle only to non-header files that define main', () => {
+    const { host, controller } = mounted([
+      FILES[0],
+      { path: 'values.h', text: 'int main(void) { return 1; }' },
+      { path: 'prototype.c', text: 'int main(void);' },
+      { path: 'comment.c', text: '/* int main(void) {} */' },
+      { path: 'other.c', text: 'int main(void) { return 2; }' },
+    ]);
+    const entries = Array.from(
+      host.querySelectorAll<HTMLButtonElement>('.plivet-tabs__entry')
+    );
+    expect(entries.map((entry) => entry.getAttribute('aria-label'))).toEqual([
+      'this is the entry source file: main.c',
+      'make this the entry source file: other.c',
+    ]);
+    entries[1].click();
+    expect(controller.entry()).toBe('other.c');
+    controller.destroy();
+    host.remove();
+  });
+
+  it('updates entry eligibility when a source gains a main definition', () => {
+    const { host, controller } = mounted(FILES);
+    expect(host.querySelectorAll('.plivet-tabs__entry')).toHaveLength(1);
+
+    tabButtons(host)[1].click();
+    controller.replaceCode('int main(void) { return 2; }');
+
+    expect(host.querySelectorAll('.plivet-tabs__entry')).toHaveLength(2);
+    controller.destroy();
+    host.remove();
+  });
+
+  it('refreshes preprocessor marks before the full syntax check', () => {
+    const { host, controller, sent } = mounted(FILES);
+    jest.useFakeTimers();
+    try {
+      const editor = (controller as any).editor;
+      editor.view.dispatch({
+        changes: { from: editor.view.state.doc.length, insert: ' ' },
+      });
+
+      jest.advanceTimersByTime(99);
+      expect(sent).toHaveLength(0);
+      jest.advanceTimersByTime(1);
+      expect(sent.map((request) => request.controlEvent)).toEqual([
+        'Preprocess',
+      ]);
+      jest.advanceTimersByTime(900);
+      expect(sent.map((request) => request.controlEvent)).toEqual([
+        'Preprocess',
+        'SyntaxCheck',
+      ]);
+    } finally {
+      controller.destroy();
+      host.remove();
+      jest.useRealTimers();
+    }
+  });
+
+  it('ignores an ineligible requested entry when another file defines main', () => {
+    const { host, controller } = mounted(
+      [
+        { path: 'values.h', text: 'int main(void) { return 1; }' },
+        FILES[1],
+        FILES[0],
+      ],
+      'values.h'
+    );
+    expect(controller.entry()).toBe('main.c');
+    expect(controller.active()).toBe('main.c');
     controller.destroy();
     host.remove();
   });

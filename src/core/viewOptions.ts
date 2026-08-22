@@ -36,6 +36,7 @@ export interface ViewSelection {
   statement?: boolean;
   callStack?: boolean;
   expression?: boolean;
+  variables?: boolean;
   memory?: boolean;
   mutations?: boolean;
   /**
@@ -53,6 +54,8 @@ export class ViewOptions {
   private callStack = true;
   /** Whether the expression tree spanning the two top columns is drawn. */
   private expression = true;
+  /** Whether the debugger-style current-context variable table is drawn. */
+  private variables = true;
   /** The memory map is one canvas section, around its individual regions. */
   private memory = true;
   /** The write history is the section under the JointJS drawing. */
@@ -101,6 +104,14 @@ export class ViewOptions {
     this.expression = shown;
   }
 
+  public areVariablesShown(): boolean {
+    return this.variables;
+  }
+
+  public showVariables(shown: boolean): void {
+    this.variables = shown;
+  }
+
   public isMemoryShown(): boolean {
     return this.memory;
   }
@@ -134,6 +145,9 @@ export class ViewOptions {
     if (typeof selection.expression === 'boolean') {
       this.expression = selection.expression;
     }
+    if (typeof selection.variables === 'boolean') {
+      this.variables = selection.variables;
+    }
     if (typeof selection.memory === 'boolean') {
       this.memory = selection.memory;
     }
@@ -153,6 +167,7 @@ export class ViewOptions {
     this.statement = true;
     this.callStack = true;
     this.expression = true;
+    this.variables = true;
     this.memory = true;
     this.mutations = true;
   }

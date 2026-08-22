@@ -19,6 +19,8 @@ export interface TabModel {
   /** The file that runs. Exactly one of them is. */
   entry: boolean;
   active: boolean;
+  /** Whether this file may be chosen as the entry source. */
+  canBeEntry?: boolean;
   /** Whether the text differs from what was opened or last saved. */
   edited?: boolean;
 }
@@ -65,25 +67,32 @@ export class TabBar {
     select.setAttribute('role', 'tab');
     select.setAttribute('aria-selected', String(tab.active));
     select.textContent = tab.edited === true ? `${tab.path} •` : tab.path;
-    select.title = tab.entry ? strings.tabEntryHint : strings.tabMakeEntryHint;
+    if (tab.canBeEntry !== false) {
+      select.title = tab.entry
+        ? strings.tabEntryHint
+        : strings.tabMakeEntryHint;
+    }
     select.addEventListener('click', () => this.options.onSelect?.(tab.path));
 
     // The entry marker is a button rather than a badge: what it says - this
     // is the file that runs - is also the only way to change which one does.
-    const entry = document.createElement('button');
-    entry.type = 'button';
-    entry.className = 'plivet-tabs__entry';
-    entry.classList.toggle('plivet-tabs__entry--on', tab.entry);
-    entry.textContent = tab.entry ? '▶' : '▷';
-    entry.title = tab.entry ? strings.tabRuns : strings.tabMakeEntry;
-    entry.setAttribute(
-      'aria-label',
-      `${tab.entry ? strings.tabRuns : strings.tabMakeEntry}: ${tab.path}`
-    );
-    entry.disabled = tab.entry;
-    entry.addEventListener('click', () => this.options.onEntry?.(tab.path));
+    if (tab.canBeEntry !== false) {
+      const entry = document.createElement('button');
+      entry.type = 'button';
+      entry.className = 'plivet-tabs__entry';
+      entry.classList.toggle('plivet-tabs__entry--on', tab.entry);
+      entry.textContent = tab.entry ? '▶' : '▷';
+      entry.title = tab.entry ? strings.tabRuns : strings.tabMakeEntry;
+      entry.setAttribute(
+        'aria-label',
+        `${tab.entry ? strings.tabRuns : strings.tabMakeEntry}: ${tab.path}`
+      );
+      entry.disabled = tab.entry;
+      entry.addEventListener('click', () => this.options.onEntry?.(tab.path));
+      element.appendChild(entry);
+    }
 
-    element.append(entry, select);
+    element.appendChild(select);
     // The file that runs cannot be closed: a session with no translation unit
     // is not a session, and the reader would have to open one to get back.
     if (!tab.entry) {

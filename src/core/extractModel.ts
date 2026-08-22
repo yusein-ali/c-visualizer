@@ -46,7 +46,12 @@ import {
   emptyStepModel,
   foldGroupOf,
 } from './model';
-import { extractVariables, formatAddress, narrowToType } from './variables';
+import {
+  extractVariables,
+  formatAddress,
+  memoryRegionOf,
+  narrowToType,
+} from './variables';
 
 /**
  * Reading an execution state as text.
@@ -572,28 +577,6 @@ class MemoryCollector {
   }
 }
 
-function memoryRegionOf(variable: Variable, stackName: string): MemoryRegion {
-  if (variable.name.startsWith('Heap:')) {
-    return 'heap';
-  }
-  if (variable.name.startsWith('Static:')) {
-    return 'readOnly';
-  }
-  const declaration = declarationInfoOf(variable);
-  if (declaration !== null) {
-    if (declaration.region === 'register') {
-      return 'registers';
-    }
-    if (declaration.region === 'static' || declaration.region === 'global') {
-      if (declaration.readOnly) {
-        return 'readOnly';
-      }
-      return declaration.initialized ? 'data' : 'bss';
-    }
-  }
-  return stackName === 'GLOBAL' ? 'data' : 'stack';
-}
-
 /**
  * What the operands of the statement about to run hold going in.
  *
@@ -729,6 +712,9 @@ export function extractModel(execState?: ExecState | null): StepModel {
   memory.addFunctions(functions, addresses);
   memory.addStrings(runtimeStringsOf(execState), addresses);
   const variables = extractVariables(execState);
+  const active = variables.find((variable) => variable.active);
+  const frames = callFramesOf(execState);
+  const currentFrame = frames[frames.length - 1];
   return {
     stacks,
     pointers: addresses.resolve(),
@@ -737,9 +723,18 @@ export function extractModel(execState?: ExecState | null): StepModel {
     expression: withOperandValues(expressionTraceOf(execState), variables),
     callExpansions: withCallValues(callExpansionsOfState(execState), variables),
     variables,
+    context: {
+      file: null,
+      function:
+        typeof currentFrame !== 'undefined'
+          ? currentFrame.name
+          : typeof active === 'undefined'
+            ? null
+            : active.frame,
+    },
     inlineValues: inlineValuesFor(execState, variables),
     constructStates: constructStatesOf(execState),
-    frames: callFramesOf(execState),
+    frames,
     mutations: mutationsOf(execState),
     evaluations: evaluationsOf(execState),
     codeRange: codeRangeOf(execState),

@@ -24,13 +24,14 @@ describe('the canvas view panel', () => {
       drawing(MEMORY_REGIONS)
     );
 
-    expect(boxesOf(root)).toHaveLength(MEMORY_REGIONS.length + 5);
+    expect(boxesOf(root)).toHaveLength(MEMORY_REGIONS.length + 6);
     MEMORY_REGIONS.forEach((region: MemoryRegion) => {
       expect(boxFor(root, memoryRegionName(region)).checked).toBe(true);
     });
     expect(boxFor(root, strings.graphViewStatement).checked).toBe(true);
     expect(boxFor(root, strings.viewCallStack).checked).toBe(true);
     expect(boxFor(root, strings.graphExpressionHeading).checked).toBe(true);
+    expect(boxFor(root, strings.viewVariables).checked).toBe(true);
     expect(boxFor(root, strings.graphMemoryHeading).checked).toBe(true);
     expect(boxFor(root, strings.viewMutations).checked).toBe(true);
   });
@@ -70,19 +71,23 @@ describe('the canvas view panel', () => {
     expect(view.isStatementShown()).toBe(true);
   });
 
-  it('controls the call stack and expression as separate views', () => {
+  it('controls the call stack, expression, and variables as separate views', () => {
     const view = new ViewOptions();
     const { root } = viewPanel(view, () => undefined, drawing(MEMORY_REGIONS));
     const callStack = boxFor(root, strings.viewCallStack);
     const expression = boxFor(root, strings.graphExpressionHeading);
+    const variables = boxFor(root, strings.viewVariables);
 
     callStack.checked = false;
     callStack.dispatchEvent(new Event('change'));
     expression.checked = false;
     expression.dispatchEvent(new Event('change'));
+    variables.checked = false;
+    variables.dispatchEvent(new Event('change'));
 
     expect(view.isCallStackShown()).toBe(false);
     expect(view.isExpressionShown()).toBe(false);
+    expect(view.areVariablesShown()).toBe(false);
   });
 
   it('ticks the regions the map is actually drawing', () => {

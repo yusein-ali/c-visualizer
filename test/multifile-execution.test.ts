@@ -122,6 +122,10 @@ describe('multi-file execution', () => {
       (response) => response.location?.path === 'helper.c'
     );
     expect(helper?.location?.range.begin.y).toBeGreaterThanOrEqual(1);
+    expect(helper?.model.context).toEqual({
+      file: 'helper.c',
+      function: 'helper',
+    });
     const helperIndex =
       typeof helper === 'undefined' ? -1 : responses.indexOf(helper);
     expect(

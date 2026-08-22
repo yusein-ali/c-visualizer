@@ -99,6 +99,18 @@ describe('the debug controls', () => {
     expect(toolbar.style.getPropertyValue('--plivet-debug-y')).toBe('');
   });
 
+  it('opens below the rendered file tabs', () => {
+    const { bar, toolbar } = mount();
+    const tabs = document.createElement('div');
+    tabs.getBoundingClientRect = () => ({ height: 42 }) as DOMRect;
+
+    bar.setDebugToolbarTabs(tabs);
+
+    expect(toolbar.style.getPropertyValue('--plivet-debug-tabs-height')).toBe(
+      '42px'
+    );
+  });
+
   it('offers keyboard movement from a named grip', () => {
     const { toolbar, dragHandle } = mount();
 

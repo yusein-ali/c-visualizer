@@ -1,10 +1,8 @@
 import { Compartment, Extension } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
-import {
-  defaultHighlightStyle,
-  syntaxHighlighting,
-} from '@codemirror/language';
+import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { oneDarkHighlightStyle } from '@codemirror/theme-one-dark';
+import { tags } from '@lezer/highlight';
 
 /**
  * Colours are named through CSS custom properties rather than written into the
@@ -118,13 +116,51 @@ const chromeFor = (palette: Palette) => ({
 });
 
 /**
- * The frame and the tokens change together: CodeMirror's default highlight
- * style is drawn for a white background, and the purple it gives keywords is
- * unreadable on a dark one.
+ * The frame and the tokens change together. The generic CodeMirror light
+ * style leaves ordinary names, function calls and operators unstyled, which
+ * makes C lose most of its structure. Keep a complete light palette here and
+ * use One Dark's equally complete palette on the dark background.
  */
+const lightHighlightStyle = HighlightStyle.define([
+  { tag: tags.meta, color: '#6a737d' },
+  {
+    tag: [tags.keyword, tags.modifier, tags.self, tags.null],
+    color: '#0000ff',
+  },
+  {
+    tag: [tags.typeName, tags.className, tags.namespace],
+    color: '#267f99',
+  },
+  {
+    tag: [
+      tags.function(tags.variableName),
+      tags.function(tags.propertyName),
+      tags.labelName,
+    ],
+    color: '#795e26',
+  },
+  {
+    tag: [tags.variableName, tags.propertyName],
+    color: '#001080',
+  },
+  { tag: [tags.number, tags.bool, tags.atom], color: '#098658' },
+  {
+    tag: [tags.string, tags.character, tags.special(tags.string)],
+    color: '#a31515',
+  },
+  { tag: [tags.escape, tags.regexp], color: '#e51400' },
+  {
+    tag: [tags.macroName, tags.processingInstruction],
+    color: '#af00db',
+  },
+  { tag: tags.operator, color: '#7a3e9d' },
+  { tag: tags.comment, color: '#008000', fontStyle: 'italic' },
+  { tag: tags.invalid, color: '#cd3131', textDecoration: 'underline wavy' },
+]);
+
 const light: Extension = [
   EditorView.theme(chromeFor(lightPalette), { dark: false }),
-  syntaxHighlighting(defaultHighlightStyle),
+  syntaxHighlighting(lightHighlightStyle),
 ];
 const dark: Extension = [
   EditorView.theme(chromeFor(darkPalette), { dark: true }),
@@ -269,11 +305,70 @@ export const debugTheme = EditorView.baseTheme({
     marginTop: '0.3em',
     opacity: '0.8',
   },
-  // Excluded code is visibly inactive. Macro expansions and directive lines
-  // deliberately have no mark: they are tooltip-only constructs, and an
-  // underline would promise navigation they do not provide.
+  // Match VS Code's treatment of inactive preprocessor branches: keep their
+  // syntax colours, but fade the text to 55% and shade the full line. Macro
+  // expansions and active directive lines deliberately have no visible mark:
+  // they are tooltip-only constructs, and an underline would promise
+  // navigation they do not provide.
   '.plivet-excluded-region': {
-    backgroundColor: 'rgba(128, 128, 128, 0.18)',
+    opacity: 'var(--plivet-editor-inactive-opacity, 0.55)',
+  },
+  '.plivet-inactive-line': {
+    backgroundColor:
+      'var(--plivet-editor-inactive-bg, rgba(128, 128, 128, 0.12))',
+  },
+  '&dark .plivet-inactive-line': {
+    backgroundColor:
+      'var(--plivet-editor-inactive-bg, rgba(128, 128, 128, 0.18))',
+  },
+  // The C grammar calls a preprocessing condition one grey metadata token.
+  // These marks restore the expression roles supplied by the preprocessing
+  // pass. `!important` also wins when CodeMirror nests its metadata span inside
+  // one of these narrower semantic marks.
+  '.plivet-preprocessor-macro, .plivet-preprocessor-macro *': {
+    color: 'var(--plivet-editor-macro-color, #001080) !important',
+  },
+  '.plivet-preprocessor-number, .plivet-preprocessor-number *': {
+    color: 'var(--plivet-editor-number-color, #098658) !important',
+  },
+  '.plivet-preprocessor-operator, .plivet-preprocessor-operator *': {
+    color: 'var(--plivet-editor-operator-color, #7a3e9d) !important',
+  },
+  '.plivet-preprocessor-keyword, .plivet-preprocessor-keyword *': {
+    color: 'var(--plivet-editor-keyword-color, #0000ff) !important',
+  },
+  '.plivet-preprocessor-punctuation, .plivet-preprocessor-punctuation *': {
+    color: 'var(--plivet-editor-punctuation-color, #212529) !important',
+  },
+  '.plivet-preprocessor-literal, .plivet-preprocessor-literal *': {
+    color: 'var(--plivet-editor-string-color, #a31515) !important',
+  },
+  '.plivet-preprocessor-comment, .plivet-preprocessor-comment *': {
+    color: 'var(--plivet-editor-comment-color, #008000) !important',
+    fontStyle: 'italic',
+  },
+  '&dark .plivet-preprocessor-macro, &dark .plivet-preprocessor-macro *': {
+    color: 'var(--plivet-editor-macro-color, #e06c75) !important',
+  },
+  '&dark .plivet-preprocessor-number, &dark .plivet-preprocessor-number *': {
+    color: 'var(--plivet-editor-number-color, #d19a66) !important',
+  },
+  '&dark .plivet-preprocessor-operator, &dark .plivet-preprocessor-operator *':
+    {
+      color: 'var(--plivet-editor-operator-color, #56b6c2) !important',
+    },
+  '&dark .plivet-preprocessor-keyword, &dark .plivet-preprocessor-keyword *': {
+    color: 'var(--plivet-editor-keyword-color, #c678dd) !important',
+  },
+  '&dark .plivet-preprocessor-punctuation, &dark .plivet-preprocessor-punctuation *':
+    {
+      color: 'var(--plivet-editor-punctuation-color, #f8f8f2) !important',
+    },
+  '&dark .plivet-preprocessor-literal, &dark .plivet-preprocessor-literal *': {
+    color: 'var(--plivet-editor-string-color, #98c379) !important',
+  },
+  '&dark .plivet-preprocessor-comment, &dark .plivet-preprocessor-comment *': {
+    color: 'var(--plivet-editor-comment-color, #5c6370) !important',
   },
   // The hover tooltip is the only one PLIVET adds, so its wrapper can be
   // styled by the class CodeMirror already puts on hover tooltips; there is no

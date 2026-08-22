@@ -1,6 +1,7 @@
 import { ExecState } from 'unicoen.ts/dist/interpreter/Engine/ExecState';
 import { Variable } from 'unicoen.ts/dist/interpreter/Engine/Variable';
 import {
+  declarationInfoOf,
   displayAddressOf,
   displayPointerValueOf,
   displayTypeOf,
@@ -8,6 +9,7 @@ import {
 } from '../interpreter/RuntimeTypeInfo';
 import { basicSizeof } from '../interpreter/RecordTable';
 import { VariableModel } from './model';
+import type { MemoryRegion } from './model';
 
 /**
  * Reading an execution state as the tooltip says it out loud.
@@ -73,6 +75,32 @@ const isVariable = (element: any): boolean =>
  * thing this is, and the canvas beside it draws the whole array.
  */
 const SHOWN_MEMBERS = 8;
+
+/** The memory band an interpreter variable belongs to in PLIVET's model. */
+export function memoryRegionOf(
+  variable: Variable,
+  stackName: string
+): MemoryRegion {
+  if (variable.name.startsWith('Heap:')) {
+    return 'heap';
+  }
+  if (variable.name.startsWith('Static:')) {
+    return 'readOnly';
+  }
+  const declaration = declarationInfoOf(variable);
+  if (declaration !== null) {
+    if (declaration.region === 'register') {
+      return 'registers';
+    }
+    if (declaration.region === 'static' || declaration.region === 'global') {
+      if (declaration.readOnly) {
+        return 'readOnly';
+      }
+      return declaration.initialized ? 'data' : 'bss';
+    }
+  }
+  return stackName === 'GLOBAL' ? 'data' : 'stack';
+}
 
 function formatValue(value: any, type: string): string {
   if (value === null || typeof value === 'undefined') {
@@ -191,7 +219,12 @@ export function extractVariables(
     return [];
   }
   const variables: VariableModel[] = [];
-  for (const stack of execState.getStacks()) {
+  const stacks = execState.getStacks();
+  const activeStack = stacks
+    .slice()
+    .reverse()
+    .find((stack) => stack.name !== 'GLOBAL');
+  for (const stack of stacks) {
     for (const variable of stack.getVariables()) {
       if (typeof variable.parentName !== 'undefined') {
         continue;
@@ -205,6 +238,9 @@ export function extractVariables(
         type,
         value: valueOf(variable, type),
         address: displayAddressOf(variable),
+        region: memoryRegionOf(variable, stack.name),
+        frame: stack.name,
+        active: stack === activeStack,
       };
       const target = targetOf(variable, execState);
       if (target !== undefined) {

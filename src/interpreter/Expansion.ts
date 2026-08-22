@@ -29,6 +29,13 @@ export interface Expansion {
   /** What the span became. Empty when the span was dropped. */
   text: string;
   /**
+   * Whether a directive is inside an active conditional-inclusion region.
+   * Conditional control lines themselves are active when their enclosing
+   * group is active, even when the branch they select is not taken.
+   * Undefined for non-directive expansions.
+   */
+  active?: boolean;
+  /**
    * What the macro's own replacement list put there, before any macro inside
    * it was expanded in turn. `text` is the end of that chain; this is the step
    * that leads to it, and it is only recorded when the two differ - a macro

@@ -39,12 +39,125 @@
  *
  * Out of scope: __VA_OPT__, which is C++20 and C23 - the grammar behind this is
  * unicoen.ts's CPP14 parser, and the GNU comma idiom above is what the C++14
- * era offers for the same trailing-comma problem. #include is dropped: the
- * engine provides printf, malloc, sqrt and friends regardless of which headers
- * are named.
+ * era offers for the same trailing-comma problem. `preprocess()` drops
+ * #include because the engine provides printf, malloc, sqrt and friends
+ * regardless of which system headers are named. `preprocessFiles()` first
+ * expands headers supplied in PLIVET's named source set.
  */
 
 import { Expansion } from './Expansion';
+
+/** One named source available to a local `#include`. */
+export interface PreprocessorFile {
+  path: string;
+  text: string;
+}
+
+const normalizedPath = (path: string): string => {
+  const segments: string[] = [];
+  for (const segment of path.replace(/\\/g, '/').split('/')) {
+    if (segment === '' || segment === '.') {
+      continue;
+    }
+    if (segment === '..') {
+      segments.pop();
+      continue;
+    }
+    segments.push(segment);
+  }
+  return segments.join('/');
+};
+
+const includedFile = (
+  files: PreprocessorFile[],
+  includingPath: string,
+  name: string
+): PreprocessorFile | undefined => {
+  const directory = includingPath.replace(/[^/\\]*$/, '');
+  const candidates = new Set([
+    normalizedPath(name),
+    normalizedPath(directory + name),
+  ]);
+  return files.find((file) => candidates.has(normalizedPath(file.path)));
+};
+
+/**
+ * Replace local include directives with their named source before preprocessing.
+ *
+ * The interpreter has to compose its files into one synthetic source because
+ * unicoen has no linker. The comparison dialog is different: its left side is
+ * the entry file the reader wrote, and its right side should show the ordinary
+ * textual meaning of `#include` at the place where the directive occurs.
+ * Unknown includes (such as stdio.h) remain directives and the normal pass
+ * drops them because their declarations are supplied by the interpreter.
+ */
+const expandIncludes = (
+  code: string,
+  path: string,
+  files: PreprocessorFile[],
+  stack: Set<string>
+): string => {
+  let inBlockComment = false;
+  return code
+    .split('\n')
+    .map((line) => {
+      const mayContainDirective = !inBlockComment;
+      let inLiteral: string | null = null;
+      let escaped = false;
+      for (let i = 0; i < line.length; i += 1) {
+        const char = line[i];
+        const next = line[i + 1];
+        if (inBlockComment) {
+          if (char === '*' && next === '/') {
+            inBlockComment = false;
+            i += 1;
+          }
+          continue;
+        }
+        if (inLiteral !== null) {
+          if (escaped) {
+            escaped = false;
+          } else if (char === '\\') {
+            escaped = true;
+          } else if (char === inLiteral) {
+            inLiteral = null;
+          }
+          continue;
+        }
+        if (char === '"' || char === "'") {
+          inLiteral = char;
+        } else if (char === '/' && next === '*') {
+          inBlockComment = true;
+          i += 1;
+        } else if (char === '/' && next === '/') {
+          break;
+        }
+      }
+      if (!mayContainDirective) {
+        return line;
+      }
+      const include = /^\s*#\s*include\s*(?:"([^"]+)"|<([^>]+)>)/.exec(line);
+      const name = include?.[1] ?? include?.[2];
+      if (typeof name === 'undefined') {
+        return line;
+      }
+      const found = includedFile(files, path, name);
+      if (typeof found === 'undefined') {
+        return line;
+      }
+      const normalized = normalizedPath(found.path);
+      if (stack.has(normalized)) {
+        return line;
+      }
+      const nested = new Set(stack);
+      nested.add(normalized);
+      return expandIncludes(found.text, found.path, files, nested).replace(
+        /\r?\n$/,
+        ''
+      );
+    })
+    .join('\n');
+};
 
 /**
  * The replacement worth reporting on its own. A macro that expands to its own
@@ -153,13 +266,14 @@ class Preprocessor {
   }
 
   private handleDirective(line: string, lineNumber: number, raw: string) {
+    const activeBefore = this.isActive();
     const text = line.replace(/^\s*#\s*/, '').trim();
     const match = /^([A-Za-z_][A-Za-z0-9_]*)\s*([\s\S]*)$/.exec(text);
     const keyword = match === null ? '' : match[1];
     const rest = match === null ? '' : match[2];
     // The editor marks the directive itself, so every branch below records what
     // this line did: the value a macro was given, or whether a branch is taken.
-    const record = (detail: string, taken?: boolean) => {
+    const record = (detail: string, taken?: boolean, active = activeBefore) => {
       const column = Math.max(raw.indexOf('#'), 0);
       this.expansions.push({
         kind: 'directive',
@@ -168,6 +282,7 @@ class Preprocessor {
         length: raw.trim().length,
         name: `#${keyword}`,
         text: detail,
+        active,
         taken,
       });
     };
@@ -176,7 +291,7 @@ class Preprocessor {
     switch (keyword) {
       case 'define': {
         if (!this.isActive()) {
-          record(rest, false);
+          record(rest);
           return;
         }
         const name = this.defineMacro(rest, lineNumber);
@@ -205,15 +320,15 @@ class Preprocessor {
       }
       case 'ifdef':
         this.pushConditional(this.macros.has(rest.split(/\s/)[0]), '#ifdef');
-        record(rest, this.isActive());
+        record(rest, this.isActive(), activeBefore);
         return;
       case 'ifndef':
         this.pushConditional(!this.macros.has(rest.split(/\s/)[0]), '#ifndef');
-        record(rest, this.isActive());
+        record(rest, this.isActive(), activeBefore);
         return;
       case 'if':
         this.pushConditional(this.evaluate(rest) !== 0, '#if');
-        record(rest, this.isActive());
+        record(rest, this.isActive(), activeBefore);
         this.recordReferences(raw, lineNumber, []);
         return;
       case 'elif': {
@@ -226,7 +341,7 @@ class Preprocessor {
         frame.directive = '#elif';
         frame.active = frame.parentActive && value;
         frame.taken = frame.taken || value;
-        record(rest, this.isActive());
+        record(rest, this.isActive(), frame.parentActive);
         this.recordReferences(raw, lineNumber, []);
         return;
       }
@@ -239,13 +354,14 @@ class Preprocessor {
         frame.directive = '#else';
         frame.active = frame.parentActive && !frame.taken;
         frame.taken = true;
-        record('', this.isActive());
+        record('', this.isActive(), frame.parentActive);
         return;
       }
-      case 'endif':
-        this.conditionals.pop();
-        record('');
+      case 'endif': {
+        const frame = this.conditionals.pop();
+        record('', undefined, frame?.parentActive ?? activeBefore);
         return;
+      }
       default:
         // #include, #pragma, #error, #line: dropped, like every other
         // directive. The blank line keeps the numbering.
@@ -938,4 +1054,17 @@ export function preprocessSource(code: string): {
 
 export function preprocess(code: string): string {
   return preprocessSource(code).code;
+}
+
+/** Preprocess one named entry file, expanding the local headers it includes. */
+export function preprocessFiles(
+  files: PreprocessorFile[],
+  entry: string,
+  fallback = ''
+): string {
+  const source =
+    files.find((file) => normalizedPath(file.path) === normalizedPath(entry))
+      ?.text ?? fallback;
+  const root = normalizedPath(entry);
+  return preprocess(expandIncludes(source, entry, files, new Set([root])));
 }

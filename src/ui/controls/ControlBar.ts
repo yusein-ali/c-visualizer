@@ -72,6 +72,9 @@ export class ControlBar {
   private readonly status: HTMLSpanElement;
   private readonly theme: HTMLSelectElement;
   private readonly fileInput: HTMLInputElement;
+  /** The tab strip whose height keeps the toolbar below the file names. */
+  private toolbarTabs: HTMLElement | null = null;
+  private toolbarTabsObserver: ResizeObserver | null = null;
   /** The pointer that currently owns the toolbar drag. */
   private pointer: number | null = null;
   private pointerX = 0;
@@ -181,11 +184,32 @@ export class ControlBar {
     this.theme.value = dark ? 'dark' : 'light';
   }
 
+  /** Keep the toolbar's CSS opening position below a possibly wrapped tab bar. */
+  setDebugToolbarTabs(tabs: HTMLElement): void {
+    this.toolbarTabsObserver?.disconnect();
+    this.toolbarTabs = tabs;
+    this.syncDebugToolbarTabs();
+
+    if (typeof ResizeObserver !== 'undefined') {
+      this.toolbarTabsObserver = new ResizeObserver(this.syncDebugToolbarTabs);
+      this.toolbarTabsObserver.observe(tabs);
+    }
+  }
+
   destroy(): void {
+    this.toolbarTabsObserver?.disconnect();
     this.fileInput.removeEventListener('change', this.chosen);
     this.status.remove();
     this.root.remove();
   }
+
+  private readonly syncDebugToolbarTabs = (): void => {
+    const height = this.toolbarTabs?.getBoundingClientRect().height ?? 0;
+    this.debugToolbar.style.setProperty(
+      '--plivet-debug-tabs-height',
+      `${height}px`
+    );
+  };
 
   /**
    * The file the picker came back with. The input is cleared afterwards, so

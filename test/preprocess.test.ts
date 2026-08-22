@@ -1,4 +1,8 @@
-import { preprocess, preprocessSource } from '../src/interpreter/preprocess';
+import {
+  preprocess,
+  preprocessFiles,
+  preprocessSource,
+} from '../src/interpreter/preprocess';
 
 /**
  * The cases mirror `baseline/scripts/probe-preprocessor.js`, which records what
@@ -263,6 +267,38 @@ describe('line numbering', () => {
   });
 });
 
+describe('local includes', () => {
+  it('replaces an include with its header at the directive location', () => {
+    const files = [
+      {
+        path: 'src/main.c',
+        text: '#include "../include/values.h"\nint value = VALUE;',
+      },
+      {
+        path: 'include/values.h',
+        text: '#define VALUE 7\nint header_declaration;',
+      },
+      { path: 'unused.c', text: 'int unrelated;' },
+    ];
+
+    const output = preprocessFiles(files, 'src/main.c');
+
+    expect(output).toContain('int header_declaration;\nint value = 7;');
+    expect(output).not.toContain('#include');
+    expect(output).not.toContain('int unrelated;');
+  });
+
+  it('expands nested headers and leaves cyclic includes finite', () => {
+    const files = [
+      { path: 'main.c', text: '#include "a.h"\nint value = VALUE;' },
+      { path: 'a.h', text: '#include "b.h"' },
+      { path: 'b.h', text: '#include "a.h"\n#define VALUE 9' },
+    ];
+
+    expect(preprocessFiles(files, 'main.c').trim()).toBe('int value = 9;');
+  });
+});
+
 describe('expansion records for the editor', () => {
   const macros = (code: string) =>
     preprocessSource(code).expansions.filter((e) => e.kind === 'macro');
@@ -329,6 +365,47 @@ describe('expansion records for the editor', () => {
     ).toEqual([
       ['#ifdef', true],
       ['#else', false],
+    ]);
+  });
+
+  it('marks directives inside skipped branches as inactive', () => {
+    const code = [
+      '#define TOUR_LEVEL 2',
+      '#define ENABLE_CALLBACKS',
+      '#undef ENABLE_CALLBACKS',
+      '#ifdef ENABLE_CALLBACKS',
+      '#define CALLBACKS_AVAILABLE 1',
+      '#endif',
+      '#if TOUR_LEVEL > 1 && defined(ENABLE_CALLBACKS)',
+      '#define SELECTED_BONUS 5',
+      '#elif TOUR_LEVEL == 1',
+      '#define SELECTED_BONUS 2',
+      '#else',
+      '#define SELECTED_BONUS 0',
+      '#endif',
+    ].join('\n');
+
+    expect(
+      directives(code).map((directive) => [
+        directive.line,
+        directive.name,
+        directive.active,
+        directive.taken,
+      ])
+    ).toEqual([
+      [1, '#define', true, undefined],
+      [2, '#define', true, undefined],
+      [3, '#undef', true, undefined],
+      [4, '#ifdef', true, false],
+      [5, '#define', false, undefined],
+      [6, '#endif', true, undefined],
+      [7, '#if', true, false],
+      [8, '#define', false, undefined],
+      [9, '#elif', true, false],
+      [10, '#define', false, undefined],
+      [11, '#else', true, true],
+      [12, '#define', true, undefined],
+      [13, '#endif', true, undefined],
     ]);
   });
 

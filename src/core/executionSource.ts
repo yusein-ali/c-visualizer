@@ -20,6 +20,8 @@ interface Segment {
 
 const lineCount = (text: string): number => text.split('\n').length;
 
+const isHeader = (path: string): boolean => /\.(h|hh|hpp|hxx)$/i.test(path);
+
 /**
  * The one translation unit unicoen can execute, and the map back to its files.
  *
@@ -35,8 +37,13 @@ export class ExecutionSource {
   constructor(files: ExecutionFile[], entry: string, fallback: string) {
     const usable = files.some((file) => file.path === entry)
       ? [
-          ...files.filter((file) => file.path === entry),
-          ...files.filter((file) => file.path !== entry),
+          ...files.filter((file) => isHeader(file.path)),
+          ...files.filter(
+            (file) => file.path === entry && !isHeader(file.path)
+          ),
+          ...files.filter(
+            (file) => file.path !== entry && !isHeader(file.path)
+          ),
         ]
       : [{ path: entry, text: fallback }];
     const parts: string[] = [];
