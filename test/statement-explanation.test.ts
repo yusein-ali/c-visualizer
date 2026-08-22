@@ -167,7 +167,7 @@ describe('what the statement section says', () => {
     // instead of about the switch in front of them.
     expect(explanation.statement?.title).toBe('return statement');
     expect(card.context).toBe(
-      'At line: 5 · for statement on line 3 completed: its controlling expression evaluated to 0'
+      'File: none · Line: 5 · Function: main() · for statement on line 3 completed: its controlling expression evaluated to 0'
     );
   });
 
@@ -306,7 +306,7 @@ describe('the statement teaching card', () => {
     const card = statementCard(step, explaining(PROGRAM, step), false);
 
     expect(card.title).toBe('For statement');
-    expect(card.context).toBe('At line: 6');
+    expect(card.context).toBe('File: none · Line: 6 · Function: main()');
     expect(card.description).toContain('Initialization: int i = 0');
   });
 
@@ -576,6 +576,33 @@ describe('the statement teaching card', () => {
         'Identifier: a\n' +
         'Initializer: none'
     );
+    expect(card.descriptionRows).toEqual([
+      {
+        label: 'Type',
+        value: 'int[4]',
+        labelCode: false,
+        valueCode: true,
+      },
+      {
+        label: 'Storage-class specifiers',
+        value: 'auto',
+        labelCode: false,
+        valueCode: true,
+      },
+      {
+        label: 'Type qualifiers',
+        value: 'none',
+        labelCode: false,
+        valueCode: true,
+      },
+      { label: 'Identifier', value: 'a', labelCode: false, valueCode: true },
+      {
+        label: 'Initializer',
+        value: 'none',
+        labelCode: false,
+        valueCode: true,
+      },
+    ]);
   });
 
   it('gives useful guidance before execution starts', () => {
@@ -614,6 +641,8 @@ describe('the statement teaching card', () => {
     };
     const card = statementCard(step, explaining(PROGRAM, step), false);
 
-    expect(card.context).toBe(`At line: ${step.expression!.range.begin.y}`);
+    expect(card.context).toBe(
+      `File: none · Line: ${step.expression!.range.begin.y} · Function: main()`
+    );
   });
 });

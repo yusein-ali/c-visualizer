@@ -319,6 +319,19 @@ export class Server {
   public async send(request: Request): Promise<Response> {
     const { controlEvent, stdinText, lineNumOfBreakpoint } = request;
     const requestedExecution = executionSourceOf(request);
+    // Breakpoints come from the active editor as zero-based, file-local rows.
+    // The interpreter executes the composed source and reports one-based
+    // global lines, so translate them once before any run command consumes
+    // them. Single-file requests keep the same values after this conversion.
+    const globalBreakpoints = lineNumOfBreakpoint?.flatMap((row) => {
+      const line = requestedExecution.globalLine(
+        activePathOf(request),
+        row + 1
+      );
+      // Keep the run-loop contract in zero-based rows; only the source-map
+      // lookup itself uses one-based interpreter lines.
+      return line === null ? [] : [line - 1];
+    });
 
     switch (controlEvent) {
       case 'Start': {
@@ -359,14 +372,14 @@ export class Server {
       case 'StepOver': {
         const execution = this.execution ?? requestedExecution;
         return this.respond(
-          this.StepOver(execution, lineNumOfBreakpoint, stdinText),
+          this.StepOver(execution, globalBreakpoints, stdinText),
           execution
         );
       }
       case 'StepAll': {
         const execution = this.execution ?? requestedExecution;
         return this.respond(
-          this.StepAll(execution, lineNumOfBreakpoint, stdinText),
+          this.StepAll(execution, globalBreakpoints, stdinText),
           execution
         );
       }
@@ -378,7 +391,7 @@ export class Server {
         this.execution = requestedExecution;
         const started = await this.Start(requestedExecution.code);
         return this.respond(
-          this.StepAll(requestedExecution, lineNumOfBreakpoint),
+          this.StepAll(requestedExecution, globalBreakpoints),
           requestedExecution,
           started.constructs,
           started.expansions
@@ -486,7 +499,10 @@ export class Server {
     return {
       execState: this.history.stateAt(step),
       output: this.history.outputAt(step),
-      debugState,
+      debugState:
+        debugState === 'Debugging' && this.history.waitingForStdinAt(step)
+          ? 'stdin'
+          : debugState,
       step,
     };
   }
@@ -570,7 +586,6 @@ export class Server {
       return this.atEnd();
     }
     const output = this.interpreter.getStdout();
-    this.record(state, output);
     let debugState: DEBUG_STATE = 'Debugging';
     if (this.interpreter.getIsWaitingForStdin()) {
       debugState = 'stdin';
@@ -578,6 +593,7 @@ export class Server {
       debugState = 'EOF';
       this.isExecuting = false;
     }
+    this.record(state, output, debugState === 'stdin');
     return { execState: state, output, debugState, step: this.count };
   }
 
@@ -871,8 +887,12 @@ export class Server {
     };
   }
 
-  private record(execState: ExecState, output: string) {
-    this.history.push(execState, output);
+  private record(
+    execState: ExecState,
+    output: string,
+    waitingForStdin: boolean = false
+  ) {
+    this.history.push(execState, output, waitingForStdin);
     this.recordArrival(execState);
   }
 

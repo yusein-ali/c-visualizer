@@ -18,23 +18,28 @@ export function callStackRows(frames: FrameModel[]): CallStackRow[] {
   return frames
     .slice()
     .reverse()
-    .map((frame, index) => ({
-      name: `${frame.name}()`,
-      where:
-        frame.calledFrom === null
-          ? `${strings.onLine} ${frame.line}`
-          : `${strings.viewCalledFrom} ${frame.calledFrom}`,
-      arguments: frame.arguments
+    .map((frame, index) => {
+      const argumentsText = frame.arguments
         .map((argument) =>
           argument.name === ''
             ? argument.value
             : `${argument.name} = ${argument.value}`
         )
-        .join(', '),
-      timesEntered:
-        1 < frame.timesEntered
-          ? `${strings.factTimesEntered}: ${frame.timesEntered}`
-          : '',
-      current: index === 0,
-    }));
+        .join(', ');
+      return {
+        name: `${frame.name}(${argumentsText})`,
+        where:
+          frame.calledFrom === null
+            ? `${strings.onLine} ${frame.line}`
+            : typeof frame.calledFromFile === 'undefined'
+              ? `${strings.viewCalledFrom} ${frame.calledFrom}`
+              : `${strings.viewCalledFromFile} ${frame.calledFromFile} ${strings.viewLine} ${frame.calledFrom}`,
+        arguments: argumentsText,
+        timesEntered:
+          1 < frame.timesEntered
+            ? `${strings.factTimesEntered}: ${frame.timesEntered}`
+            : '',
+        current: index === 0,
+      };
+    });
 }

@@ -20,6 +20,7 @@ export const HISTORY_LIMIT = 1000;
 interface Entry {
   state: ExecState;
   output: string;
+  waitingForStdin: boolean;
 }
 
 export class StepHistory {
@@ -29,8 +30,12 @@ export class StepHistory {
 
   constructor(private readonly limit: number = HISTORY_LIMIT) {}
 
-  public push(state: ExecState, output: string): void {
-    this.entries.set(this.recorded, { state, output });
+  public push(
+    state: ExecState,
+    output: string,
+    waitingForStdin: boolean = false
+  ): void {
+    this.entries.set(this.recorded, { state, output, waitingForStdin });
     this.recorded += 1;
     this.evict();
   }
@@ -51,6 +56,10 @@ export class StepHistory {
   public outputAt(index: number): string {
     const entry = this.entries.get(index);
     return entry === undefined ? '' : entry.output;
+  }
+
+  public waitingForStdinAt(index: number): boolean {
+    return this.entries.get(index)?.waitingForStdin ?? false;
   }
 
   public lastState(): ExecState | undefined {

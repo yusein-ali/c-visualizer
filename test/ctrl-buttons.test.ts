@@ -52,6 +52,8 @@ describe('control button enablement', () => {
     expect(enablementFor('First').StepBack).toBe(false);
     expect(enablementFor('First').BackAll).toBe(false);
     expect(enablementFor('Debugging').StepBack).toBe(true);
+    expect(enablementFor('stdin').StepBack).toBe(true);
+    expect(enablementFor('stdin').BackAll).toBe(true);
   });
 
   it('does not offer stepping forward once the program has ended', () => {

@@ -58,7 +58,10 @@ export class ExecutionSource {
       });
       parts.push(file.text);
       if (index + 1 < usable.length) {
-        parts.push('\n');
+        // A trailing newline already separates this file from the next one.
+        // Adding another here shifts every later interpreter line while the
+        // segment map still advances by only the file's own line count.
+        parts.push(file.text.endsWith('\n') ? '' : '\n');
       }
       firstLine += lines;
     }

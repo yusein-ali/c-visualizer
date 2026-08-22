@@ -336,8 +336,19 @@
   cursor: pointer;
 }
 
+.plivet-graph .plivet-identifier {
+  cursor: pointer;
+}
+
 .plivet-graph .plivet-object--focus {
   fill: var(--plivet-graph-focus, #fff3bf);
   stroke: var(--plivet-graph-focus-line, #d9a400);
   stroke-width: 2;
+}
+
+/* Keep the identifier legible when its surrounding memory cell is focused. */
+.plivet-graph text.plivet-object--focus {
+  fill: var(--plivet-graph-ink, #111111);
+  stroke: none;
+  font-weight: 700;
 }

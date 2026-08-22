@@ -822,6 +822,53 @@ int main(void) {
     ).toMatchObject({ path: 'main.c', range: { begin: { y: 10 } } });
   });
 
+  it('matches a breakpoint to a line in the active file', async () => {
+    const server = new Server();
+    const files = [
+      {
+        path: 'main.c',
+        text: `int add(int);
+int main(void) {
+  return add(1);
+}
+`,
+      },
+      {
+        path: 'helper.c',
+        text: `int add(int value) {
+  return value + 1;
+}
+`,
+      },
+    ];
+    let runEvent: string | null = null;
+    const stopped = new Promise<Response>((resolve) => {
+      server.onRunEvent = (event, response) => {
+        runEvent = event;
+        resolve(response);
+      };
+    });
+
+    await quiet(() =>
+      server.send({
+        controlEvent: 'Exec',
+        sourcecode: files[0].text,
+        files,
+        entry: 'main.c',
+        active: 'helper.c',
+        // The first line in helper.c, in the editor's zero-based rows.
+        lineNumOfBreakpoint: [0],
+      })
+    );
+
+    const response = await stopped;
+    expect(runEvent).toBe('Breakpoint');
+    expect(response.location).toMatchObject({
+      path: 'helper.c',
+      range: { begin: { y: 1 } },
+    });
+  });
+
   it('puts only referenced stdio routines in text memory', async () => {
     const response = await quiet(() =>
       new Server().send({
@@ -880,6 +927,28 @@ int main(void) { return 0; }`,
     }
     // Down to the beginning, and then it stays there.
     expect(walked).toEqual([5, 4, 3, 2, 1, 0, 0, 0]);
+  });
+
+  it('restores stdin when replay steps back to a scanf pause', async () => {
+    const source = `int main(void) { int value = 0; scanf("%d", &value); return value; }`;
+    const server = new Server();
+    const request = (controlEvent: CONTROL_EVENT, stdinText?: string) =>
+      quiet(() => server.send({ controlEvent, sourcecode: source, stdinText }));
+
+    await request('Start');
+    let paused = await request('Step');
+    for (
+      let attempt = 0;
+      attempt < 20 && paused.debugState !== 'stdin';
+      attempt += 1
+    ) {
+      paused = await request('Step');
+    }
+    expect(paused.debugState).toBe('stdin');
+
+    await request('Step', '7');
+    const replayed = await request('StepBack');
+    expect(replayed.debugState).toBe('stdin');
   });
 
   it('steps over a function call and keeps the skipped states in history', async () => {

@@ -1019,11 +1019,7 @@ export class EditorController {
     model: StepModel,
     location: SourceLocation | undefined
   ): StepModel {
-    if (
-      typeof location === 'undefined' ||
-      model.codeRange === null ||
-      model.codeRange.begin.y === location.range.begin.y
-    ) {
+    if (typeof location === 'undefined' || model.codeRange === null) {
       return model;
     }
     const source = this.executionSource();
@@ -1031,6 +1027,22 @@ export class EditorController {
     return {
       ...model,
       codeRange: location.range,
+      frames: model.frames.map((frame) => {
+        if (frame.calledFrom === null) {
+          return frame;
+        }
+        const caller = source.locate({
+          begin: { x: 0, y: frame.calledFrom },
+          end: { x: 0, y: frame.calledFrom },
+        });
+        return caller === null
+          ? frame
+          : {
+              ...frame,
+              calledFrom: caller.range.begin.y,
+              calledFromFile: caller.path,
+            };
+      }),
       expression: this.localExpression(source, path, model.expression),
       constructStates: model.constructStates.flatMap((state) => {
         const range = this.localRange(source, path, state.range);
@@ -1456,9 +1468,37 @@ export class EditorController {
       this.entryPath,
       this.fileAt(this.entryPath).text
     );
+    // Object declarations come from `this.statement`, whose construct list is
+    // deliberately localized to the active tab for editor highlighting.
+    // Function declarations above come from the worker's composed source.
+    // Convert the former back to composed coordinates before asking the source
+    // map to locate it; otherwise a header offset is subtracted twice.
+    const declarationRange =
+      target.kind === 'object'
+        ? {
+            begin: {
+              x: declaration.column,
+              y:
+                source.globalLine(this.activePath, declaration.line) ??
+                declaration.line,
+            },
+            end: {
+              x: declaration.endColumn,
+              y:
+                source.globalLine(this.activePath, declaration.endLine) ??
+                declaration.endLine,
+            },
+          }
+        : {
+            begin: { x: declaration.column, y: declaration.line },
+            end: {
+              x: declaration.endColumn,
+              y: declaration.endLine,
+            },
+          };
     const location = source.locate({
-      begin: { x: declaration.column, y: declaration.line },
-      end: { x: declaration.endColumn, y: declaration.endLine },
+      begin: declarationRange.begin,
+      end: declarationRange.end,
     });
     if (location === null) {
       return;

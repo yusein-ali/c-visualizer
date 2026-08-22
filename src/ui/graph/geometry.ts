@@ -115,7 +115,8 @@ export function statementSummary(model: StepModel): string {
 export function memoryGeometry(
   model: StepModel,
   folds: FoldState,
-  view: ViewOptions = new ViewOptions()
+  view: ViewOptions = new ViewOptions(),
+  availableWidth?: number
 ): MemoryGeometry {
   const memory: MemorySegmentModel[] = model.memory
     .filter((segment) =>
@@ -128,7 +129,7 @@ export function memoryGeometry(
       ...segment,
       name: segmentNames[segment.key],
     }));
-  return layoutMemory({ ...model, memory }, folds);
+  return layoutMemory({ ...model, memory }, folds, availableWidth);
 }
 
 /**

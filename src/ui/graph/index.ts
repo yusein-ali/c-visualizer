@@ -8,6 +8,7 @@ export {
   statementSummary,
 } from './geometry';
 export { StackTable, stackTableOf } from './StackTable';
+export { mutationTableCells } from './mutationTable';
 export { callStackRows } from './callStack';
 export type { CallStackRow } from './callStack';
 export { callHeading } from './callSection';

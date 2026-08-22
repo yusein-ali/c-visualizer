@@ -15,6 +15,8 @@ export interface StatementCardModel {
   context: string;
   /** The construct and all of its facts, kept inside one explanation cell. */
   description: string;
+  /** Facts that can be shown as styled label/value rows instead of prose. */
+  descriptionRows?: StatementCardRow[];
   values: StatementCardRow[];
 }
 
@@ -34,12 +36,54 @@ const sentenceLabel = (label: string): string =>
       ? strings.statementReadsZero
       : sentenceCase(plainText(label));
 
+/** The source location is part of the statement identity, not just a line. */
+const statementLocation = (model: StepModel, line: number | null): string => {
+  const file = model.context.file ?? strings.variableNoContext;
+  const functionName =
+    model.context.function === null
+      ? strings.variableNoContext
+      : `${model.context.function}()`;
+  const lineText = line === null ? strings.variableNoContext : String(line);
+  return `${strings.statementContextFile}: ${file} · ${strings.statementContextLine}: ${lineText} · ${strings.statementContextFunction}: ${functionName}`;
+};
+
+/** Remove the old line-only prefix when an explanation adds a side note. */
+const explanationNote = (
+  explanationContext: string | undefined,
+  line: number | null
+): string => {
+  if (explanationContext === undefined || line === null) {
+    return explanationContext ?? '';
+  }
+  const prefix = `${strings.statementOnLine} ${line}`;
+  if (explanationContext === prefix) {
+    return '';
+  }
+  return explanationContext.startsWith(`${prefix} · `)
+    ? explanationContext.slice(`${prefix} · `.length)
+    : explanationContext;
+};
+
 const factLine = (
   fact: NonNullable<StatementExplanation['statement']>['facts'][number]
 ): string =>
   fact.value === ''
     ? finishSentence(sentenceLabel(fact.label))
     : `${sentenceLabel(fact.label)}: ${plainText(fact.value)}`;
+
+const factRows = (
+  facts: NonNullable<StatementExplanation['statement']>['facts']
+): StatementCardRow[] | undefined => {
+  if (facts.length === 0 || facts.some((fact) => fact.value === '')) {
+    return undefined;
+  }
+  return facts.map((fact) => ({
+    label: sentenceLabel(fact.label),
+    value: plainText(fact.value),
+    labelCode: false,
+    valueCode: true,
+  }));
+};
 
 /** A list that reads as prose rather than as columns in a data table. */
 const list = (parts: string[]): string => {
@@ -174,7 +218,7 @@ export function statementCard(
       context:
         line === null
           ? strings.statementStartHint
-          : `${strings.statementOnLine} ${line}`,
+          : statementLocation(model, line),
       description:
         line === null
           ? ''
@@ -184,12 +228,13 @@ export function statementCard(
   }
 
   const title = sentenceCase(explanation.statement.title);
+  const location = statementLocation(model, line);
+  const note = explanationNote(explanation.context, line);
   return {
     title,
-    context:
-      explanation.context ??
-      (line === null ? '' : `${strings.statementOnLine} ${line}`),
+    context: note === '' ? location : `${location} · ${note}`,
     description: descriptionOf(title, explanation.statement.facts),
+    descriptionRows: factRows(explanation.statement.facts),
     values: includeValues
       ? explanation.parts.map((part) => ({
           label: part.title,

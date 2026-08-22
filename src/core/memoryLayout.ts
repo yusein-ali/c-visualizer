@@ -40,6 +40,8 @@ const CHARACTER_WIDTH = MEMORY_FONT_SIZE * 0.6;
 
 /** The segment's name and address range. */
 export const MEMORY_TITLE_HEIGHT = 32;
+/** A title whose range cannot share its line with the segment name. */
+export const MEMORY_WRAPPED_TITLE_HEIGHT = 50;
 /** The row naming the columns below it. */
 export const MEMORY_COLUMN_HEADER_HEIGHT = 24;
 /** The row naming a stack frame within the stack segment. */
@@ -282,8 +284,26 @@ const titleWidth = (name: string, addressLabel: string): number =>
   4 * MEMORY_PADDING_X +
   MEMORY_TITLE_TOGGLE_WIDTH;
 
+/**
+ * The title is rendered in a bold interface font, so use a deliberately
+ * generous estimate for the name. The range gets its own line before the two
+ * labels can collide; widening the table is not always possible because the
+ * memory map may have been given two fixed columns.
+ */
+const titleFitsOnOneLine = (
+  name: string,
+  addressLabel: string,
+  width: number
+): boolean =>
+  name.length * (MEMORY_FONT_SIZE + 1) +
+    addressLabel.length * CHARACTER_WIDTH +
+    4 * MEMORY_PADDING_X +
+    MEMORY_TITLE_TOGGLE_WIDTH <=
+    width;
+
 function columnWidths(
-  segments: MemorySegmentModel[]
+  segments: MemorySegmentModel[],
+  maxNodeWidth?: number
 ): Map<MemoryColumnKey, number> {
   const widths = new Map<MemoryColumnKey, number>(
     COLUMN_ORDER.map((key) => [key, MIN_COLUMN_WIDTH])
@@ -343,6 +363,12 @@ function columnWidths(
     const slack = Math.ceil((title - nodeWidth) / COLUMN_ORDER.length);
     for (const column of COLUMN_ORDER) {
       widths.set(column, (widths.get(column) as number) + slack);
+    }
+  }
+  if (typeof maxNodeWidth === 'number' && nodeWidth > maxNodeWidth) {
+    const scale = maxNodeWidth / nodeWidth;
+    for (const column of COLUMN_ORDER) {
+      widths.set(column, (widths.get(column) as number) * scale);
     }
   }
   return widths;
@@ -601,14 +627,19 @@ function pointerArrow(
 
 export function layoutMemory(
   model: StepModel,
-  folds: FoldState
+  folds: FoldState,
+  availableWidth?: number
 ): MemoryGeometry {
   const byKey = new Map(model.memory.map((segment) => [segment.key, segment]));
   const ordered = SEGMENT_ORDER.map((key) => byKey.get(key)).filter(
     (segment): segment is MemorySegmentModel => typeof segment !== 'undefined'
   );
 
-  const widths = columnWidths(ordered);
+  const maxNodeWidth =
+    typeof availableWidth === 'number'
+      ? Math.max(1, (availableWidth - COLUMN_GAP_X) / 2)
+      : undefined;
+  const widths = columnWidths(ordered, maxNodeWidth);
   let left = 0;
   const columns: MemoryColumnGeometry[] = COLUMN_ORDER.map((key) => {
     const width = widths.get(key) as number;
@@ -785,7 +816,15 @@ export function layoutMemory(
         (index + 1 < rows.length && rows[index + 1].kind === 'entry')
     );
     const columnHeaderHeight = collapsed ? 0 : MEMORY_COLUMN_HEADER_HEIGHT;
-    let y = MEMORY_TITLE_HEIGHT + columnHeaderHeight;
+    const addressLabel = addressLabelOf(segment);
+    const titleHeight = titleFitsOnOneLine(
+      segment.name,
+      addressLabel,
+      nodeWidth
+    )
+      ? MEMORY_TITLE_HEIGHT
+      : MEMORY_WRAPPED_TITLE_HEIGHT;
+    let y = titleHeight + columnHeaderHeight;
     for (const row of kept) {
       row.y = y;
       for (const cell of row.cells) {
@@ -811,12 +850,12 @@ export function layoutMemory(
     segments.push({
       key: segment.key,
       name: segment.name,
-      addressLabel: addressLabelOf(segment),
+      addressLabel,
       x: columnX[side],
       y: segmentTop,
       width: nodeWidth,
       height: y,
-      titleHeight: MEMORY_TITLE_HEIGHT,
+      titleHeight,
       columnHeaderHeight,
       collapsed,
       columns,

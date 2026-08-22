@@ -63,7 +63,9 @@ const strings = {
   viewMutations: 'Object writes over time',
   viewNothingRunning: 'no function invocation is active',
   viewNothingWritten: 'no object has been written yet',
-  viewCalledFrom: 'call on line',
+  viewCalledFrom: 'called from line',
+  viewCalledFromFile: 'called from',
+  viewLine: 'line',
   viewColumnFrame: 'Function invocation',
   viewColumnObject: 'Object',
   viewColumnBefore: 'Previously stored',
@@ -85,6 +87,7 @@ const strings = {
   variableContextFunction: 'Function',
   variableColumnSize: 'Size',
   variableColumnSegment: 'Memory segment',
+  variableColumnType: 'Type',
   variableNoContext: 'none',
   variableNoneActive: 'no active variables in this context',
   // The JointJS sections, read as cause then state: the operation and active
@@ -99,6 +102,9 @@ const strings = {
   statementNotRunning: 'no statement is being executed',
   statementCurrent: 'Current statement',
   statementNoActive: 'No current statement',
+  statementContextFile: 'File',
+  statementContextLine: 'Line',
+  statementContextFunction: 'Function',
   statementOnLine: 'At line:',
   statementLoopExitedOnLine:
     'Iteration statement completed after its controlling expression on line',

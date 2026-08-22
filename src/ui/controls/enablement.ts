@@ -54,13 +54,13 @@ export const enablementFor = (debugState: DEBUG_STATE): Enablement => {
         StepAll: true,
       };
     case 'stdin':
-      // Blocked on input. Stepping resumes the read; stepping backwards over
-      // it would have to un-consume the input, so it is not offered.
+      // The input pause is a retained history step, so replay can move back
+      // from it without trying to reverse the interpreter.
       return {
         Start: true,
         Stop: true,
-        BackAll: false,
-        StepBack: false,
+        BackAll: true,
+        StepBack: true,
         StepOver: false,
         Step: true,
         StepAll: true,

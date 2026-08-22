@@ -2,6 +2,7 @@
 // their way out, and only the default is guaranteed.
 import packageJson from '../../package.json';
 import {
+  CONTROL_EVENT,
   DEBUG_STATE,
   InterpreterClient,
   StepModel,
@@ -154,6 +155,7 @@ export class Plivet {
   private preprocessed: PreprocessedDialog | null = null;
   private readonly diagnosticProviders = new Map<string, DiagnosticProvider>();
   private debugState: DEBUG_STATE = 'Stop';
+  private stdinCommand: CONTROL_EVENT = 'StepAll';
   private theme: Theme;
 
   constructor(parent: HTMLElement, options: PlivetOptions = {}) {
@@ -183,7 +185,7 @@ export class Plivet {
 
     this.controls = new ControlBar(this.shell.controls, {
       statusParent: this.shell.status,
-      onDebug: (command) => bus.signal('debug', command),
+      onDebug: (command) => this.signalDebug(command),
       onZoom: (command: ZOOM_COMMAND) => bus.signal('zoom', command),
       onTheme: (dark) => bus.signal('changeTheme', dark ? 'dark' : 'light'),
       onHelp: () => this.help.open(),
@@ -223,7 +225,7 @@ export class Plivet {
       // Resume rather than single-step: the run stops at the next read, at a
       // breakpoint or at EOF, so the console re-opens on its own for the next
       // value instead of waiting for a Step press that is easy to miss.
-      onInput: (text: string) => bus.signal('debug', 'StepAll', text),
+      onInput: (text: string) => this.signalDebug(this.stdinCommand, text),
     });
 
     this.graph = new PlivetGraph(this.shell.main, {
@@ -511,21 +513,21 @@ export class Plivet {
     switch (event.key) {
       case 'F5':
         if (enabled.StepAll) {
-          this.bus.signal('debug', runCommand(this.debugState));
+          this.signalDebug(runCommand(this.debugState));
         } else {
           handled = false;
         }
         break;
       case 'F6':
         if (enabled.Step) {
-          this.bus.signal('debug', stepCommand(this.debugState));
+          this.signalDebug(stepCommand(this.debugState));
         } else {
           handled = false;
         }
         break;
       case 'F7':
         if (enabled.StepOver) {
-          this.bus.signal('debug', 'StepOver');
+          this.signalDebug('StepOver');
         } else {
           handled = false;
         }
@@ -541,6 +543,15 @@ export class Plivet {
       event.stopPropagation();
     }
   };
+
+  private signalDebug(command: CONTROL_EVENT, stdinText?: string): void {
+    if (command === 'Step' || command === 'StepOver') {
+      this.stdinCommand = command;
+    } else if (command === 'StepAll' || command === 'Exec') {
+      this.stdinCommand = 'StepAll';
+    }
+    this.bus.signal('debug', command, stdinText);
+  }
 
   private async upload(files: FileList): Promise<void> {
     try {

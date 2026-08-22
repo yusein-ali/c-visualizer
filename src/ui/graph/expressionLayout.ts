@@ -103,6 +103,14 @@ const localLayout = (
     cursor += child.maxX - child.minX + gapX;
     return result;
   });
+  if (placed.length > 2) {
+    // A wide first branch otherwise pulls the parent left. Anchor the parent
+    // over the middle branch, which keeps the second leaf under its operator
+    // and leaves the branch spacing unchanged.
+    const middle = placed[Math.floor(placed.length / 2)];
+    const middleCenter = (middle.minX + middle.maxX) / 2;
+    return joined({ ...root, x: middleCenter - root.width / 2 }, placed);
+  }
   return joined(root, placed);
 };
 

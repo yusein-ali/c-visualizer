@@ -115,4 +115,24 @@ describe('operand connector ports', () => {
     ).toHaveLength(6);
     expect(new Set(sources.map((source) => source.x)).size).toBe(6);
   });
+
+  it('centres a wide parent over its middle branch', () => {
+    const middle = node('.', { kind: 'operator', children: [node('b')] });
+    const root = node('?:', {
+      kind: 'operator',
+      children: [
+        node('>', {
+          kind: 'operator',
+          children: [node('a'), node('wide')],
+        }),
+        middle,
+        node('c'),
+      ],
+    });
+    const geometry = layout(root);
+    const parent = geometry.nodes.find((one) => one.node === root)!;
+    const middleBox = geometry.nodes.find((one) => one.node === middle)!;
+
+    expect(parent.x + parent.width / 2).toBe(middleBox.x + middleBox.width / 2);
+  });
 });

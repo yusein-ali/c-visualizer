@@ -162,7 +162,7 @@ const mountedMacroFiles = () => {
     entry: 'main.c',
   });
   const view = (controller as any).editor.view;
-  return { host, controller, view };
+  return { host, bus, controller, view };
 };
 
 const mountedEnumFiles = () => {
@@ -443,6 +443,63 @@ describe('memory-view navigation, wired up', () => {
 
     expect(view.state.doc.lineAt(view.state.selection.main.anchor).number).toBe(
       5
+    );
+    controller.destroy();
+    host.remove();
+  });
+
+  it('keeps an object jump on the right line after a header offset', () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const bus = new Bus();
+    const { client } = fakeClient();
+    const entry = `#include "values.h"
+int main(void) {
+  int count = 2;
+  return count;
+}`;
+    const controller = new EditorController(host, {
+      bus,
+      client,
+      files: [
+        { path: 'main.c', text: entry },
+        { path: 'values.h', text: MACRO_HEADER },
+      ],
+      entry: 'main.c',
+    });
+    const view = (controller as any).editor.view;
+    const files = controller.openFiles();
+    const source = new ExecutionSource(files, 'main.c', files[0].text);
+    const model = {
+      ...emptyStepModel(),
+      variables: [
+        {
+          name: 'count',
+          key: 'main-count',
+          type: 'int',
+          value: '2',
+          address: 0x1000,
+          region: 'stack' as const,
+          frame: 'main',
+          active: true,
+        },
+      ],
+    };
+    controller.recieve({
+      output: '',
+      sourcecode: source.code,
+      debugState: 'Debugging',
+      step: 1,
+      errors: [],
+      model,
+      constructs: constructsOf(source.code),
+    } as Response);
+
+    bus.signal('navigateMemory', { kind: 'object', key: 'main-count' });
+
+    expect(controller.active()).toBe('main.c');
+    expect(view.state.doc.lineAt(view.state.selection.main.anchor).number).toBe(
+      3
     );
     controller.destroy();
     host.remove();

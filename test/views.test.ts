@@ -46,7 +46,7 @@ describe('the call stack beside the statement', () => {
     const inside = stepOn(2);
     expect(inside.frames.map((frame) => frame.name)).toEqual(['main', 'twice']);
     expect(callStackRows(inside.frames).map((row) => row.name)).toEqual([
-      'twice()',
+      'twice(n = 1)',
       'main()',
     ]);
   });
@@ -54,8 +54,27 @@ describe('the call stack beside the statement', () => {
   it('pairs argument values with their corresponding parameters', () => {
     const [current] = callStackRows(stepOn(2).frames);
     expect(current.arguments).toBe('n = 1');
-    expect(current.where).toBe('call on line 7');
+    expect(current.where).toBe('called from line 7');
     expect(current.current).toBe(true);
+  });
+
+  it('includes the source file for a mapped caller location', () => {
+    const [current] = callStackRows([
+      {
+        name: 'helper',
+        line: 2,
+        calledFrom: 123,
+        calledFromFile: 'main.c',
+        arguments: [],
+        timesEntered: 1,
+      },
+    ]);
+    expect(current.where).toBe('called from main.c line 123');
+  });
+
+  it('shows the definition line for the entry frame', () => {
+    const rows = callStackRows(stepOn(2).frames);
+    expect(rows[1].where).toBe('on line 5');
   });
 });
 

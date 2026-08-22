@@ -15,7 +15,6 @@ import {
 } from '../../core';
 import strings from '../../strings';
 import { IconName, iconFor } from '../controls/icons';
-import { MutationView } from '../views';
 import { graphGeometry, memoryGeometry } from './geometry';
 import { expressionGeometry } from './expressionLayout';
 import { expressionNodeOf } from './ExpressionNode';
@@ -26,6 +25,7 @@ import { variableContextLabel, variableTableRows } from './variableTable';
 import { emptyStatementExplanation, StatementExplanation } from '../records';
 import { MemoryNode, memoryNodeOf } from './MemoryNode';
 import { StackTable, stackTableOf } from './StackTable';
+import { mutationTableCells } from './mutationTable';
 import {
   statementCard,
   StatementCardModel,
@@ -94,8 +94,6 @@ const CARD_LABEL_WIDTH = 164;
 /** The room between successive canvas sections. */
 const SECTION_GAP = 36;
 const COLUMN_GAP = 24;
-const COLUMN_WIDTH = 480;
-const TWO_COLUMN_WIDTH = COLUMN_WIDTH * 2 + COLUMN_GAP;
 /** Where the drawing starts, which is where `layoutMemory` puts the map. */
 const ORIGIN_X = 24;
 const ORIGIN_Y = 24;
@@ -105,7 +103,11 @@ const CALL_ROW_GAP = 5;
 const VARIABLE_CONTEXT_HEIGHT = 30;
 const VARIABLE_HEADER_HEIGHT = 28;
 const VARIABLE_ROW_HEIGHT = 34;
-const VARIABLE_COLUMN_WIDTHS = [220, 250, 90, 300, 124] as const;
+const VARIABLE_COLUMN_WIDTHS = [190, 250, 250, 90, 300, 124] as const;
+const VARIABLE_TABLE_WIDTH = VARIABLE_COLUMN_WIDTHS.reduce(
+  (total, width) => total + width,
+  0
+);
 
 /** JointJS rectangles center labels unless both axes are overridden. */
 export const leftAlignedLabel = (x: number, height: number) => ({
@@ -150,6 +152,7 @@ type CanvasSection =
   | 'expression'
   | 'variables'
   | 'memory'
+  | 'mutations'
   | `call:${string}`;
 
 const isCanvasSection = (value: string): value is CanvasSection =>
@@ -158,6 +161,7 @@ const isCanvasSection = (value: string): value is CanvasSection =>
   value === 'expression' ||
   value === 'variables' ||
   value === 'memory' ||
+  value === 'mutations' ||
   value.startsWith('call:');
 
 const lowered = (point: Point, dy: number): Point => ({
@@ -208,7 +212,6 @@ export class PlivetGraph {
   private readonly folds = new FoldState();
   private readonly view = new ViewOptions();
   private readonly panel: ViewPanelHandle;
-  private readonly mutations: MutationView;
   private readonly collapsed = new Set<CanvasSection>();
   /** The window the drawing scrolls inside, below the bar. */
   private readonly viewport: HTMLDivElement;
@@ -243,6 +246,15 @@ export class PlivetGraph {
   private reported: string | null = null;
   private readonly onFocus?: (object: string | null) => void;
   private readonly onNavigate?: (target: MemoryNavigationTarget) => void;
+
+  /** Width of a section band in the visible canvas, in paper coordinates. */
+  private fullCanvasWidth(): number {
+    return Math.max(1, this.viewport.clientWidth / this.scale - ORIGIN_X * 2);
+  }
+
+  private topColumnWidth(): number {
+    return Math.max(1, (this.fullCanvasWidth() - COLUMN_GAP) / 2);
+  }
 
   constructor(
     private readonly container: HTMLElement,
@@ -286,11 +298,6 @@ export class PlivetGraph {
     this.paperHost.className = 'plivet-graph__paper';
     this.viewport.appendChild(this.paperHost);
     this.container.appendChild(this.viewport);
-    // The history belongs to the same workspace and View panel, but remains
-    // ordinary DOM: a bounded table is clearer and cheaper than hundreds of
-    // SVG cells. It follows the paper, so it is literally under the canvas.
-    this.mutations = new MutationView(this.container);
-
     this.graph = new dia.Graph({}, { cellNamespace });
     this.paper = new dia.Paper({
       el: this.paperHost,
@@ -362,7 +369,7 @@ export class PlivetGraph {
     this.resizeObserver =
       typeof ResizeObserver === 'undefined'
         ? null
-        : new ResizeObserver(() => this.resize());
+        : new ResizeObserver(() => this.render(this.model));
     if (this.resizeObserver !== null) {
       this.resizeObserver.observe(this.container);
     }
@@ -403,7 +410,7 @@ export class PlivetGraph {
         ...this.callStackCells(
           model,
           this.view.isStatementShown()
-            ? ORIGIN_X + COLUMN_WIDTH + COLUMN_GAP
+            ? ORIGIN_X + this.topColumnWidth() + COLUMN_GAP
             : ORIGIN_X,
           nextY
         )
@@ -435,15 +442,12 @@ export class PlivetGraph {
       }
     }
 
-    // The compact current-scope table bridges the source-level expression and
-    // the complete implementation memory map below it.
-    if (this.view.areVariablesShown()) {
-      cells.push(...this.variableTableCells(model, ORIGIN_X, nextY));
-      nextY =
-        Math.max(this.contentHeight, nextY + HEADING_HEIGHT) + SECTION_GAP;
-    }
-
-    const baseMemory = memoryGeometry(model, this.folds, this.view);
+    const baseMemory = memoryGeometry(
+      model,
+      this.folds,
+      this.view,
+      this.fullCanvasWidth()
+    );
     if (this.view.isMemoryShown()) {
       const memoryDrop = nextY + MEMORY_DROP - ORIGIN_Y;
       const memory = loweredMemory(baseMemory, memoryDrop);
@@ -454,7 +458,7 @@ export class PlivetGraph {
           ORIGIN_X,
           nextY,
           'memory',
-          TWO_COLUMN_WIDTH
+          this.fullCanvasWidth()
         )
       );
       if (!this.collapsed.has('memory')) {
@@ -480,16 +484,53 @@ export class PlivetGraph {
           )
         );
       }
+      nextY =
+        Math.max(this.contentHeight, nextY + HEADING_HEIGHT) + SECTION_GAP;
     } else {
       // Region switches still report their configured/dynamic state while the
       // enclosing memory section is switched off.
       this.memory = baseMemory;
     }
 
-    this.mutations.setShown(this.view.areMutationsShown());
-    this.mutations.setMutations(
-      this.view.areMutationsShown() ? model.mutations : []
-    );
+    // The compact current-scope table follows the complete implementation
+    // memory map, so the names a reader cares about remain beside the storage
+    // they describe without covering the map itself.
+    if (this.view.areVariablesShown()) {
+      cells.push(...this.variableTableCells(model, ORIGIN_X, nextY));
+      nextY =
+        Math.max(this.contentHeight, nextY + HEADING_HEIGHT) + SECTION_GAP;
+    }
+
+    if (this.view.areMutationsShown()) {
+      const mutationY = Math.max(nextY, this.contentHeight + SECTION_GAP);
+      cells.push(
+        this.sectionHeading(
+          strings.viewMutations,
+          ORIGIN_X,
+          mutationY,
+          'mutations',
+          this.fullCanvasWidth()
+        )
+      );
+      if (!this.collapsed.has('mutations')) {
+        const tableWidth = this.fullCanvasWidth();
+        const table = mutationTableCells(
+          model.mutations,
+          ORIGIN_X,
+          mutationY + HEADING_HEIGHT + HEADING_GAP,
+          tableWidth
+        );
+        cells.push(...table.cells);
+        this.contentWidth = Math.max(
+          this.contentWidth,
+          ORIGIN_X + table.width + ORIGIN_X
+        );
+        this.contentHeight = Math.max(
+          this.contentHeight,
+          mutationY + HEADING_HEIGHT + HEADING_GAP + table.height + ORIGIN_X
+        );
+      }
+    }
     this.panel.refresh();
     this.paper.freeze();
     this.graph.resetCells(cells);
@@ -518,7 +559,7 @@ export class PlivetGraph {
     this.scale = Math.max(0.4, Math.min(2, scale));
     this.zoomLabel.textContent = `${Math.round(this.scale * 100)}%`;
     this.paper.scale(this.scale, this.scale);
-    this.resize();
+    this.render(this.model);
   }
 
   setDark(dark: boolean): void {
@@ -536,7 +577,6 @@ export class PlivetGraph {
     }
     this.paper.remove();
     this.graph.clear();
-    this.mutations.destroy();
     this.container.replaceChildren();
     this.container.classList.remove('plivet-graph');
     this.container.classList.remove('plivet-graph--dark');
@@ -562,9 +602,11 @@ export class PlivetGraph {
       return;
     }
     event.preventDefault();
-    this.onNavigate(
-      memoryNavigationTarget(this.model, decodeURIComponent(encoded))
-    );
+    const object = decodeURIComponent(encoded);
+    // Keep the row selected while the editor moves to its declaration, even
+    // when the browser does not deliver another mouseover after the gesture.
+    this.setFocus(object);
+    this.onNavigate(memoryNavigationTarget(this.model, object));
   }
 
   private report(object: string | null): void {
@@ -670,6 +712,7 @@ export class PlivetGraph {
         fontFamily: 'system-ui, sans-serif',
         fontSize: 14,
         fontWeight: 'bold',
+        ...leftAlignedLabel(12, HEADING_HEIGHT),
         pointerEvents: 'none',
       },
     });
@@ -705,7 +748,9 @@ export class PlivetGraph {
         originX,
         originY,
         'statement',
-        COLUMN_WIDTH
+        this.view.isCallStackShown()
+          ? this.topColumnWidth()
+          : this.fullCanvasWidth()
       ),
     ];
     if (this.collapsed.has('statement')) {
@@ -714,7 +759,11 @@ export class PlivetGraph {
     const headingBottom = originY + HEADING_HEIGHT + HEADING_GAP;
     this.contentWidth = Math.max(
       this.contentWidth,
-      originX + COLUMN_WIDTH + ORIGIN_X
+      originX +
+        (this.view.isCallStackShown()
+          ? this.topColumnWidth()
+          : this.fullCanvasWidth()) +
+        ORIGIN_X
     );
     this.contentHeight = Math.max(this.contentHeight, headingBottom);
     // Preserve the explanation's title/fact structure. Flattening these into
@@ -728,7 +777,10 @@ export class PlivetGraph {
       ...this.statementCardCells(
         statementCard(model, this.explanation, includeValues),
         originX,
-        headingBottom
+        headingBottom,
+        this.view.isCallStackShown()
+          ? this.topColumnWidth()
+          : this.fullCanvasWidth()
       )
     );
     return cells;
@@ -746,7 +798,9 @@ export class PlivetGraph {
         originX,
         originY,
         'callStack',
-        COLUMN_WIDTH
+        this.view.isStatementShown()
+          ? this.topColumnWidth()
+          : this.fullCanvasWidth()
       ),
     ];
     if (this.collapsed.has('callStack')) {
@@ -768,14 +822,17 @@ export class PlivetGraph {
         : rows;
     let y = originY + HEADING_HEIGHT + HEADING_GAP;
     for (const row of shown) {
-      const details = [row.where, row.arguments, row.timesEntered].filter(
+      const details = [row.where, row.timesEntered].filter(
         (part) => part !== ''
       );
       const text = [row.name, details.join(' · ')].filter(Boolean).join('\n');
       const height = details.length === 0 ? 34 : 48;
       const cell = new shapes.standard.Rectangle({ z: 4 });
       cell.position(originX, y);
-      cell.resize(COLUMN_WIDTH, height);
+      const columnWidth = this.view.isStatementShown()
+        ? this.topColumnWidth()
+        : this.fullCanvasWidth();
+      cell.resize(columnWidth, height);
       cell.attr({
         body: {
           fill: row.current
@@ -801,7 +858,11 @@ export class PlivetGraph {
     }
     this.contentWidth = Math.max(
       this.contentWidth,
-      originX + COLUMN_WIDTH + ORIGIN_X
+      originX +
+        (this.view.isStatementShown()
+          ? this.topColumnWidth()
+          : this.fullCanvasWidth()) +
+        ORIGIN_X
     );
     this.contentHeight = Math.max(this.contentHeight, y + ORIGIN_X);
     return cells;
@@ -823,7 +884,7 @@ export class PlivetGraph {
         originX,
         originY,
         'expression',
-        TWO_COLUMN_WIDTH,
+        this.fullCanvasWidth(),
         collapsed
       ),
     ];
@@ -854,7 +915,7 @@ export class PlivetGraph {
         originX,
         originY,
         section,
-        TWO_COLUMN_WIDTH
+        this.fullCanvasWidth()
       ),
     ];
     if (this.collapsed.has(section)) {
@@ -882,20 +943,24 @@ export class PlivetGraph {
         originX,
         originY,
         'variables',
-        TWO_COLUMN_WIDTH
+        this.fullCanvasWidth()
       ),
     ];
     if (this.collapsed.has('variables')) {
       return cells;
     }
 
+    const tableWidth = this.fullCanvasWidth();
+    const columnWidths = VARIABLE_COLUMN_WIDTHS.map(
+      (width) => (width / VARIABLE_TABLE_WIDTH) * tableWidth
+    );
     let y = originY + HEADING_HEIGHT + HEADING_GAP;
     cells.push(
       this.cardCell(
         variableContextLabel(model),
         originX,
         y,
-        TWO_COLUMN_WIDTH,
+        tableWidth,
         VARIABLE_CONTEXT_HEIGHT,
         {
           fill: 'var(--plivet-graph-caption, #f7f9fb)',
@@ -909,6 +974,7 @@ export class PlivetGraph {
 
     const headings = [
       strings.memoryColumnName,
+      strings.variableColumnType,
       strings.memoryColumnValue,
       strings.variableColumnSize,
       strings.variableColumnSegment,
@@ -916,7 +982,7 @@ export class PlivetGraph {
     ];
     let x = originX;
     headings.forEach((heading, index) => {
-      const width = VARIABLE_COLUMN_WIDTHS[index];
+      const width = columnWidths[index];
       cells.push(
         this.cardCell(heading, x, y, width, VARIABLE_HEADER_HEIGHT, {
           fill: 'var(--plivet-graph-header, #eef2f6)',
@@ -937,7 +1003,7 @@ export class PlivetGraph {
           strings.variableNoneActive,
           originX,
           y,
-          TWO_COLUMN_WIDTH,
+          tableWidth,
           VARIABLE_ROW_HEIGHT,
           {
             fill: 'var(--plivet-graph-surface, #ffffff)',
@@ -952,6 +1018,8 @@ export class PlivetGraph {
       for (const row of rows) {
         const values = [
           row.name,
+          model.variables.find((variable) => variable.key === row.key)?.type ??
+            '',
           row.value,
           row.size,
           row.segment,
@@ -959,21 +1027,22 @@ export class PlivetGraph {
         ];
         x = originX;
         values.forEach((value, index) => {
-          const width = VARIABLE_COLUMN_WIDTHS[index];
+          const width = columnWidths[index];
           const cell = this.cardCell(value, x, y, width, VARIABLE_ROW_HEIGHT, {
             fill:
-              index === 4
+              index === 5
                 ? 'var(--plivet-graph-address, #fbfcfd)'
                 : 'var(--plivet-graph-surface, #ffffff)',
             stroke: 'var(--plivet-graph-grid, #cfd8e1)',
             color: 'var(--plivet-graph-ink, #26384a)',
-            code: index !== 3,
+            code: index !== 4,
             fontSize: 13,
           });
           cell.attr({
             body: {
               'data-object-key': encodeURIComponent(row.key),
-              class: 'plivet-object-cell plivet-variable-cell',
+              class:
+                'plivet-object-cell plivet-variable-cell plivet-identifier',
             },
             label: { pointerEvents: 'none' },
           });
@@ -986,7 +1055,7 @@ export class PlivetGraph {
 
     this.contentWidth = Math.max(
       this.contentWidth,
-      originX + TWO_COLUMN_WIDTH + ORIGIN_X
+      originX + tableWidth + ORIGIN_X
     );
     this.contentHeight = Math.max(this.contentHeight, y + ORIGIN_X);
     return cells;
@@ -996,13 +1065,14 @@ export class PlivetGraph {
   private statementCardCells(
     card: StatementCardModel,
     originX: number,
-    originY: number
+    originY: number,
+    columnWidth: number
   ): dia.Cell[] {
     const cells: dia.Cell[] = [];
     let y = originY;
 
     cells.push(
-      this.cardCell(card.title, originX, y, COLUMN_WIDTH, CARD_TITLE_HEIGHT, {
+      this.cardCell(card.title, originX, y, columnWidth, CARD_TITLE_HEIGHT, {
         fill: 'var(--plivet-graph-current, #e8f2ff)',
         stroke: 'var(--plivet-graph-accent-line, #9fbfe5)',
         color: 'var(--plivet-graph-accent-text, #234b73)',
@@ -1015,11 +1085,11 @@ export class PlivetGraph {
     if (card.context !== '') {
       const contextHeight = this.cardTextHeight(
         card.context,
-        COLUMN_WIDTH,
+        columnWidth,
         CARD_CONTEXT_HEIGHT
       );
       cells.push(
-        this.cardCell(card.context, originX, y, COLUMN_WIDTH, contextHeight, {
+        this.cardCell(card.context, originX, y, columnWidth, contextHeight, {
           fill: 'var(--plivet-graph-caption, #f7f9fb)',
           stroke: 'var(--plivet-graph-grid, #cfd8e1)',
           color: 'var(--plivet-graph-context-text, #5d6b78)',
@@ -1029,10 +1099,16 @@ export class PlivetGraph {
       y += contextHeight;
     }
 
-    if (card.description !== '') {
+    if (card.descriptionRows !== undefined) {
+      for (const row of card.descriptionRows) {
+        const rendered = this.cardRow(row, originX, y, columnWidth);
+        cells.push(...rendered.cells);
+        y = rendered.bottom;
+      }
+    } else if (card.description !== '') {
       const descriptionHeight = this.cardTextHeight(
         card.description,
-        COLUMN_WIDTH,
+        columnWidth,
         CARD_DESCRIPTION_HEIGHT
       );
       cells.push(
@@ -1040,7 +1116,7 @@ export class PlivetGraph {
           card.description,
           originX,
           y,
-          COLUMN_WIDTH,
+          columnWidth,
           descriptionHeight,
           {
             fill: 'var(--plivet-graph-surface, #ffffff)',
@@ -1059,7 +1135,7 @@ export class PlivetGraph {
           strings.statementValuesHeading,
           originX,
           y,
-          COLUMN_WIDTH,
+          columnWidth,
           CARD_SECTION_HEIGHT,
           {
             fill: 'var(--plivet-graph-header, #eef2f6)',
@@ -1072,7 +1148,7 @@ export class PlivetGraph {
       );
       y += CARD_SECTION_HEIGHT;
       for (const row of card.values) {
-        const rendered = this.cardRow(row, originX, y);
+        const rendered = this.cardRow(row, originX, y, columnWidth);
         cells.push(...rendered.cells);
         y = rendered.bottom;
       }
@@ -1080,7 +1156,7 @@ export class PlivetGraph {
 
     this.contentWidth = Math.max(
       this.contentWidth,
-      originX + COLUMN_WIDTH + ORIGIN_X
+      originX + columnWidth + ORIGIN_X
     );
     this.contentHeight = Math.max(this.contentHeight, y + ORIGIN_X);
     return cells;
@@ -1089,13 +1165,14 @@ export class PlivetGraph {
   private cardRow(
     row: StatementCardRow,
     originX: number,
-    originY: number
+    originY: number,
+    columnWidth: number
   ): { cells: dia.Cell[]; bottom: number } {
     if (row.value === '') {
-      const height = this.cardRowHeight(row.label, COLUMN_WIDTH);
+      const height = this.cardRowHeight(row.label, columnWidth);
       return {
         cells: [
-          this.cardCell(row.label, originX, originY, COLUMN_WIDTH, height, {
+          this.cardCell(row.label, originX, originY, columnWidth, height, {
             fill: 'var(--plivet-graph-note, #fff8e1)',
             stroke: 'var(--plivet-graph-note-line, #e2d3a4)',
             color: 'var(--plivet-graph-note-text, #5c5130)',
@@ -1107,7 +1184,7 @@ export class PlivetGraph {
       };
     }
 
-    const valueWidth = COLUMN_WIDTH - CARD_LABEL_WIDTH;
+    const valueWidth = columnWidth - CARD_LABEL_WIDTH;
     const height = Math.max(
       this.cardRowHeight(row.label, CARD_LABEL_WIDTH),
       this.cardRowHeight(row.value, valueWidth)

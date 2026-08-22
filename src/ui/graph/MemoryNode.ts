@@ -4,6 +4,7 @@ import {
   MEMORY_FONT_SIZE,
   MEMORY_PADDING_X,
   MEMORY_TITLE_TOGGLE_WIDTH,
+  MEMORY_WRAPPED_TITLE_HEIGHT,
   MemoryColumnKey,
   MemoryRowGeometry,
   MemorySegmentGeometry,
@@ -165,7 +166,7 @@ function entryRow(
       ? undefined
       : {
           'data-object-key': encodeURIComponent(row.object),
-          class: 'plivet-object-cell',
+          class: 'plivet-object-cell plivet-identifier',
         };
 
   if (typeof row.caption !== 'undefined') {
@@ -222,24 +223,30 @@ function entryRow(
       },
       marks
     );
-    push(part, 'text', `cell-${index}-${position}-text`, {
-      // A name keeps a gutter for the fold triangle and one step of
-      // indentation per level of nesting, so a member sits under the
-      // aggregate holding it. A value ends the row, where its arrow leaves.
-      x: isValue
-        ? column.x + column.width - MEMORY_PADDING_X
-        : column.x +
-          MEMORY_PADDING_X +
-          (column.key === 'name' ? row.indent + MEMORY_FOLD_WIDTH : 0),
-      y: bandMiddle,
-      text: cell.text,
-      fill: isAddress ? HEADER_TEXT : TEXT,
-      fontFamily: column.key === 'name' ? SANS : MONOSPACE,
-      fontSize: MEMORY_FONT_SIZE,
-      textAnchor: isValue ? 'end' : 'start',
-      dominantBaseline: 'central',
-      pointerEvents: 'none',
-    });
+    push(
+      part,
+      'text',
+      `cell-${index}-${position}-text`,
+      {
+        // A name keeps a gutter for the fold triangle and one step of
+        // indentation per level of nesting, so a member sits under the
+        // aggregate holding it. A value ends the row, where its arrow leaves.
+        x: isValue
+          ? column.x + column.width - MEMORY_PADDING_X
+          : column.x +
+            MEMORY_PADDING_X +
+            (column.key === 'name' ? row.indent + MEMORY_FOLD_WIDTH : 0),
+        y: bandMiddle,
+        text: cell.text,
+        fill: isAddress ? HEADER_TEXT : TEXT,
+        fontFamily: column.key === 'name' ? SANS : MONOSPACE,
+        fontSize: MEMORY_FONT_SIZE,
+        textAnchor: isValue ? 'end' : 'start',
+        dominantBaseline: 'central',
+        pointerEvents: 'none',
+      },
+      marks
+    );
   });
 
   if (typeof row.fold === 'undefined') {
@@ -294,6 +301,9 @@ const node = (segment: MemorySegmentGeometry, part: Part): dia.Element =>
 
 export function memoryNodeOf(segment: MemorySegmentGeometry): dia.Element {
   const part: Part = { markup: [], attrs: {} };
+  const wrappedTitle = segment.titleHeight >= MEMORY_WRAPPED_TITLE_HEIGHT;
+  const titleTextY = wrappedTitle ? 16 : segment.titleHeight / 2;
+  const titleAddressY = wrappedTitle ? 38 : segment.titleHeight / 2;
 
   push(part, 'rect', 'body', {
     x: 0,
@@ -347,7 +357,7 @@ export function memoryNodeOf(segment: MemorySegmentGeometry): dia.Element {
   }
   push(part, 'text', 'titleToggle', {
     x: MEMORY_PADDING_X + 4 + MEMORY_TITLE_TOGGLE_WIDTH / 2,
-    y: segment.titleHeight / 2,
+    y: titleTextY,
     text: segment.collapsed ? SEGMENT_CLOSED : SEGMENT_OPEN,
     fill: TITLE_ADDRESS,
     fontFamily: SANS,
@@ -359,7 +369,7 @@ export function memoryNodeOf(segment: MemorySegmentGeometry): dia.Element {
   });
   push(part, 'text', 'titleText', {
     x: MEMORY_PADDING_X + 4 + MEMORY_TITLE_TOGGLE_WIDTH,
-    y: segment.titleHeight / 2,
+    y: titleTextY,
     text: segment.name,
     fill: TITLE_TEXT,
     fontFamily: SANS,
@@ -371,7 +381,7 @@ export function memoryNodeOf(segment: MemorySegmentGeometry): dia.Element {
   });
   push(part, 'text', 'titleAddress', {
     x: segment.width - MEMORY_PADDING_X - 4,
-    y: segment.titleHeight / 2,
+    y: titleAddressY,
     text: segment.addressLabel,
     fill: TITLE_ADDRESS,
     fontFamily: MONOSPACE,

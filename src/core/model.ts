@@ -217,6 +217,8 @@ export interface FrameModel {
   line: number;
   /** The line containing the call; null for the initial function invocation. */
   calledFrom: number | null;
+  /** The source file containing the call, when the application has mapped it. */
+  calledFromFile?: string;
   /** What it was passed, in order, spelled as C passed it: by value. */
   arguments: FrameArgumentModel[];
   /** How many times it has been entered so far, this activation included. */
