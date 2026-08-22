@@ -407,6 +407,11 @@ export interface VariableModel {
   frame: string;
   /** Whether its function frame is the one currently executing. */
   active: boolean;
+  /**
+   * How many bytes it occupies, as the display layout counts them. Absent for
+   * an object the layout has no size for, which the table says as a dash.
+   */
+  size?: number;
   /** For a pointer, the variable it points at. */
   target?: { name: string; value: string };
 }

@@ -83,6 +83,7 @@ const strings = {
   memoryEmptySegment: 'empty at this step',
   variableContextFile: 'File',
   variableContextFunction: 'Function',
+  variableColumnSize: 'Size',
   variableColumnSegment: 'Memory segment',
   variableNoContext: 'none',
   variableNoneActive: 'no active variables in this context',

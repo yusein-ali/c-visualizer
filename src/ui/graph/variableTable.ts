@@ -7,9 +7,15 @@ export interface VariableTableRow {
   key: string;
   name: string;
   value: string;
+  /** The object's width in bytes, or a dash where the layout has no size. */
+  size: string;
   segment: string;
   address: string;
 }
+
+/** Written the way the memory map writes it, so the two columns agree. */
+const sizeText = (size: number | undefined): string =>
+  typeof size === 'number' ? `${size} B` : '\u2014';
 
 /**
  * File-scope objects and objects in the executing frame are visible in the
@@ -30,6 +36,7 @@ export function variableTableRows(model: StepModel): VariableTableRow[] {
       key: variable.key,
       name: variable.name,
       value: variable.value,
+      size: sizeText(variable.size),
       segment: memoryRegionName(variable.region),
       address: formatAddress(variable.address),
     }));

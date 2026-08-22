@@ -105,7 +105,7 @@ const CALL_ROW_GAP = 5;
 const VARIABLE_CONTEXT_HEIGHT = 30;
 const VARIABLE_HEADER_HEIGHT = 28;
 const VARIABLE_ROW_HEIGHT = 34;
-const VARIABLE_COLUMN_WIDTHS = [220, 340, 300, 124] as const;
+const VARIABLE_COLUMN_WIDTHS = [220, 250, 90, 300, 124] as const;
 
 /** JointJS rectangles center labels unless both axes are overridden. */
 export const leftAlignedLabel = (x: number, height: number) => ({
@@ -910,6 +910,7 @@ export class PlivetGraph {
     const headings = [
       strings.memoryColumnName,
       strings.memoryColumnValue,
+      strings.variableColumnSize,
       strings.variableColumnSegment,
       strings.memoryColumnAddress,
     ];
@@ -949,18 +950,24 @@ export class PlivetGraph {
       y += VARIABLE_ROW_HEIGHT;
     } else {
       for (const row of rows) {
-        const values = [row.name, row.value, row.segment, row.address];
+        const values = [
+          row.name,
+          row.value,
+          row.size,
+          row.segment,
+          row.address,
+        ];
         x = originX;
         values.forEach((value, index) => {
           const width = VARIABLE_COLUMN_WIDTHS[index];
           const cell = this.cardCell(value, x, y, width, VARIABLE_ROW_HEIGHT, {
             fill:
-              index === 3
+              index === 4
                 ? 'var(--plivet-graph-address, #fbfcfd)'
                 : 'var(--plivet-graph-surface, #ffffff)',
             stroke: 'var(--plivet-graph-grid, #cfd8e1)',
             color: 'var(--plivet-graph-ink, #26384a)',
-            code: index !== 2,
+            code: index !== 3,
             fontSize: 13,
           });
           cell.attr({

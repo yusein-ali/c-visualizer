@@ -15,6 +15,7 @@ describe('the current-context variable table', () => {
         region: 'data',
         frame: 'GLOBAL',
         active: false,
+        size: 4,
       },
       {
         name: 'result',
@@ -56,6 +57,7 @@ describe('the current-context variable table', () => {
         key: 'GLOBAL-shared',
         name: 'shared',
         value: '4',
+        size: '4 B',
         segment: 'Initialized static storage (data)',
         address: '0x3000',
       },
@@ -63,6 +65,7 @@ describe('the current-context variable table', () => {
         key: 'helper-value',
         name: 'value',
         value: '6',
+        size: '\u2014',
         segment: 'Automatic storage (stack)',
         address: '0xFFE0',
       },

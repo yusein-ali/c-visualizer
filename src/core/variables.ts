@@ -4,6 +4,7 @@ import {
   declarationInfoOf,
   displayAddressOf,
   displayPointerValueOf,
+  displaySizeOf,
   displayTypeOf,
   functionPointerInfoOf,
 } from '../interpreter/RuntimeTypeInfo';
@@ -242,6 +243,10 @@ export function extractVariables(
         frame: stack.name,
         active: stack === activeStack,
       };
+      const size = displaySizeOf(variable);
+      if (size !== null) {
+        model.size = size;
+      }
       const target = targetOf(variable, execState);
       if (target !== undefined) {
         model.target = target;
