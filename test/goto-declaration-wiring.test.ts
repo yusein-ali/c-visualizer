@@ -28,6 +28,15 @@ int main(void) {
   return twice(count);
 }`;
 
+/** The same, with the one name the constructs cannot place: a macro. */
+const WITH_MACRO = `#define LIMIT 100
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
+int main(void) {
+  int a = 1;
+  int b = LIMIT;
+  return MAX(a, b);
+}`;
+
 /** A client that answers a syntax check the way the Worker would. */
 const fakeClient = () => {
   const sent: Request[] = [];
@@ -44,7 +53,7 @@ const fakeClient = () => {
         step: 0,
         errors: [],
         model: emptyStepModel(),
-        expansions: [],
+        expansions: interpreter.getExpansions(request.sourcecode),
         constructs: interpreter.getConstructs(request.sourcecode),
         lints: [],
       } as Response);
@@ -53,7 +62,7 @@ const fakeClient = () => {
   return { client: client as unknown as InterpreterClient, sent };
 };
 
-const mounted = () => {
+const mounted = (doc = PROGRAM) => {
   const host = document.createElement('div');
   document.body.appendChild(host);
   const bus = new Bus();
@@ -61,7 +70,7 @@ const mounted = () => {
   const controller = new EditorController(host, {
     bus,
     client,
-    doc: PROGRAM,
+    doc,
   });
   const view = (controller as any).editor.view;
   return { host, controller, view, sent };
@@ -129,6 +138,42 @@ describe('ctrl-click, wired up', () => {
     clickAt(view, use);
     expect(view.state.doc.lineAt(view.state.selection.main.anchor).number).toBe(
       5
+    );
+    controller.destroy();
+    host.remove();
+  });
+
+  it('goes to the #define from a macro use', async () => {
+    // The parser never sees `LIMIT` - it reads `100` - so the constructs have
+    // nothing to send the reader to, and the link resolves it against what the
+    // preprocessor recorded instead.
+    const { host, view, controller } = mounted(WITH_MACRO);
+    approach(view);
+    await settled();
+
+    const use = WITH_MACRO.indexOf('= LIMIT') + 2;
+    view.dispatch({ selection: { anchor: 0 } });
+    clickAt(view, use);
+    const landed = view.state.selection.main.anchor;
+    expect(view.state.doc.lineAt(landed).number).toBe(1);
+    // On the name itself, not at the start of the directive.
+    expect(view.state.doc.sliceString(landed, landed + 5)).toBe('LIMIT');
+    controller.destroy();
+    host.remove();
+  });
+
+  it("leaves a macro call's arguments to the constructs", async () => {
+    const { host, view, controller } = mounted(WITH_MACRO);
+    approach(view);
+    await settled();
+
+    // `a` sits inside the span `MAX(a, b)` replaced, and is still a local.
+    // The call, not the `#define` of the same shape above it.
+    const argument = WITH_MACRO.lastIndexOf('MAX(a, b)') + 'MAX('.length;
+    view.dispatch({ selection: { anchor: 0 } });
+    clickAt(view, argument);
+    expect(view.state.doc.lineAt(view.state.selection.main.anchor).number).toBe(
+      4
     );
     controller.destroy();
     host.remove();

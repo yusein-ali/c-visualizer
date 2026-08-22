@@ -23,7 +23,7 @@ import {
   rangeOf,
   TeachingDiagnostic,
 } from '../ui/editor';
-import { declarationFor } from './declarations';
+import { declarationFor, macroDefinitionLine } from './declarations';
 import { HoverTextSource } from './hoverText';
 import { libraryHelp, libraryNames } from './libraryHelp';
 import { Bus } from './emitter';
@@ -155,6 +155,12 @@ export class EditorController {
    * modifier-hover link that goes to one.
    */
   private constructs: Construct[] = [];
+  /**
+   * What the preprocessor replaced, kept for the same reason as the
+   * constructs: a macro use is a name the parser never saw, so the link that
+   * goes to its `#define` has only this list to resolve it against.
+   */
+  private expansions: Expansion[] = [];
   private syntaxErrors: SyntaxErrorModel[] = [];
   private teachingLints: TeachingDiagnostic[] = [];
   private runtimeLints: TeachingDiagnostic[] = [];
@@ -625,6 +631,13 @@ export class EditorController {
    * the interpreter's.
    */
   private declarationRange(request: DeclarationRequest) {
+    // Macros are asked about first, and not through the constructs at all: the
+    // preprocessor replaced the name before the parser read the line, so the
+    // one record of where `LIMIT` came from is the expansion list.
+    const defined = macroDefinitionLine(this.expansions, request);
+    if (defined !== null) {
+      return this.macroNameRange(defined, request.word);
+    }
     const found = declarationFor(this.constructs, request);
     if (found === null) {
       return null;
@@ -636,6 +649,28 @@ export class EditorController {
       found.endLine,
       found.endColumn
     );
+  }
+
+  /**
+   * The macro's name on the `#define` line that defines it.
+   *
+   * The preprocessor records which line defined a macro and not which column,
+   * so the name is found in the line itself. Marking the name rather than the
+   * whole directive is what the jump elsewhere does - a reader who followed
+   * `LIMIT` is shown `LIMIT`, with its replacement beside it - and the whole
+   * line is the fallback for a `#define` the document no longer holds in the
+   * shape it was read in.
+   */
+  private macroNameRange(line: number, name: string) {
+    const doc = this.editor.view.state.doc;
+    const found = doc.line(Math.min(Math.max(line, 1), doc.lines));
+    // The name is an identifier - it matched a word in the editor to get here -
+    // so it needs no escaping, only whole-word anchoring, or `MAX` would be
+    // found inside `MAXIMUM`.
+    const at = found.text.search(new RegExp(`\\b${name}\\b`));
+    return at < 0
+      ? { from: found.from, to: found.to }
+      : { from: found.from + at, to: found.from + at + name.length };
   }
 
   /**
@@ -668,6 +703,7 @@ export class EditorController {
   }
 
   setExpansions(expansions: Expansion[]) {
+    this.expansions = expansions;
     this.hover.setExpansions(expansions);
     this.editor.debug.showExpansions(this.editor.view, expansions);
   }

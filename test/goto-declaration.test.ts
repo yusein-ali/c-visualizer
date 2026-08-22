@@ -2,7 +2,7 @@ import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { PlivetCPP14Interpreter } from '../src/interpreter/CPP14';
 import { Construct } from '../src/interpreter/Construct';
-import { declarationFor } from '../src/app/declarations';
+import { declarationFor, macroDefinitionLine } from '../src/app/declarations';
 import { focusField, goTo, gotoDeclaration } from '../src/ui/editor';
 
 /**
@@ -82,11 +82,64 @@ describe('which declaration a name means', () => {
   });
 
   it('says nothing about a name this program does not declare', () => {
-    // A library function, a macro already replaced, or a misspelling: none of
-    // them has anywhere in this file to go.
+    // A library function or a misspelling has nowhere in this file to go. So
+    // has a macro, as far as the constructs are concerned - the parser never
+    // saw it - and `macroDefinitionLine` is what answers for those.
     expect(goesTo('printf', 12, true)).toBeNull();
     expect(goesTo('lenght', 12)).toBeNull();
     expect(goesTo('', 12)).toBeNull();
+  });
+});
+
+/**
+ * A macro is the one name the constructs cannot place, because by the time the
+ * parser reads the line the name is gone and its replacement is there instead.
+ * The preprocessor's own record of what it replaced is what the link uses.
+ */
+const MACROS = `#define LIMIT 100
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
+int main(void) {
+  int a = 1;
+  int b = LIMIT;
+  return MAX(a, b);
+}`;
+
+const expansionsOf = (code: string) => {
+  const interpreter = new PlivetCPP14Interpreter();
+  interpreter.setFileList(new Map());
+  return interpreter.getExpansions(code);
+};
+
+describe('which #define a macro use came from', () => {
+  const expansions = expansionsOf(MACROS);
+
+  /** The line a modifier-click on that word, on that line, would name. */
+  const definedAt = (word: string, line: number, column?: number) =>
+    macroDefinitionLine(expansions, {
+      word,
+      line,
+      column: column ?? Math.max(MACROS.split('\n')[line - 1].indexOf(word), 0),
+      isCall: false,
+    });
+
+  it('sends an object-like macro to its #define', () => {
+    expect(definedAt('LIMIT', 5)).toBe(1);
+  });
+
+  it('sends a function-like macro to its #define', () => {
+    expect(definedAt('MAX', 6)).toBe(2);
+  });
+
+  it('leaves the arguments of a macro call alone', () => {
+    // `MAX(a, b)` is replaced as a whole, so `a` sits inside the expansion
+    // without being the macro; it is a local, and the constructs place it.
+    expect(definedAt('a', 6)).toBeNull();
+    expect(definedAt('b', 6)).toBeNull();
+  });
+
+  it('says nothing about a name no macro defines', () => {
+    expect(definedAt('main', 3)).toBeNull();
+    expect(definedAt('', 5)).toBeNull();
   });
 });
 

@@ -1,4 +1,5 @@
 import { Construct } from '../interpreter/Construct';
+import { Expansion } from '../interpreter/Expansion';
 import { DeclarationRequest } from '../ui/editor';
 
 /**
@@ -145,9 +146,49 @@ const memberFor = (constructs: Construct[], name: string): Construct | null =>
   null;
 
 /**
+ * The line of the `#define` a macro use came from, or null where the word is
+ * not a macro use.
+ *
+ * Macros are the one name in the program the constructs cannot answer for.
+ * The parser never sees them: by the time it reads the line, `LIMIT` is `100`
+ * and the name is gone. What is left of it is the expansion record the
+ * preprocessor kept, which names the macro and the line that defined it - so
+ * the question is asked of that list instead, and answered with a line rather
+ * than a construct.
+ *
+ * Two things are required of the record and not one. A function-like macro's
+ * span covers its whole call, arguments and all, so a pointer over `a` in
+ * `MAX(a, b)` falls inside the expansion without being the macro; only a word
+ * that is the macro's name, starting where the expansion starts, is the name
+ * the reader is pointing at.
+ */
+export function macroDefinitionLine(
+  expansions: Expansion[],
+  request: DeclarationRequest
+): number | null {
+  const { word, line, column } = request;
+  if (word === '') {
+    return null;
+  }
+  for (const expansion of expansions) {
+    if (
+      expansion.kind === 'macro' &&
+      expansion.line === line &&
+      expansion.column === column &&
+      expansion.name === word &&
+      typeof expansion.definedAt !== 'undefined'
+    ) {
+      return expansion.definedAt;
+    }
+  }
+  return null;
+}
+
+/**
  * The declaration a use refers to, or null where the program declares no such
- * name - a library function, a macro the preprocessor has already replaced,
- * or a misspelling, none of which this file has anywhere to go for.
+ * name - a library function, a macro (which `macroDefinitionLine` answers for
+ * instead, the parser having never seen it), or a misspelling, none of which
+ * this file has anywhere to go for.
  */
 export function declarationFor(
   constructs: Construct[],
