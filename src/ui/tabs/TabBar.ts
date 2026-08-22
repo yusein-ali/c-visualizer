@@ -4,12 +4,10 @@ import './tabs.css';
 /**
  * The files a reader has open, as a strip of tabs over the editor.
  *
- * C compiles one translation unit, so exactly one of them is the file that
- * runs: it is marked, and pressing another file's marker makes that one the
- * entry instead. This is the shape the interactive-code directive PLIVET is
- * meant to embed in already has - the parts of a block are tabs, one of them
- * is the main file, and every part is submitted together - which is why the
- * protocol carries the whole set even while only the entry is compiled.
+ * Exactly one is the entry: it is placed first in the interpreter's composed
+ * source and normally contains `main`. Pressing another file's marker makes
+ * that one the entry instead. All tabs are submitted and interpreted together,
+ * and file-aware step locations bring the matching tab to the front.
  *
  * With one file open the strip is not drawn at all. A reader who has never
  * opened a second file should not be paying a line of the page to be told
@@ -67,6 +65,7 @@ export class TabBar {
     select.setAttribute('role', 'tab');
     select.setAttribute('aria-selected', String(tab.active));
     select.textContent = tab.edited === true ? `${tab.path} •` : tab.path;
+    select.title = tab.entry ? strings.tabEntryHint : strings.tabMakeEntryHint;
     select.addEventListener('click', () => this.options.onSelect?.(tab.path));
 
     // The entry marker is a button rather than a badge: what it says - this

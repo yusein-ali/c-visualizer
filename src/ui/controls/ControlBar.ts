@@ -10,7 +10,7 @@ import {
 import { IconName, iconFor } from './icons';
 
 /**
- * The debug controls: six buttons, the two that open and save a program, the
+ * The debug controls: seven buttons, the two that open and save a program, the
  * three that size the editor's text, the theme switch, the button that opens
  * the instructions, and the step counter.
  *
@@ -27,6 +27,8 @@ import { IconName, iconFor } from './icons';
 export type ZOOM_COMMAND = 'In' | 'Out' | 'Reset';
 
 export interface ControlBarOptions {
+  /** Optional mount for the status line when it belongs below the editor. */
+  statusParent?: HTMLElement;
   /** A debug command the user asked for. */
   onDebug?: (command: CONTROL_EVENT) => void;
   /** The editor's text size, which is what `zoom` has meant since Phase 8. */
@@ -45,6 +47,10 @@ export interface ControlBarOptions {
   onOpenFile?: (file: File) => void;
   /** Write the program out. What it is called is the caller's business. */
   onSaveCode?: () => void;
+  /** Compile every source file through the diagnostic providers of the host. */
+  onBuild?: () => void;
+  /** Whether the host-backed Build button is present. */
+  build?: boolean;
   dark?: boolean;
 }
 
@@ -61,9 +67,20 @@ export class ControlBar {
 
   private readonly options: ControlBarOptions;
   private readonly buttons: DebugButton[] = [];
+  private readonly debugToolbar: HTMLDivElement;
+  private readonly dragHandle: HTMLButtonElement;
   private readonly status: HTMLSpanElement;
   private readonly theme: HTMLSelectElement;
   private readonly fileInput: HTMLInputElement;
+  /** The pointer that currently owns the toolbar drag. */
+  private pointer: number | null = null;
+  private pointerX = 0;
+  private pointerY = 0;
+  private startX = 0;
+  private startY = 0;
+  /** Translation from the toolbar's centred opening position. */
+  private x = 0;
+  private y = 0;
 
   constructor(parent: HTMLElement, options: ControlBarOptions = {}) {
     this.options = options;
@@ -73,8 +90,10 @@ export class ControlBar {
 
     const help = document.createElement('button');
     help.type = 'button';
-    help.className = 'plivet-controls__help';
-    help.textContent = strings.howToUse;
+    help.className = 'plivet-controls__button';
+    help.title = strings.howToUse;
+    help.setAttribute('aria-label', strings.howToUse);
+    help.appendChild(iconFor('help'));
     help.addEventListener('click', () => this.options.onHelp?.());
 
     // A button the page has switched off is never built, rather than built
@@ -82,9 +101,10 @@ export class ControlBar {
     // reader that the reader cannot use.
     const preprocessed = document.createElement('button');
     preprocessed.type = 'button';
-    preprocessed.className = 'plivet-controls__help';
-    preprocessed.textContent = strings.preprocessedButton;
+    preprocessed.className = 'plivet-controls__button';
     preprocessed.title = strings.preprocessedHint;
+    preprocessed.setAttribute('aria-label', strings.preprocessedButton);
+    preprocessed.appendChild(iconFor('preprocessed'));
     preprocessed.addEventListener('click', () =>
       this.options.onPreprocessed?.()
     );
@@ -101,30 +121,35 @@ export class ControlBar {
 
     this.status = document.createElement('span');
     this.status.className = 'plivet-controls__status';
+    if (options.statusParent !== undefined) {
+      this.status.classList.add('plivet-controls__status--detached');
+    }
     // The counter is the only thing on the page that says a step happened, so
     // it is announced rather than merely displayed.
     this.status.setAttribute('role', 'status');
     this.status.setAttribute('aria-live', 'polite');
 
     this.theme = this.themeSwitch();
+    this.dragHandle = this.toolbarHandle();
+    this.debugToolbar = this.debugGroup();
 
-    // Left to right: what the bar can tell you, what it can read and write,
-    // then the run itself. Open and Save are next to the run controls because
-    // that is the order the work is done in, but they are not run controls -
-    // a rule on each side of the debug group is what says so, and keeps a
-    // hand reaching for Save from landing on Stop.
+    // Left to right: save/load, the compiler's source, text size, help and the
+    // theme. The run controls float independently over the editor. A configured
+    // Build action belongs to that debug group, after the execution controls.
     this.root.append(
-      help,
-      ...(options.preprocessor === false ? [] : [preprocessed]),
-      this.theme,
       this.fileGroup(),
       this.fileInput,
-      this.divider(),
-      this.debugGroup(),
+      this.debugToolbar,
+      ...(options.preprocessor === false ? [] : [this.divider(), preprocessed]),
       this.divider(),
       this.zoomGroup(),
-      this.status
+      this.divider(),
+      help,
+      this.divider(),
+      this.theme,
+      ...(options.statusParent === undefined ? [this.status] : [])
     );
+    options.statusParent?.appendChild(this.status);
     parent.appendChild(this.root);
 
     this.setDark(options.dark === true);
@@ -158,6 +183,7 @@ export class ControlBar {
 
   destroy(): void {
     this.fileInput.removeEventListener('change', this.chosen);
+    this.status.remove();
     this.root.remove();
   }
 
@@ -205,11 +231,11 @@ export class ControlBar {
   private fileGroup(): HTMLDivElement {
     const group = this.group('files');
     group.append(
-      this.fileButton('open', strings.openCode, strings.openCodeHint, () =>
-        this.fileInput.click()
-      ),
       this.fileButton('save', strings.saveCode, strings.saveCodeHint, () =>
         this.options.onSaveCode?.()
+      ),
+      this.fileButton('open', strings.openCode, strings.openCodeHint, () =>
+        this.fileInput.click()
       )
     );
     return group;
@@ -238,16 +264,150 @@ export class ControlBar {
 
   private debugGroup(): HTMLDivElement {
     const group = this.group('debug');
+    group.setAttribute('role', 'toolbar');
+    group.setAttribute('aria-label', strings.debugToolbar);
     group.append(
+      this.dragHandle,
       this.debugButton('Start', 'Start', 'restart', 'start'),
       this.debugButton('Stop', 'Stop', 'stop', 'stop'),
       this.debugButton('BackAll', 'BackAll', 'rewind', 'move'),
       this.debugButton('StepBack', 'StepBack', 'stepBack', 'move'),
+      this.debugButton('StepOver', 'StepOver', 'stepOver', 'move'),
       this.debugButton('Step', 'Step', 'stepForward', 'move'),
       this.debugButton('StepAll', 'StepAll', 'run', 'move')
     );
+    if (this.options.build === true) {
+      const divider = this.divider();
+      divider.classList.add('plivet-controls__divider--debug');
+      group.append(
+        divider,
+        this.fileButton('build', strings.buildCode, strings.buildCodeHint, () =>
+          this.options.onBuild?.()
+        )
+      );
+    }
     return group;
   }
+
+  /**
+   * The dotted grip at the left of the floating run controls. Pointer drags
+   * move it freely inside this PLIVET instance; arrow keys provide the same
+   * operation without a pointer, and Enter or a double-click puts it back.
+   */
+  private toolbarHandle(): HTMLButtonElement {
+    const handle = document.createElement('button');
+    handle.type = 'button';
+    handle.className = 'plivet-controls__drag';
+    handle.title = strings.moveDebugToolbar;
+    handle.setAttribute('aria-label', strings.moveDebugToolbar);
+    handle.addEventListener('pointerdown', this.dragStart);
+    handle.addEventListener('pointermove', this.dragMove);
+    handle.addEventListener('pointerup', this.dragEnd);
+    handle.addEventListener('pointercancel', this.dragEnd);
+    handle.addEventListener('keydown', this.dragKey);
+    handle.addEventListener('dblclick', this.resetToolbarPosition);
+    return handle;
+  }
+
+  private dragStart = (event: PointerEvent): void => {
+    if (event.button !== 0) {
+      return;
+    }
+    this.pointer = event.pointerId ?? 0;
+    if (typeof this.dragHandle.setPointerCapture === 'function') {
+      this.dragHandle.setPointerCapture(this.pointer);
+    }
+    this.pointerX = event.clientX;
+    this.pointerY = event.clientY;
+    this.startX = this.x;
+    this.startY = this.y;
+    this.debugToolbar.classList.add('plivet-controls__group--debug-dragging');
+    event.preventDefault();
+  };
+
+  private dragMove = (event: PointerEvent): void => {
+    if (this.pointer === null || (event.pointerId ?? 0) !== this.pointer) {
+      return;
+    }
+    this.moveToolbar(
+      this.startX + event.clientX - this.pointerX,
+      this.startY + event.clientY - this.pointerY
+    );
+    event.preventDefault();
+  };
+
+  private dragEnd = (event: PointerEvent): void => {
+    if (this.pointer === null || (event.pointerId ?? 0) !== this.pointer) {
+      return;
+    }
+    if (typeof this.dragHandle.releasePointerCapture === 'function') {
+      this.dragHandle.releasePointerCapture(this.pointer);
+    }
+    this.pointer = null;
+    this.debugToolbar.classList.remove(
+      'plivet-controls__group--debug-dragging'
+    );
+  };
+
+  private dragKey = (event: KeyboardEvent): void => {
+    const movement: Record<string, readonly [number, number]> = {
+      ArrowLeft: [-16, 0],
+      ArrowRight: [16, 0],
+      ArrowUp: [0, -16],
+      ArrowDown: [0, 16],
+    };
+    const delta = movement[event.key];
+    if (delta !== undefined) {
+      this.moveToolbar(this.x + delta[0], this.y + delta[1]);
+      event.preventDefault();
+    } else if (event.key === 'Enter') {
+      this.resetToolbarPosition();
+      event.preventDefault();
+    }
+  };
+
+  /** Keep the floating controls inside the application that owns them. */
+  private moveToolbar(x: number, y: number): void {
+    const boundary =
+      this.root.closest<HTMLElement>('.plivet') ??
+      this.root.parentElement ??
+      this.root;
+    const bounds = boundary.getBoundingClientRect();
+    const toolbar = this.debugToolbar.getBoundingClientRect();
+    const base = {
+      left: toolbar.left - this.x,
+      right: toolbar.right - this.x,
+      top: toolbar.top - this.y,
+      bottom: toolbar.bottom - this.y,
+    };
+
+    // jsdom and a detached widget have no layout. In a browser, clamp only on
+    // an axis for which the owner has a measurable amount of room.
+    this.x =
+      bounds.width > 0
+        ? this.clamp(x, bounds.left - base.left, bounds.right - base.right)
+        : x;
+    this.y =
+      bounds.height > 0
+        ? this.clamp(y, bounds.top - base.top, bounds.bottom - base.bottom)
+        : y;
+    this.debugToolbar.style.setProperty('--plivet-debug-x', `${this.x}px`);
+    this.debugToolbar.style.setProperty('--plivet-debug-y', `${this.y}px`);
+  }
+
+  private clamp(value: number, least: number, most: number): number {
+    // An embedding narrower than the toolbar cannot contain both edges. Keep
+    // its grip reachable at the nearer boundary instead of producing NaN or
+    // making movement reverse direction.
+    return most < least ? least : Math.min(Math.max(value, least), most);
+  }
+
+  private resetToolbarPosition = (): void => {
+    this.x = 0;
+    this.y = 0;
+    this.debugToolbar.style.removeProperty('--plivet-debug-x');
+    this.debugToolbar.style.removeProperty('--plivet-debug-y');
+  };
 
   private debugButton(
     slot: keyof Enablement,

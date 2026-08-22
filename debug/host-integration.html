@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>c-visualizer host integration debugger</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: system-ui, sans-serif;
+        --interactive-editor-bg: #f8fafc;
+        --interactive-editor-fg: #172033;
+        --interactive-editor-border: #94a3b8;
+      }
+
+      body {
+        margin: 0;
+        background: #e2e8f0;
+        color: #172033;
+      }
+
+      .host-panel {
+        display: grid;
+        gap: 10px;
+        padding: 12px 16px;
+        border-bottom: 1px solid #94a3b8;
+        background: #f8fafc;
+      }
+
+      .host-panel h1,
+      .host-panel p {
+        margin: 0;
+      }
+
+      .host-panel h1 {
+        font-size: 18px;
+      }
+
+      .host-actions {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .host-actions button,
+      .host-actions a {
+        box-sizing: border-box;
+        min-height: 32px;
+        padding: 6px 10px;
+        border: 1px solid #64748b;
+        border-radius: 4px;
+        background: #fff;
+        color: #172033;
+        font: inherit;
+        text-decoration: none;
+        cursor: pointer;
+      }
+
+      #mode,
+      #status {
+        padding: 3px 7px;
+        border-radius: 4px;
+        background: #dbeafe;
+        font-family: ui-monospace, monospace;
+      }
+
+      #host-log {
+        box-sizing: border-box;
+        width: 100%;
+        max-height: 150px;
+        margin: 0;
+        padding: 8px;
+        overflow: auto;
+        border: 1px solid #94a3b8;
+        background: #0f172a;
+        color: #e2e8f0;
+        white-space: pre-wrap;
+      }
+
+      #visualizer {
+        min-width: 760px;
+        background: #fff;
+      }
+    </style>
+  </head>
+  <body>
+    <section class="host-panel" aria-label="Host integration controls">
+      <h1>Host integration debugger</h1>
+      <p>
+        Mode: <span id="mode">loading</span> · Status:
+        <span id="status">loading scripts</span>
+      </p>
+      <p>
+        Press c-visualizer's <strong>Build</strong> button to run the simulated
+        A+ grader. Press <strong>Start</strong>, then <strong>Step</strong> to
+        follow execution from main.c into helper.c and back automatically.
+      </p>
+      <div class="host-actions">
+        <button id="save" type="button">Host Save snapshot</button>
+        <button id="update" type="button">Host Update sources</button>
+        <button id="direct-diagnostic" type="button">
+          Add host diagnostic
+        </button>
+        <button id="clear-diagnostic" type="button">
+          Clear host diagnostic
+        </button>
+        <button id="clear-log" type="button">Clear log</button>
+        <a href="/?codemirror=host">Test host CodeMirror</a>
+        <a href="/?codemirror=fallback">Test fallback CodeMirror</a>
+      </div>
+      <pre id="host-log" aria-live="polite"></pre>
+    </section>
+    <main id="visualizer"></main>
+    <script src="/host-integration.js"></script>
+  </body>
+</html>

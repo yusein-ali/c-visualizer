@@ -236,6 +236,10 @@ export function parseConfig(text: string): PlivetOptions {
   const features = featuresOf(parsed.features);
   const licenses = string(parsed.licenses, 'licenses');
   const views = viewsOf(parsed.views);
+  const supportBuild = boolean(
+    parsed['support-build'] ?? parsed.supportBuild,
+    'support-build'
+  );
   if (typeof sourceCode !== 'undefined') {
     options.sourceCode = sourceCode;
   }
@@ -259,6 +263,9 @@ export function parseConfig(text: string): PlivetOptions {
   }
   if (typeof licenses !== 'undefined') {
     options.licenses = licenses;
+  }
+  if (typeof supportBuild !== 'undefined') {
+    options.supportBuild = supportBuild;
   }
   return options;
 }

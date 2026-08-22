@@ -33,10 +33,10 @@ import { UniWhile } from 'unicoen.ts/dist/node/UniWhile';
  * Everything it produces is plain data: this runs in the Worker and the linter
  * that shows it runs on the page.
  *
- * The two severities mean different things. `error` is for what C leaves
- * undefined - the program may appear to work and is not required to - and
- * `warning` for legal C that is nearly always a mistake. Nothing here is
- * reported as an error unless the standard says the behaviour is undefined.
+ * Severity describes how urgently the editor presents a finding, not a C
+ * standard category. Diagnostics state explicitly when evaluation would have
+ * undefined behavior; warnings also cover constructs that are valid C but are
+ * commonly accidental.
  */
 
 export type LintSeverity = 'info' | 'warning' | 'error';
@@ -519,9 +519,9 @@ class LintPass {
 }
 
 /**
- * `scanf` is handed the address of the object it fills. Passing the object
- * itself compiles - the argument list is variadic, so nothing checks it - and
- * then stores through whatever the object happened to hold.
+ * A `scanf` conversion that assigns a value requires a pointer to the object
+ * that receives it. Passing the object's stored value as a variadic argument
+ * does not provide that pointer.
  */
 const scanfAddress: Rule = {
   name: 'scanf-address',
@@ -556,10 +556,10 @@ const scanfAddress: Rule = {
       pass.report(
         this,
         range,
-        `${name} stores through the pointer it is given, so it needs the ` +
-          `address of ${argument.name}: write &${argument.name}. Passing ` +
-          `${argument.name} itself hands ${name} the value it holds and asks ` +
-          `it to store there.`,
+        `${name} requires a pointer to the object that receives this input. ` +
+          `Pass the address of ${argument.name} by writing ` +
+          `&${argument.name}; passing ${argument.name} supplies its stored ` +
+          `value instead, and using that value as an address has undefined behavior.`,
         { fix, help: name }
       );
     }
@@ -567,11 +567,10 @@ const scanfAddress: Rule = {
 };
 
 /**
- * `=` in a condition assigns and then tests what it assigned, so the branch is
- * decided by the value on the right and the object on the left quietly
- * changes. The idiom that means it - `while ((c = getchar()) != EOF)` - keeps
- * the assignment inside a comparison, which is why only the whole condition is
- * looked at here.
+ * `=` in a controlling expression performs an assignment, and the assignment
+ * expression's result then determines control flow. The idiom that intends an
+ * assignment - `while ((c = getchar()) != EOF)` - makes the comparison
+ * explicit, which is why only the complete controlling expression is checked.
  */
 const assignmentAsCondition: Rule = {
   name: 'assignment-as-condition',
@@ -602,19 +601,20 @@ const assignmentAsCondition: Rule = {
     pass.report(
       this,
       range,
-      `${operator} assigns; == compares. This condition gives ` +
-        `${target === '' ? 'the object on the left' : target} a new value ` +
-        `and then tests that value.`,
+      `${operator} is an assignment operator; == is the equality operator. ` +
+        `This controlling expression stores a value in ` +
+        `${target === '' ? 'the object designated by the left operand' : target} ` +
+        `and then uses the assignment expression's result to determine control flow.`,
       { fix }
     );
   },
 };
 
 /**
- * A format string is a promise about the arguments after it, and nothing
- * checks it: too few arguments reads whatever is next in the frame, and a
- * conversion that disagrees with its argument reads the right bytes as the
- * wrong thing.
+ * Each conversion specification imposes a type requirement on its
+ * corresponding argument. A variadic call carries no parameter type
+ * information for these trailing arguments, so a mismatch has undefined
+ * behavior rather than producing a language-level conversion.
  */
 const formatArguments: Rule = {
   name: 'format-arguments',
@@ -639,8 +639,13 @@ const formatArguments: Rule = {
       pass.report(
         this,
         callRange,
-        `${name} is asked for ${count(conversions.length, 'conversion')} and ` +
-          `given ${count(given.length, 'argument')} after the format string.`,
+        `The ${name} format contains ${count(
+          conversions.length,
+          'conversion specification'
+        )}, but the call supplies ${count(
+          given.length,
+          'corresponding argument'
+        )}. The mismatch has undefined behavior.`,
         { help: name }
       );
       return;
@@ -667,10 +672,12 @@ const formatArguments: Rule = {
         this,
         range,
         shape.reads
-          ? `${conversion.text} stores ${NAMES[expected]}, and this argument ` +
-              `points at ${NAMES[actual]}.`
-          : `${conversion.text} prints ${NAMES[expected]}, and this argument ` +
-              `is ${NAMES[actual]}.`,
+          ? `${conversion.text} requires a pointer to ${NAMES[expected]} ` +
+              `object, but this argument points to ${NAMES[actual]}. The ` +
+              `mismatch has undefined behavior.`
+          : `${conversion.text} requires ${NAMES[expected]} after the ` +
+              `default argument promotions, but this argument is ` +
+              `${NAMES[actual]}. The mismatch has undefined behavior.`,
         { help: name }
       );
     });
@@ -678,9 +685,9 @@ const formatArguments: Rule = {
 };
 
 /**
- * An object with automatic storage and no initializer holds whatever its
- * memory held before. Reading it is undefined, and the reason it is worth a
- * rule is that the program usually appears to work: the bytes are often zero.
+ * An object with automatic storage duration and no initializer has an
+ * indeterminate value. Evaluating that value is not the same as reading a
+ * predictable leftover bit pattern.
  */
 const uninitializedRead: Rule = {
   name: 'uninitialized-read',
@@ -738,9 +745,9 @@ const uninitializedRead: Rule = {
     pass.report(
       this,
       range,
-      `${node.name} is read before it is given a value. An uninitialized ` +
-        `${declared.type} holds whatever was left in that memory, so what ` +
-        `this reads is not defined.`
+      `${node.name} is evaluated before a value is stored in it. This ` +
+        `uninitialized object of type ${declared.type} has an indeterminate ` +
+        `value; using that value here has undefined behavior.`
     );
   },
   leave(node, pass) {
@@ -754,15 +761,20 @@ const uninitializedRead: Rule = {
 };
 
 /**
- * A non-`void` function that can reach its closing brace returns nothing, and
- * the caller reads whatever the calling convention left where the result goes.
- * `main` is exempt: C says falling off the end of it returns zero.
+ * Reaching the closing brace of a non-`void` function is equivalent to a
+ * return statement with no expression. If the caller uses that function
+ * call's value, the behavior is undefined. `main` is exempt: reaching its
+ * closing brace returns zero.
  */
 const missingReturn: Rule = {
   name: 'missing-return',
   severity: 'warning',
   enter(node, pass) {
-    if (!(node instanceof UniFunctionDec) || node.name === 'main') {
+    if (
+      !(node instanceof UniFunctionDec) ||
+      !(node.block instanceof UniBlock) ||
+      node.name === 'main'
+    ) {
       return;
     }
     const returns = typeof node.returnType === 'string' ? node.returnType : '';
@@ -781,9 +793,10 @@ const missingReturn: Rule = {
     pass.report(
       this,
       { ...range, endLine: range.line, endColumn: pass.lineLength(range.line) },
-      `${node.name} returns ${returns}, but control can reach the end of it ` +
-        `without a return statement. What the caller reads back is not ` +
-        `defined.`
+      `${node.name} has return type ${returns}, but control can reach its ` +
+        `closing brace. This is equivalent to a return statement with no ` +
+        `expression; if the caller uses the function call's value, the ` +
+        `behavior is undefined.`
     );
   },
 };

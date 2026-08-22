@@ -178,11 +178,29 @@ const targetText = (node: unknown, values?: Map<object, string>): string => {
 };
 
 /** One construct, and what has happened to it so far. */
+/**
+ * One label a `switch` writes, as far as the tree can say.
+ *
+ * `constant` is the value the label selects on, spelled the way the engine
+ * spells the controlling value so the two can be compared - a character
+ * constant becomes its code, because that is what `switch ('b')` is worth at
+ * run time. `kind` is what keeps a guess from being made where the tree cannot
+ * support one: an `enum` constant or `case 1 + 1` arrives as neither a literal
+ * nor a `default`, and a switch holding one is not reasoned about at all.
+ */
+interface CaseLabel {
+  label: string;
+  kind: 'constant' | 'default' | 'unknown';
+  constant?: string;
+}
+
 interface Activation {
   node: object;
   kind: string;
   range: CodeRangeModel;
   condition?: string;
+  /** For a `switch`: the labels it declares, in source order. */
+  cases?: CaseLabel[];
   /** `factBranchThen` or `factBranchElse`, once a branch has run. */
   branch?: string;
   iterations?: number;
@@ -256,7 +274,7 @@ const rangeOf = (node: any): CodeRangeModel | null => {
  * off a pointer parameter's name before binding it, and the name a reader sees
  * in the body is the stripped one.
  */
-const parameterNames = (declaration: UniFunctionDec): string[] => {
+export const parameterNames = (declaration: UniFunctionDec): string[] => {
   const names: string[] = [];
   for (const parameter of (declaration.params ?? []) as any[]) {
     for (const variable of (parameter.variables ?? []) as any[]) {
@@ -318,9 +336,9 @@ const asText = (value: unknown): string | null => {
  * A value as C leaves it.
  *
  * The engine compares with JavaScript's operators and hands back a boolean;
- * C's relational operators yield an `int`, and the whole point of showing a
- * value here is that C has no boolean type to hide behind - `i < 3` is worth
- * 1, and a reader told it is worth `true` has learned the wrong language.
+ * C's relational operators yield an `int`; although C has the `_Bool` type,
+ * `i < 3` has the value 1 rather than a JavaScript Boolean value. Showing that
+ * representation keeps the trace faithful to the interpreted language.
  */
 const spell = (value: unknown): string => {
   const primitive = value instanceof Boolean ? value.valueOf() : value;
@@ -358,11 +376,17 @@ function factsOf(activation: Activation): ConstructFactModel[] {
       value: String(activation.iterations),
     });
   }
-  if (typeof activation.label !== 'undefined') {
-    facts.push({ label: 'factLabel', value: activation.label });
+  const selected = selectedLabel(activation);
+  if (selected !== null) {
+    facts.push({ label: 'factLabel', value: selected });
+    // Fall-through is observed rather than worked out: it is true when more
+    // than one label's statements have actually run, which no reading of the
+    // controlling value can tell you.
     if (1 < activation.labels.length) {
       facts.push({ label: 'factFallsThrough', value: '' });
     }
+  } else if (activation.kind === 'switch' && decidable(activation)) {
+    facts.push({ label: 'factNoLabel', value: '' });
   }
   activation.args.forEach((value, index) => {
     if (typeof value === 'undefined') {
@@ -432,6 +456,8 @@ export class ConstructRecorder {
   private evaluations = new Map<object, EvaluationModel>();
   /** Every write the run has made, oldest first, bounded. */
   private mutations: MutationModel[] = [];
+  /** The labels each `switch` declares, indexed while the tree is walked. */
+  private cases = new WeakMap<object, CaseLabel[]>();
 
   /**
    * A new run. The index is built once, from the tree about to execute: a
@@ -446,6 +472,7 @@ export class ConstructRecorder {
     this.entries = new Map<object, number>();
     this.evaluations = new Map<object, EvaluationModel>();
     this.mutations = [];
+    this.cases = new WeakMap<object, CaseLabel[]>();
     this.index(program);
     if (entryPoint !== null) {
       // Nothing calls `main`, so its activation is opened here; the count is
@@ -731,6 +758,9 @@ export class ConstructRecorder {
     if (kind === 'functionDec') {
       activation.name = String((node as { name?: unknown }).name ?? '');
     }
+    if (kind === 'switch') {
+      activation.cases = this.cases.get(node);
+    }
     if (kind === 'assignment') {
       const target =
         node instanceof UniUnaryOp &&
@@ -749,9 +779,10 @@ export class ConstructRecorder {
    * One write, kept after the step that made it.
    *
    * The frame is the innermost function on the stack rather than the one the
-   * statement is written in, and they differ exactly where it matters: a
-   * write inside a callee is a write to the callee's own copy, which is C's
-   * by-value passing said as a fact rather than as a warning.
+   * statement is written in. Recording the frame matters because an
+   * assignment may modify a parameter object or, through a pointer, an object
+   * whose lifetime began in a caller; those operations have different effects
+   * despite C's by-value argument passing.
    */
   private wrote(activation: Activation): void {
     const target = activation.resolvedTarget ?? activation.target ?? '';
@@ -882,6 +913,13 @@ export class ConstructRecorder {
     }
     if (node instanceof UniSwitch) {
       this.mark(node.cond, { owner: node, kind: 'switch', role: 'condition' });
+      this.cases.set(
+        node,
+        ((node.cases ?? []) as any[]).map((unit) => ({
+          label: labelOf(unit),
+          ...constantOf(unit),
+        }))
+      );
       for (const unit of (node.cases ?? []) as any[]) {
         const label = labelOf(unit);
         for (const statement of (unit.statement ?? []) as any[]) {
@@ -980,15 +1018,96 @@ export class ConstructRecorder {
   }
 }
 
+/**
+ * Which label a `switch` is running.
+ *
+ * A label whose statements have begun is the answer wherever there is one: it
+ * is what the program did, and it survives fall-through, where the label that
+ * matched and the label running are no longer the same.
+ *
+ * Before that it is worked out from the controlling value against the
+ * constants, because the engine reaches the first statement of a case one step
+ * after it has chosen it - and the step where the marker sits on `case 2:` is
+ * exactly the step where a reader is asking which case that is. C's rule is
+ * the whole rule: the first label whose constant equals the value, and
+ * `default` when none does.
+ */
+function selectedLabel(activation: Activation): string | null {
+  if (typeof activation.label !== 'undefined') {
+    return activation.label;
+  }
+  if (!decidable(activation)) {
+    return null;
+  }
+  const cases = activation.cases as CaseLabel[];
+  const matched = cases.find(
+    (one) => one.kind === 'constant' && one.constant === activation.condition
+  );
+  if (typeof matched !== 'undefined') {
+    return matched.label;
+  }
+  const fallback = cases.find((one) => one.kind === 'default');
+  return typeof fallback === 'undefined' ? null : fallback.label;
+}
+
+/**
+ * Whether the labels can be read against the controlling value at all. One
+ * label the tree could not reduce to a constant is enough to stop: the value
+ * might well be that label's, and answering `default` because the comparison
+ * could not be made would be worse than not answering.
+ */
+function decidable(activation: Activation): boolean {
+  const { cases, condition } = activation;
+  return (
+    typeof cases !== 'undefined' &&
+    typeof condition !== 'undefined' &&
+    cases.every((one) => one.kind !== 'unknown')
+  );
+}
+
+/**
+ * What a `switch` label selects on, spelled as the engine spells the value it
+ * is compared against.
+ *
+ * A character constant reaches the tree as a one-character string and the
+ * controlling expression reaches the recorder as its code, so `case 'b'` is
+ * only comparable once it has been turned into `98`. Anything that is not a
+ * literal - an `enum` constant, a constant expression, a macro the
+ * preprocessor left as a name - is reported as unknown rather than guessed at.
+ */
+function constantOf(unit: any): {
+  kind: 'constant' | 'default' | 'unknown';
+  constant?: string;
+} {
+  if (unit === null || unit.label === 'default' || unit.cond === null) {
+    return { kind: 'default' };
+  }
+  const value = (unit.cond as { value?: unknown }).value;
+  if (typeof value === 'number') {
+    return { kind: 'constant', constant: String(value) };
+  }
+  if (typeof value === 'string' && value.length === 1) {
+    return { kind: 'constant', constant: String(value.charCodeAt(0)) };
+  }
+  return { kind: 'unknown' };
+}
+
 /** How a `switch` label reads in the source it was written in. */
 function labelOf(unit: any): string {
   if (unit.label === 'default' || unit.cond === null) {
     return 'default';
   }
   const value = (unit.cond as { value?: unknown }).value;
-  return typeof value === 'undefined'
-    ? 'case'
-    : `case ${typeof value === 'string' ? value : String(value)}`;
+  if (typeof value === 'undefined') {
+    return 'case';
+  }
+  // A character constant is a one-character string in the tree, and `case b`
+  // is a different program from `case 'b'`. The clause list `outline.ts`
+  // reads out of the source spells it with the quotes, and one label must not
+  // read two ways on one screen.
+  return typeof value === 'string'
+    ? `case '${value}'`
+    : `case ${String(value)}`;
 }
 
 export function constructStatesOf(state: ExecState): ConstructStateModel[] {

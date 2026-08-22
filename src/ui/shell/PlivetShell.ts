@@ -3,7 +3,7 @@ import { Splitter } from './Splitter';
 import './shell.css';
 
 /**
- * The frame the application hangs in: two columns, a footer, and five boxes
+ * The frame the application hangs in: two columns, a footer, and six boxes
  * for the widgets to mount into.
  *
  * It was `App`, `EditorSide`, `Menu` and `Footer` - four React class
@@ -74,9 +74,11 @@ const copyrightYears = (fromYear: number | undefined): string => {
 
 export class PlivetShell {
   readonly root: HTMLDivElement;
-  /** Where the debug controls, the step counter and the theme switch go. */
+  /** Where the utility controls and floating debug toolbar go. */
   readonly controls: HTMLDivElement;
   readonly editor: HTMLDivElement;
+  /** The debug state and step count, immediately below the editor. */
+  readonly status: HTMLDivElement;
   readonly console: HTMLDivElement;
   readonly files: HTMLDivElement;
   /** The right-hand column: the visualization. */
@@ -98,6 +100,8 @@ export class PlivetShell {
     this.controls.className = 'plivet__controls';
     this.editor = document.createElement('div');
     this.editor.className = 'plivet__editor';
+    this.status = document.createElement('div');
+    this.status.className = 'plivet__status';
     this.console = document.createElement('div');
     this.console.className = 'plivet__console';
     this.files = document.createElement('div');
@@ -113,6 +117,7 @@ export class PlivetShell {
     this.side.append(
       this.controls,
       this.editor,
+      this.status,
       editorSplit.element,
       this.console,
       ...(options.files === false ? [] : [this.files])

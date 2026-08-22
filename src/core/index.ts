@@ -10,9 +10,12 @@
 export { InterpreterClient } from './client';
 export { Server } from './server';
 export type { Request, Response, SourceFile } from './server';
+export type { SourceLocation } from './executionSource';
+export { ExecutionSource } from './executionSource';
 export type {
   CONTROL_EVENT,
   DEBUG_STATE,
+  FileSyntaxErrors,
   LineCount,
   RUN_EVENT,
   SyntaxErrorModel,
@@ -64,6 +67,7 @@ export {
   cellWidth,
   emptyStepModel,
   foldGroupOf,
+  foldPathOf,
   isWithinFold,
   rangeCovers,
   rangeSpan,
@@ -71,6 +75,7 @@ export {
   startsShown,
 } from './model';
 export type {
+  CallExpansionModel,
   CellKind,
   CellModel,
   CodeRangeModel,

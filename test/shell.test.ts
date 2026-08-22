@@ -60,12 +60,20 @@ describe('the shell', () => {
     for (const mount of [
       shell.controls,
       shell.editor,
+      shell.status,
       shell.console,
       shell.files,
       shell.main,
     ]) {
       expect(shell.root.contains(mount)).toBe(true);
     }
+  });
+
+  it('places the debug status immediately below the editor', () => {
+    const parent = parentOf();
+    const shell = new PlivetShell(parent);
+
+    expect(shell.editor.nextElementSibling).toBe(shell.status);
   });
 
   it('carries the theme on the root, where the widgets inherit it', () => {

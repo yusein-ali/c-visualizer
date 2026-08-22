@@ -94,11 +94,11 @@ describe('pinned watches', () => {
     view.destroy();
   });
 
-  it('says a pinned name is out of the frame rather than vanishing', () => {
+  it('says a pinned identifier is not visible rather than vanishing', () => {
     const hover = new HoverTextSource();
     hover.setStep(emptyStepModel());
     const record = hover.watchRecord('count');
     expect(record.title).toBe('count');
-    expect(record.facts[0].label).toContain('frame');
+    expect(record.facts[0].label).toContain('not visible');
   });
 });

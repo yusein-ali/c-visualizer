@@ -18,6 +18,22 @@
       }
     },
     {
+      "name": "c-visualizer: deployed host integration",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "debug:host-integration", "--", "--port", "8090"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "autoAttachChildProcesses": true,
+      "skipFiles": ["<node_internals>/**"],
+      "serverReadyAction": {
+        "pattern": "Host integration debug server:\\s+(https?://[^\\s]+)",
+        "uriFormat": "%s",
+        "action": "debugWithChrome"
+      }
+    },
+    {
       "name": "c-visualizer: attach to running server",
       "type": "pwa-chrome",
       "request": "launch",

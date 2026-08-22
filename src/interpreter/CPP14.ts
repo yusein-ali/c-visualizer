@@ -191,16 +191,28 @@ export class PlivetCPP14Interpreter extends Interpreter {
    * nothing rather than throwing - the syntax errors are the diagnostics worth
    * showing while the code is half written.
    */
-  getLints(code: string): LintDiagnostic[] {
+  getLints(code: string, linkedCode: string = code): LintDiagnostic[] {
+    return this.getTeachingLints(code).concat(this.getLinkerLints(linkedCode));
+  }
+
+  /** Diagnostics whose coordinates belong to this one source file. */
+  getTeachingLints(code: string): LintDiagnostic[] {
     const prepared = this.prepare(code);
     try {
-      const tree = this.mapper.parseToUniTree(prepared.code);
-      // Two passes over one tree: what a compiler would say about the
-      // statements, and what a linker would say about the file as a whole.
-      // They are separate because they are different questions - one walks
-      // with scope, the other asks about the translation unit - and one list
-      // because the reader has one editor.
-      return teachingDiagnostics(tree, code).concat(linkerDiagnostics(tree));
+      return teachingDiagnostics(
+        this.mapper.parseToUniTree(prepared.code),
+        code
+      );
+    } catch {
+      return [];
+    }
+  }
+
+  /** Linker diagnostics whose coordinates belong to the complete program. */
+  getLinkerLints(code: string): LintDiagnostic[] {
+    const prepared = this.prepare(code);
+    try {
+      return linkerDiagnostics(this.mapper.parseToUniTree(prepared.code));
     } catch {
       return [];
     }

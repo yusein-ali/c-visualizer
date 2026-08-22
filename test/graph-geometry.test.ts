@@ -80,8 +80,10 @@ const model = (): StepModel => {
       [scalarRow('p', 'int *', '0x1004', 0x1000), array, member],
       0x1000,
       [
-        { name: 'main', rows: 1 },
-        { name: 'sum', rows: 2 },
+        // This shared geometry fixture keeps both runs open; the tests below
+        // that exercise frame defaults mark exactly one as current.
+        { key: 'frame-0-main', name: 'main', rows: 1, current: true },
+        { key: 'frame-1-sum', name: 'sum', rows: 2, current: true },
       ]
     ),
   ];
@@ -143,10 +145,23 @@ describe('memory geometry', () => {
     const stack = geometry.segments.find((one) => one.key === 'stack');
     const bss = geometry.segments.find((one) => one.key === 'bss');
 
-    expect(stack!.name).toBe('Stack');
+    expect(stack!.name).toBe('Automatic storage (stack)');
     expect(stack!.addressLabel).toBe('0x1000 – 0x1004');
     // An empty segment still says where it would begin.
     expect(bss!.addressLabel).toBe('0x3800 –');
+  });
+
+  it('includes the complete illustrative code size in the text range', () => {
+    const step = model();
+    const text = step.memory.find((one) => one.key === 'text')!;
+    const row = scalarRow('helper', 'function', 'code', 0x1000);
+    row.find((cell) => cell.kind === 'type')!.size = 48;
+    text.rows = [row];
+
+    const segment = mapOf(step, new FoldState()).segments.find(
+      (one) => one.key === 'text'
+    )!;
+    expect(segment.addressLabel).toBe('0x1000 – 0x102F');
   });
 
   it('lines the columns up across every segment', () => {
@@ -302,18 +317,49 @@ describe('memory geometry', () => {
     });
   });
 
-  it('folds an aggregate away and keeps the columns still', () => {
+  it('opens only the current frame until the reader chooses otherwise', () => {
+    const step = model();
+    const stackModel = step.memory.find((one) => one.key === 'stack')!;
+    stackModel.groups[0].current = false;
+    const folds = new FoldState();
+    const stackOf = () =>
+      mapOf(step, folds).segments.find((one) => one.key === 'stack')!;
+
+    const initially = stackOf();
+    expect(
+      initially.rows
+        .filter((row) => row.kind === 'group')
+        .map((row) => [row.label, row.collapsed])
+    ).toEqual([
+      ['main', true],
+      ['sum', false],
+    ]);
+    expect(
+      initially.rows
+        .flatMap((row) => row.cells)
+        .some((cell) => cell.key === 'p-value')
+    ).toBe(false);
+
+    folds.toggleFrame('frame-0-main', true);
+    expect(
+      stackOf()
+        .rows.flatMap((row) => row.cells)
+        .some((cell) => cell.key === 'p-value')
+    ).toBe(true);
+  });
+
+  it('starts an aggregate folded and keeps the columns still when opened', () => {
     const step = model();
     const folds = new FoldState();
-    const open = mapOf(step, folds);
-    folds.toggle(group);
     const closed = mapOf(step, folds);
-    const entries = (geometry: typeof open) =>
+    folds.toggle(group);
+    const open = mapOf(step, folds);
+    const entries = (geometry: typeof closed) =>
       geometry.segments
         .flatMap((one) => one.rows)
         .filter((row) => row.kind === 'entry').length;
 
-    expect(entries(closed)).toBe(entries(open) - 1);
+    expect(entries(open)).toBe(entries(closed) + 1);
     expect(closed.segments[0].width).toBe(open.segments[0].width);
   });
 
@@ -370,8 +416,35 @@ describe('memory geometry', () => {
     expect(mapOf(step, folds)).toEqual(open);
   });
 
+  it('points to a collapsed right-hand heading, then to its address cell', () => {
+    const step = model();
+    const textModel = step.memory.find((one) => one.key === 'text')!;
+    textModel.rows = [scalarRow('helper', 'function', 'code', 0x1000)];
+    step.pointers = [{ from: 'Heap:0-value', to: 'helper-address' }];
+    const folds = new FoldState();
+    const closed = mapOf(step, folds);
+    const text = closed.segments.find((one) => one.key === 'text')!;
+
+    expect(text.collapsed).toBe(true);
+    expect(closed.arrows).toHaveLength(1);
+    expect(closed.arrows[0].to.y).toBeGreaterThan(text.y);
+    expect(closed.arrows[0].to.y).toBeLessThan(text.y + text.titleHeight / 2);
+
+    folds.toggleSegment('text', true);
+    const open = mapOf(step, folds);
+    const address = open.segments
+      .find((one) => one.key === 'text')!
+      .rows.flatMap((row) => row.cells)
+      .find((cell) => cell.key === 'helper-address')!;
+
+    expect(open.arrows[0].to.y).toBe(address.y - MEMORY_CAPTION_HEIGHT / 2);
+    expect(open.arrows[0].to).not.toEqual(closed.arrows[0].to);
+  });
+
   it('indents a member under the aggregate that holds it', () => {
-    const geometry = mapOf(model(), new FoldState());
+    const folds = new FoldState();
+    folds.toggle(group);
+    const geometry = mapOf(model(), folds);
     const stack = geometry.segments.find((one) => one.key === 'stack');
     const rows = stack!.rows.filter((row) => row.kind === 'entry');
 
@@ -455,6 +528,9 @@ describe('memory geometry', () => {
     const geometry = mapOf(step, new FoldState());
     const stack = geometry.segments.find((one) => one.key === 'stack')!;
     const heap = geometry.segments.find((one) => one.key === 'heap')!;
+    const address = stack.rows
+      .flatMap((row) => row.cells)
+      .find((cell) => cell.key === 'a-address')!;
     const [arrow] = geometry.arrows;
 
     // It leaves by the side that faces where it is going, not by the far one,
@@ -462,7 +538,11 @@ describe('memory geometry', () => {
     // address column, so it starts on the blank top of its own address cell.
     expect(arrow.from.x).toBeGreaterThan(heap.x);
     expect(arrow.from.x).toBeLessThan(heap.x + heap.columns[0].width);
-    expect(arrow.to.x).toBeGreaterThanOrEqual(stack.x + stack.width);
+    // The head finishes inside the otherwise blank end of the caption band,
+    // instead of floating just beyond the table border.
+    expect(arrow.to.x).toBeLessThan(stack.x + stack.width);
+    expect(arrow.to.y).toBeLessThan(address.y);
+    expect(arrow.to.y).toBeGreaterThan(address.y - MEMORY_CAPTION_HEIGHT);
     expect(arrow.vertices).toHaveLength(2);
     arrow.vertices!.forEach((vertex) => {
       expect(vertex.x).toBeGreaterThan(stack.x + stack.width);
@@ -495,7 +575,9 @@ describe('memory geometry', () => {
       { from: 'p-value', to: 'a-address' },
       { from: 'a-value', to: 'a[0]-address' },
     ];
-    const geometry = mapOf(step, new FoldState());
+    const folds = new FoldState();
+    folds.toggle(group);
+    const geometry = mapOf(step, folds);
     const stack = geometry.segments.find((one) => one.key === 'stack')!;
     const [first, second] = geometry.arrows;
 
@@ -535,22 +617,31 @@ describe('memory geometry', () => {
     step.pointers = [{ from: 'Heap:0-value', to: 'Heap:0-address' }];
     const geometry = mapOf(step, new FoldState());
     const heap = geometry.segments.find((one) => one.key === 'heap')!;
+    const address = heap.rows
+      .flatMap((row) => row.cells)
+      .find((cell) => cell.key === 'Heap:0-address')!;
     const [arrow] = geometry.arrows;
 
     expect(arrow.from.x).toBeGreaterThanOrEqual(heap.x + heap.width);
     expect(arrow.vertices![0].x).toBeGreaterThan(arrow.from.x);
     expect(arrow.vertices![0].x).toBeLessThan(geometry.width);
+    // The route stays outside, but its arrowhead lands inside the target row.
+    expect(arrow.to.x).toBeLessThan(heap.x + heap.width);
+    expect(arrow.to.x).toBeGreaterThan(heap.x);
+    expect(arrow.to.y).toBeLessThan(address.y);
+    expect(arrow.to.y).toBeGreaterThan(address.y - MEMORY_CAPTION_HEIGHT);
   });
 
   it('drops an arrow whose target is folded away', () => {
     const step = model();
     const folds = new FoldState();
-    folds.toggle(group);
 
     expect(mapOf(step, folds).arrows).toHaveLength(1);
-    // The aggregate's own row survives a fold; its members do not.
+    // The aggregate's own row survives its initial fold; its members do not.
     step.pointers = [{ from: 'p-value', to: 'a[0]-address' }];
     expect(mapOf(step, folds).arrows).toHaveLength(0);
+    folds.toggle(group);
+    expect(mapOf(step, folds).arrows).toHaveLength(1);
   });
 
   it('leaves a region holding nothing off the map until it is asked for', () => {
@@ -693,12 +784,14 @@ describe('what the statement section says without an expansion', () => {
   it('names the innermost construct the step is inside, and what it is doing', () => {
     // The function encloses the loop; the reader is inside the loop.
     expect(statementSummary(stepInside())).toBe(
-      'for loop — evaluates to: 1, which C reads as true, because it is not zero, iterations begun so far: 3'
+      'for statement — evaluates to: 1, the scalar value compares unequal to 0, so C treats it as true, iterations begun so far: 3'
     );
   });
 
   it('says nothing was running when nothing is', () => {
-    expect(statementSummary(emptyStepModel())).toBe('no statement is running');
+    expect(statementSummary(emptyStepModel())).toBe(
+      'no statement is being executed'
+    );
   });
 
   it('says nothing was running when no record covers the marker', () => {
@@ -708,7 +801,7 @@ describe('what the statement section says without an expansion', () => {
       ...stepInside(),
       codeRange: at(40, 0, 10),
     };
-    expect(statementSummary(elsewhere)).toBe('no statement is running');
+    expect(statementSummary(elsewhere)).toBe('no statement is being executed');
   });
 
   it('names a construct that has no facts yet', () => {

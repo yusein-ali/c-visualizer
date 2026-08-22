@@ -12,6 +12,7 @@ import { UniUnaryOp } from 'unicoen.ts/dist/node/UniUnaryOp';
 import { UniVariableDec } from 'unicoen.ts/dist/node/UniVariableDec';
 import { UniWhile } from 'unicoen.ts/dist/node/UniWhile';
 import type {
+  CallExpansionModel,
   CodeRangeModel,
   ExpressionModel,
   ExpressionNodeKind,
@@ -20,7 +21,19 @@ import type {
 
 interface StateWithExpression extends ExecState {
   plivetExpression?: ExpressionModel | null;
+  plivetCallExpansions?: CallExpansionModel[];
 }
+
+/**
+ * The parameters a call's callee declares, in order.
+ *
+ * The recorder cannot work this out: resolving a name to a definition needs a
+ * scope, and the engine is the thing that has one. It is asked before the call
+ * has begun, so a call through a pointer answers with nothing rather than by
+ * running the expression to find out - and an argument view then names its
+ * position alone, which is the honest answer at that point.
+ */
+export type ParameterLookup = (call: UniMethodCall) => string[];
 
 /** C's assignment operators (6.5.16), which `ConstructTrace` reads too. */
 export const ASSIGNMENT = /^(?:=|\+=|-=|\*=|\/=|%=|<<=|>>=|&=|\|=|\^=)$/;
@@ -47,6 +60,7 @@ const POSTFIX_UPDATE = /^(?:\+\+|--)$/;
 export class ExpressionRecorder {
   private active: UniExpr | null = null;
   private values = new WeakMap<UniExpr, string>();
+  private parameters: ParameterLookup = () => [];
 
   capture(expr: UniExpr, value: unknown): void {
     if (this.active === null) {
@@ -55,11 +69,16 @@ export class ExpressionRecorder {
     this.values.set(expr, expressionValue(value));
   }
 
-  beforeYield(state: ExecState, next: UniExpr): void {
+  beforeYield(
+    state: ExecState,
+    next: UniExpr,
+    parameters: ParameterLookup = () => []
+  ): void {
     if (next !== this.active) {
       this.values = new WeakMap<UniExpr, string>();
     }
     this.active = next;
+    this.parameters = parameters;
     this.attach(state);
   }
 
@@ -71,10 +90,27 @@ export class ExpressionRecorder {
   }
 
   private attach(state: ExecState): void {
-    (state as StateWithExpression).plivetExpression =
-      this.active === null || !containsExpandableOperator(this.active)
-        ? null
-        : expressionOf(this.active, this.values);
+    const target = state as StateWithExpression;
+    if (this.active === null || !containsExpandableOperator(this.active)) {
+      target.plivetExpression = null;
+      target.plivetCallExpansions = [];
+      return;
+    }
+    // One counter for the whole step, so no two nodes drawn on the canvas at
+    // the same time can be told apart only by which tree they came from.
+    const keys = { value: 0 };
+    target.plivetExpression = expressionOf(
+      this.active,
+      this.values,
+      keys,
+      this.parameters
+    );
+    target.plivetCallExpansions = callExpansionsOf(
+      this.active,
+      this.values,
+      this.parameters,
+      keys
+    );
   }
 }
 
@@ -83,13 +119,99 @@ export function expressionTraceOf(state: ExecState): ExpressionModel | null {
   return typeof expression === 'undefined' ? null : expression;
 }
 
+/** The calls in the statement about to run that pass a computed argument. */
+export function callExpansionsOfState(state: ExecState): CallExpansionModel[] {
+  return (state as StateWithExpression).plivetCallExpansions ?? [];
+}
+
+/**
+ * Every call worth a view of its own, outermost first.
+ *
+ * A call earns one when at least one of its arguments is computed. `twice(i)`
+ * does not: the call tree and the memory beside it already say what `i` holds,
+ * and a section for every call regardless would bury the ones that have
+ * something to show.
+ *
+ * Nested calls each get their own, because each binds its own parameters -
+ * `f(g(x * 2))` has one thing to say about what `f` copies and another about
+ * what `g` does. What it never does is split one call's arguments across
+ * views: they are what a single call operator binds, positionally and at
+ * once, and apart from that operator an argument is just an expression that
+ * happens to be written inside some parentheses.
+ *
+ * A call the main expansion already shows on its own is left out. `f(x * 2);`
+ * and `int t = f(x * 2);` are the call, give or take the `=` and the name
+ * being written to, so the statement's tree is that call's view already and a
+ * section repeating it is noise rather than emphasis. What earns one is a call
+ * the statement buries - `total = total + twice(a * 2 + 1)`, where the call is
+ * one operand of one operator of an assignment.
+ */
+function callExpansionsOf(
+  expression: UniExpr,
+  values: WeakMap<UniExpr, string>,
+  parameters: ParameterLookup,
+  keys: { value: number }
+): CallExpansionModel[] {
+  const found: CallExpansionModel[] = [];
+  /**
+   * `spine` is true while nothing but a `return`, an assignment or a
+   * declaration stands between this node and the root - the punctuation of a
+   * statement rather than a computation in it. A call reached that way is what
+   * the statement does, and the main expansion has already drawn it.
+   */
+  const visit = (node: UniExpr, spine: boolean): void => {
+    if (
+      node instanceof UniMethodCall &&
+      !spine &&
+      node.args.some((argument) => 0 < childrenOf(argument).length)
+    ) {
+      const at = rangeOf(node).begin;
+      const callee = `${calleeName(node.methodName)}()`;
+      found.push({
+        key: `call-${callee}-${at.y}-${at.x}`,
+        callee,
+        parameters: parameters(node),
+        expression: expressionOf(node, values, keys, parameters),
+      });
+    }
+    // `childrenOf` does not descend a declaration - `nodeOf` reaches its
+    // initialiser itself, for the `=` it draws - so the walk does it here.
+    // Without this `int total = twice(a * 2);` would find no call at all.
+    if (node instanceof UniVariableDec) {
+      for (const definition of node.variables) {
+        if (definition.value !== null) {
+          visit(definition.value, spine);
+        }
+      }
+      return;
+    }
+    const children = childrenOf(node);
+    for (const child of children) {
+      // A `return`'s value and an assignment's right side carry the spine on;
+      // an operand of anything else is a computation, and what it contains is
+      // buried far enough to be worth pulling out.
+      const carries =
+        spine &&
+        (node instanceof UniReturn ||
+          (node instanceof UniBinOp &&
+            ASSIGNMENT.test(node.operator) &&
+            child === node.right));
+      visit(child, carries);
+    }
+  };
+  visit(expression, true);
+  return found;
+}
+
 function expressionOf(
   expression: UniExpr,
-  values: WeakMap<UniExpr, string>
+  values: WeakMap<UniExpr, string>,
+  keys: { value: number },
+  parameters: ParameterLookup
 ): ExpressionModel {
   return {
     range: rangeOf(expression),
-    root: nodeOf(expression, values, { value: 0 }),
+    root: nodeOf(expression, values, keys, parameters),
   };
 }
 
@@ -108,40 +230,57 @@ function valueOf(
 function nodeOf(
   expression: UniExpr,
   values: WeakMap<UniExpr, string>,
-  keys: { value: number }
+  keys: { value: number },
+  parameters: ParameterLookup
 ): ExpressionNodeModel {
   if (expression instanceof UniVariableDec) {
-    const definition = expression.variables.find(
-      (item) => item.value !== null && containsExpandableOperator(item.value)
-    );
+    const definition = expression.variables.find((item) => item.value !== null);
     if (typeof definition !== 'undefined') {
-      const left: ExpressionNodeModel = {
+      const key = `expression-${keys.value++}`;
+      // A declarator has no identifier expression of its own, so make the
+      // target leaf that a regular assignment gets from its left operand.
+      // Keeping it separate gives every assignment the same target, operator,
+      // value sequence on the canvas.
+      const target: ExpressionNodeModel = {
         key: `expression-${keys.value++}`,
         kind: 'operand',
         text: definition.name,
-        // The declarator, which is where the name is written.
-        range: rangeOf(definition),
+        range: rangeOf(expression),
         value: null,
         children: [],
       };
       return {
-        key: `expression-${keys.value++}`,
+        key,
         kind: 'assignment',
         text: '=',
         range: rangeOf(expression),
         value: valueOf(expression, values),
-        children: [left, nodeOf(definition.value, values, keys)],
+        children: [target, nodeOf(definition.value, values, keys, parameters)],
       };
     }
   }
 
   const children = childrenOf(expression).map((child) =>
-    nodeOf(child, values, keys)
+    nodeOf(child, values, keys, parameters)
   );
+  // An argument is the one node whose meaning comes from somewhere other than
+  // the tree: it is a value about to be copied into a named object, and the
+  // name is in the callee's declaration rather than at the call.
+  if (expression instanceof UniMethodCall) {
+    const names = parameters(expression);
+    children.forEach((child, index) => {
+      const name = names[index];
+      if (typeof name === 'string' && name !== '') {
+        child.parameter = name;
+      }
+    });
+  }
+  const kind = kindOf(expression, children.length);
+  const text = expressionText(expression);
   return {
     key: `expression-${keys.value++}`,
-    kind: kindOf(expression, children.length),
-    text: expressionText(expression),
+    kind,
+    text,
     range: rangeOf(expression),
     value: valueOf(expression, values),
     children,
@@ -261,18 +400,19 @@ function containsExpandableOperator(expression: UniExpr): boolean {
   if (expression instanceof UniMethodCall && 0 < expression.args.length) {
     return true;
   }
-  if (
-    expression instanceof UniBinOp &&
-    (!ASSIGNMENT.test(expression.operator) || expression.operator !== '=')
-  ) {
+  // Every operator earns one, `=` included. A plain assignment used to be left
+  // out for having nothing to expand, which is only true of the tree: three
+  // boxes say which object is written, the operation, and the value that goes
+  // into it, and a reader stepping through a program should not have the expansion
+  // appear and disappear according to how much arithmetic the line happens to
+  // contain.
+  if (expression instanceof UniBinOp) {
     return true;
   }
   if (expression instanceof UniVariableDec) {
-    return expression.variables.some(
-      (definition) =>
-        definition.value !== null &&
-        containsExpandableOperator(definition.value)
-    );
+    // A declaration with an initialiser is that same picture, with the object
+    // coming into existence as it is written.
+    return expression.variables.some((definition) => definition.value !== null);
   }
   return childrenOf(expression).some(containsExpandableOperator);
 }

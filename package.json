@@ -15,6 +15,8 @@
     "build": "npm run clean && cross-env NODE_ENV=prod webpack --config webpack.config.js && npm run license",
     "license": "node scripts/generate-licenses.js",
     "deploy": "npm run clean:embed && cross-env NODE_ENV=prod webpack --config webpack.config.deploy.js && npm run license:embed",
+    "deploy:debug": "npm run clean:embed && cross-env NODE_ENV=prod DEBUG_DEPLOY=1 webpack --config webpack.config.deploy.js && npm run license:embed",
+    "debug:host-integration": "npm run deploy:debug && node scripts/serve-host-integration.js",
     "clean:embed": "shx rm -rf dist/embed",
     "license:embed": "cross-env LICENSE_OUT=dist/embed/licenses.html node scripts/generate-licenses.js",
     "test": "jest",

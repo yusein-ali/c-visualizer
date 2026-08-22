@@ -13,13 +13,14 @@ import { CONTROL_EVENT, DEBUG_STATE } from '../../core';
  * before a session exists. Stepping at a breakpoint restarted the program, and
  * continuing ran it from the beginning to the same breakpoint again.
  *
- * The mapping is therefore total: every state answers for all six buttons.
+ * The mapping is therefore total: every state answers for all seven buttons.
  */
 export interface Enablement {
   Start: boolean;
   Stop: boolean;
   BackAll: boolean;
   StepBack: boolean;
+  StepOver: boolean;
   Step: boolean;
   StepAll: boolean;
 }
@@ -38,6 +39,7 @@ export const enablementFor = (debugState: DEBUG_STATE): Enablement => {
         Stop: true,
         BackAll: false,
         StepBack: false,
+        StepOver: true,
         Step: true,
         StepAll: true,
       };
@@ -47,6 +49,7 @@ export const enablementFor = (debugState: DEBUG_STATE): Enablement => {
         Stop: true,
         BackAll: true,
         StepBack: true,
+        StepOver: true,
         Step: true,
         StepAll: true,
       };
@@ -58,6 +61,7 @@ export const enablementFor = (debugState: DEBUG_STATE): Enablement => {
         Stop: true,
         BackAll: false,
         StepBack: false,
+        StepOver: false,
         Step: true,
         StepAll: true,
       };
@@ -68,6 +72,7 @@ export const enablementFor = (debugState: DEBUG_STATE): Enablement => {
         Stop: true,
         BackAll: false,
         StepBack: false,
+        StepOver: false,
         Step: false,
         StepAll: false,
       };
@@ -78,6 +83,7 @@ export const enablementFor = (debugState: DEBUG_STATE): Enablement => {
         Stop: true,
         BackAll: true,
         StepBack: true,
+        StepOver: false,
         Step: false,
         StepAll: false,
       };
@@ -89,6 +95,7 @@ export const enablementFor = (debugState: DEBUG_STATE): Enablement => {
         Stop: false,
         BackAll: false,
         StepBack: false,
+        StepOver: false,
         Step: true,
         StepAll: true,
       };

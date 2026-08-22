@@ -31,9 +31,8 @@
   --plivet-console-heading-line: var(--plivet-console-title-border, #333333);
 
   box-sizing: border-box;
-  height: 18vh;
   margin: 1px;
-  overflow-y: auto;
+  overflow: hidden;
   border: 1px black solid;
   background-color: var(--plivet-console-surface);
   color: var(--plivet-console-ink);
@@ -47,6 +46,11 @@
   );
   font-size: 14px;
   line-height: 1.4;
+}
+
+.plivet-console[open] {
+  height: 18vh;
+  overflow-y: auto;
 }
 
 .plivet-console--dark {
@@ -84,6 +88,8 @@
   font-size: 14px;
   font-weight: 700;
   line-height: 20px;
+  cursor: pointer;
+  user-select: none;
 }
 
 /*

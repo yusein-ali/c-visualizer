@@ -18,6 +18,7 @@ import { UniMethodCall } from 'unicoen.ts/dist/node/UniMethodCall';
 import { UniNoneLiteral } from 'unicoen.ts/dist/node/UniNoneLiteral';
 import { UniProgram } from 'unicoen.ts/dist/node/UniProgram';
 import { UniStringLiteral } from 'unicoen.ts/dist/node/UniStringLiteral';
+import { UniStatement } from 'unicoen.ts/dist/node/UniStatement';
 import { UniSwitch } from 'unicoen.ts/dist/node/UniSwitch';
 import { UniUnaryOp } from 'unicoen.ts/dist/node/UniUnaryOp';
 import { UniVariableDec } from 'unicoen.ts/dist/node/UniVariableDec';
@@ -29,7 +30,7 @@ import {
   StorageRegion,
 } from './DeclarationSpecifiers';
 import { DesignatedInitializers } from './DesignatedInitializers';
-import { ConstructRecorder } from './ConstructTrace';
+import { ConstructRecorder, parameterNames } from './ConstructTrace';
 import { ExpressionRecorder } from './ExpressionTrace';
 import { FieldOffset, RecordTable } from './RecordTable';
 import { RuntimeDiagnostic } from './RuntimeDiagnostic';
@@ -44,10 +45,110 @@ import { UnionTable } from './UnionTable';
  * program defines is filed at 0 - the null pointer. A pointer to it would then
  * be false in an `if`, equal to `NULL`, and drawn as nothing, which is the one
  * thing a pointer to a real function can never be. Reporting the segment from
- * a fixed base fixes all three at once, and 0x1000 keeps every function below
- * the static area at 10000, which is where a text segment belongs.
+ * a fixed base fixes all three at once. 0x1000 also leaves the small teaching
+ * programs this interpreter is built for room before the static area at
+ * 10000, which is where a text segment belongs.
  */
 export const CODE_SEGMENT_BASE = 0x1000;
+
+/**
+ * An illustrative amount of text memory for one parsed expression.
+ *
+ * This is a teaching estimate, not an ABI rule. Real machine code can occupy
+ * more or fewer bytes depending on the processor and on the complexity of
+ * each expression.
+ */
+export const TEXT_BYTES_PER_EXPRESSION = 16;
+
+/**
+ * Runtime-backed stdio routines that occupy illustrative text memory too.
+ *
+ * They have no parsed `UniFunctionDec`, so the ordinary function index cannot
+ * discover them. Keeping the list here makes the modeled code segment agree
+ * with the stdio functions the runtime actually installs.
+ */
+const STDIO_FUNCTION_NAMES = [
+  'printf',
+  'scanf',
+  'gets',
+  'getchar',
+  'fopen',
+  'fgetc',
+  'fgets',
+  'fputc',
+  'fputs',
+  'fflush',
+  'fclose',
+] as const;
+
+/** Illustrative code size for a runtime-backed library function. */
+const LIBRARY_FUNCTION_TEXT_SIZE = TEXT_BYTES_PER_EXPRESSION;
+
+/** The supported stdio routines called anywhere in the parsed program. */
+function usedStdioFunctionsIn(root: unknown): Set<string> {
+  const used = new Set<string>();
+  const seen = new Set<unknown>();
+  const visit = (node: unknown): void => {
+    if (node === null || typeof node !== 'object') {
+      return;
+    }
+    if (Array.isArray(node)) {
+      node.forEach(visit);
+      return;
+    }
+    if (seen.has(node)) {
+      return;
+    }
+    seen.add(node);
+    if (
+      node instanceof UniMethodCall &&
+      node.receiver === null &&
+      node.methodName instanceof UniIdent &&
+      STDIO_FUNCTION_NAMES.some((name) => name === node.methodName.name)
+    ) {
+      used.add(node.methodName.name);
+    }
+    const sourceNode = node as { fields?: Map<string, unknown> } & Record<
+      string,
+      unknown
+    >;
+    if (typeof sourceNode.fields === 'undefined') {
+      return;
+    }
+    for (const field of Array.from(sourceNode.fields.keys())) {
+      if (field !== 'comments' && field !== 'codeRange') {
+        visit(sourceNode[field]);
+      }
+    }
+  };
+  visit(root);
+  return used;
+}
+
+/** The illustrative number of bytes occupied by one function's code. */
+function textSizeOf(dec: UniFunctionDec): number {
+  let expressions = 0;
+  const seen = new Set<unknown>();
+  const visit = (node: unknown): void => {
+    if (node === null || typeof node !== 'object' || seen.has(node)) {
+      return;
+    }
+    seen.add(node);
+    if (node instanceof UniExpr && !(node instanceof UniStatement)) {
+      expressions += 1;
+    }
+    for (const child of Object.values(node as Record<string, unknown>)) {
+      if (Array.isArray(child)) {
+        child.forEach(visit);
+      } else {
+        visit(child);
+      }
+    }
+  };
+  visit(dec.block);
+  // Even an empty function needs its own non-overlapping address.
+  return Math.max(1, expressions) * TEXT_BYTES_PER_EXPRESSION;
+}
 
 /**
  * A node's own span, in the interpreter's coordinates. Everything a runtime
@@ -162,7 +263,7 @@ interface RecordArrayAllocation {
  * unicoen.ts marks its two dispatch helpers private, so they are absent from
  * the declarations even though the running class has them. Naming them here is
  * how an override can hand a call on to the machinery that already knows how
- * to bind arguments and push a stack frame.
+ * to assign argument values to parameters and push a stack frame.
  */
 interface DispatchingEngine {
   execFunc(
@@ -325,6 +426,10 @@ export class PlivetCPP14Engine extends CPP14Engine {
   /** Where each function was filed on the code segment, both ways round. */
   private readonly functionAddresses = new Map<string, number>();
   private readonly functionsByAddress = new Map<number, UniFunctionDec>();
+  /** Runtime library functions have names and addresses, but no UniFunctionDec. */
+  private readonly libraryFunctionsByAddress = new Map<number, string>();
+  /** Stdio routines referenced by this program, whether or not execution reaches them. */
+  private usedStdioFunctions = new Set<string>();
   private globalScope: Scope | null = null;
   private entryPoint: UniFunctionDec | null = null;
   private readonly expressions = new ExpressionRecorder();
@@ -341,6 +446,8 @@ export class PlivetCPP14Engine extends CPP14Engine {
   private readonly unwritten = new Set<number>();
   /** Addresses already reported, so a read in a loop is said once. */
   private readonly readUnwritten = new Set<number>();
+  /** Whether absent initializers currently need C's static-storage zero fill. */
+  private zeroFillingStaticStorage = false;
 
   /** Installs the record metadata read from the program about to execute. */
   setRecordTables(structs: StructTable, unions: UnionTable): void {
@@ -354,6 +461,8 @@ export class PlivetCPP14Engine extends CPP14Engine {
     this.declarationInfoByAddress.clear();
     this.functionAddresses.clear();
     this.functionsByAddress.clear();
+    this.libraryFunctionsByAddress.clear();
+    this.usedStdioFunctions.clear();
     this.globalScope = null;
     this.entryPoint = null;
   }
@@ -455,8 +564,8 @@ export class PlivetCPP14Engine extends CPP14Engine {
       if (typeof descriptor === 'undefined') {
         this.refuse(
           'array-out-of-bounds',
-          `index ${index} is outside the array, which holds ` +
-            `${allocation.descriptors.length}`
+          `index ${index} is outside the array bounds; valid indices are 0 ` +
+            `through ${allocation.descriptors.length - 1}`
         );
       }
       return descriptor;
@@ -488,7 +597,7 @@ export class PlivetCPP14Engine extends CPP14Engine {
       if (Number(target) === 0) {
         this.refuse(
           'null-dereference',
-          'dereference of a pointer that points at nothing'
+          'a null pointer does not point to an object that can be dereferenced'
         );
       }
       return this.functionAt(Number(target), scope) === null
@@ -504,7 +613,7 @@ export class PlivetCPP14Engine extends CPP14Engine {
       if (info !== undefined && info.region === 'register') {
         this.refuse(
           'register-address',
-          'cannot take the address of a register variable'
+          'the address operator cannot be applied to an object declared with the register storage-class specifier'
         );
       }
       return address;
@@ -609,9 +718,29 @@ export class PlivetCPP14Engine extends CPP14Engine {
   }
 
   protected *stopByYield(ret: any, nextExpr: UniExpr): any {
-    this.expressions.beforeYield(this.currentState, nextExpr);
+    this.expressions.beforeYield(this.currentState, nextExpr, (call) =>
+      this.parametersCalledBy(call)
+    );
     this.constructs.attach(this.currentState);
     return yield* super.stopByYield(ret, nextExpr);
+  }
+
+  /**
+   * The parameters a call in the statement about to run will bind, so an
+   * argument's own view can name the one it initialises.
+   *
+   * Functions are declared at file scope, so the global scope answers every
+   * call this can answer at all: a call through a pointer and a library
+   * function both resolve to nothing here, and the view falls back to the
+   * argument's position.
+   */
+  private parametersCalledBy(call: UniMethodCall): string[] {
+    const scope = this.globalScope;
+    if (scope === null) {
+      return [];
+    }
+    const declaration = this.declarationCalledBy(call, scope);
+    return declaration === null ? [] : parameterNames(declaration);
   }
 
   stepExecute(): ExecState {
@@ -626,6 +755,7 @@ export class PlivetCPP14Engine extends CPP14Engine {
   protected *executeStepByStep(dec: UniProgram): any {
     this.entryPoint = this.getEntryPoint(dec);
     this.sourceStrings = stringLiteralsIn(dec);
+    this.usedStdioFunctions = usedStdioFunctionsIn(dec);
     this.constructs.reset(dec, this.entryPoint);
     return yield* super.executeStepByStep(dec);
   }
@@ -774,7 +904,11 @@ export class PlivetCPP14Engine extends CPP14Engine {
   /** The name of the function at a code address, for the visualizer. */
   functionNameAt(address: number): string | null {
     const dec = this.functionAt(address);
-    return dec === null ? null : dec.name;
+    if (dec !== null) {
+      return dec.name;
+    }
+    const libraryName = this.libraryFunctionsByAddress.get(address);
+    return typeof libraryName === 'undefined' ? null : libraryName;
   }
 
   /**
@@ -869,26 +1003,25 @@ export class PlivetCPP14Engine extends CPP14Engine {
   }
 
   /** Plain text-segment entries for the Worker model. */
-  functionLocations(): { name: string; address: number }[] {
+  functionLocations(): { name: string; address: number; size: number }[] {
     this.indexFunctions();
-    const locations = Array.from(this.functionAddresses.entries()).map(
-      ([name, address]) => ({ name, address })
+    const definitions = Array.from(this.functionsByAddress.entries()).map(
+      ([address, dec]) => ({
+        name: dec.name,
+        address,
+        size: textSizeOf(dec),
+      })
     );
-    const entryPoint = this.entryPoint;
-    if (
-      entryPoint !== null &&
-      !locations.some((item) => item.name === entryPoint.name)
-    ) {
-      const lastAddress = locations.reduce(
-        (maximum, item) => Math.max(maximum, item.address),
-        CODE_SEGMENT_BASE - 4
-      );
-      locations.push({
-        name: entryPoint.name,
-        address: lastAddress + 4,
-      });
-    }
-    return locations.sort((left, right) => left.address - right.address);
+    const libraries = Array.from(this.libraryFunctionsByAddress.entries()).map(
+      ([address, name]) => ({
+        name,
+        address,
+        size: LIBRARY_FUNCTION_TEXT_SIZE,
+      })
+    );
+    return definitions
+      .concat(libraries)
+      .sort((left, right) => left.address - right.address);
   }
 
   protected loadLibarary(global: Scope): void {
@@ -916,12 +1049,45 @@ export class PlivetCPP14Engine extends CPP14Engine {
       return;
     }
     this.globalScope = global;
-    for (const address of global.variableAddress.values()) {
-      const value = global.objectOnMemory.get(address);
+    const definitions: { engineAddress: number; dec: UniFunctionDec }[] = [];
+    for (const engineAddress of global.variableAddress.values()) {
+      const value = global.objectOnMemory.get(engineAddress);
       if (value instanceof UniFunctionDec) {
-        this.functionAddresses.set(value.name, CODE_SEGMENT_BASE + address);
-        this.functionsByAddress.set(CODE_SEGMENT_BASE + address, value);
+        definitions.push({ engineAddress, dec: value });
       }
+    }
+    definitions.sort((left, right) => left.engineAddress - right.engineAddress);
+    const entryPoint = this.entryPoint;
+    if (
+      entryPoint !== null &&
+      !definitions.some(({ dec }) => dec.name === entryPoint.name)
+    ) {
+      definitions.push({
+        engineAddress: Number.MAX_SAFE_INTEGER,
+        dec: entryPoint,
+      });
+    }
+
+    this.functionAddresses.clear();
+    this.functionsByAddress.clear();
+    this.libraryFunctionsByAddress.clear();
+    let address = CODE_SEGMENT_BASE;
+    for (const { dec } of definitions) {
+      this.functionAddresses.set(dec.name, address);
+      this.functionsByAddress.set(address, dec);
+      address += textSizeOf(dec);
+    }
+    for (const name of STDIO_FUNCTION_NAMES) {
+      if (!this.usedStdioFunctions.has(name)) {
+        continue;
+      }
+      const implementation = global.hasValue(name) ? global.get(name) : null;
+      if (typeof implementation !== 'function') {
+        continue;
+      }
+      this.functionAddresses.set(name, address);
+      this.libraryFunctionsByAddress.set(address, name);
+      address += LIBRARY_FUNCTION_TEXT_SIZE;
     }
   }
 
@@ -952,64 +1118,86 @@ export class PlivetCPP14Engine extends CPP14Engine {
           (def.value instanceof UniArray &&
             this.designatedInitializers.hasIn(decVar.codeRange)))
     );
+    const staticStorage = this.hasStaticStorage(
+      sourceInfo,
+      decVar.modifiers,
+      scope
+    );
+    const previousZeroFill = this.zeroFillingStaticStorage;
+    this.zeroFillingStaticStorage = staticStorage;
     let value: any = null;
-    if (!hasSpecialArray) {
-      value = yield* super.execVariableDec(decVar, scope);
-    } else {
-      Engine.lastSizeOf = decVar.type;
-      for (let index = 0; index < decVar.variables.length; index += 1) {
-        const def = decVar.variables[index];
-        const dimensions = arrayDimensions[index];
-        const table =
-          decVar.type.indexOf('*') === -1 && !/^[*&]/.test(def.name)
-            ? this.tableFor(decVar.type)
-            : null;
-        const designated =
-          def.value instanceof UniArray &&
-          this.designatedInitializers.hasIn(decVar.codeRange);
-        if (dimensions.length !== 1 || (table === null && !designated)) {
-          const single = new UniVariableDec(decVar.modifiers, decVar.type, [
-            def,
-          ]);
-          value = yield* super.execVariableDec(single, scope);
+    try {
+      if (!hasSpecialArray) {
+        value = yield* super.execVariableDec(decVar, scope);
+      } else {
+        Engine.lastSizeOf = decVar.type;
+        for (let index = 0; index < decVar.variables.length; index += 1) {
+          const def = decVar.variables[index];
+          const dimensions = arrayDimensions[index];
+          const table =
+            decVar.type.indexOf('*') === -1 && !/^[*&]/.test(def.name)
+              ? this.tableFor(decVar.type)
+              : null;
+          const designated =
+            def.value instanceof UniArray &&
+            this.designatedInitializers.hasIn(decVar.codeRange);
+          if (dimensions.length !== 1 || (table === null && !designated)) {
+            const single = new UniVariableDec(decVar.modifiers, decVar.type, [
+              def,
+            ]);
+            value = yield* super.execVariableDec(single, scope);
+            continue;
+          }
+
+          let elements: any[];
+          if (def.value instanceof UniArray) {
+            const evaluated = yield* this.execExpr(def.value, scope);
+            elements = this.designatedInitializers.order(
+              decVar.codeRange,
+              def.value,
+              evaluated,
+              dimensions[0],
+              table === null ? 0 : []
+            );
+          } else {
+            elements = Array.from(new Array(dimensions[0]), () => null);
+          }
+          if (table === null) {
+            while (def.name.startsWith('*')) {
+              def.name = def.name.substring(1);
+              decVar.type += '*';
+            }
+            while (def.name.startsWith('&')) {
+              def.name = def.name.substring(1);
+              decVar.type += '&';
+            }
+            value = elements;
+            scope.setTop(def.name, value, decVar.type);
+          } else {
+            value = this.allocateRecordArray(
+              def.name,
+              decVar.type,
+              def.typeSuffix,
+              elements,
+              scope
+            );
+          }
+        }
+        Engine.lastSizeOf = '';
+      }
+    } finally {
+      this.zeroFillingStaticStorage = previousZeroFill;
+    }
+    if (staticStorage) {
+      for (const def of decVar.variables) {
+        if (def.value !== null && !(def.value instanceof UniNoneLiteral)) {
           continue;
         }
-
-        let elements: any[];
-        if (def.value instanceof UniArray) {
-          const evaluated = yield* this.execExpr(def.value, scope);
-          elements = this.designatedInitializers.order(
-            decVar.codeRange,
-            def.value,
-            evaluated,
-            dimensions[0],
-            table === null ? 0 : []
-          );
-        } else {
-          elements = Array.from(new Array(dimensions[0]), () => null);
-        }
-        if (table === null) {
-          while (def.name.startsWith('*')) {
-            def.name = def.name.substring(1);
-            decVar.type += '*';
-          }
-          while (def.name.startsWith('&')) {
-            def.name = def.name.substring(1);
-            decVar.type += '&';
-          }
-          value = elements;
-          scope.setTop(def.name, value, decVar.type);
-        } else {
-          value = this.allocateRecordArray(
-            def.name,
-            decVar.type,
-            def.typeSuffix,
-            elements,
-            scope
-          );
+        const address = scope.variableAddress.get(def.name);
+        if (typeof address !== 'undefined') {
+          this.zeroInitializeRecord(decVar.type, address, scope);
         }
       }
-      Engine.lastSizeOf = '';
     }
     for (let index = 0; index < decVar.variables.length; index += 1) {
       const def = decVar.variables[index];
@@ -1074,6 +1262,11 @@ export class PlivetCPP14Engine extends CPP14Engine {
     return value;
   }
 
+  /** Supplies the zero bits C gives every static-storage object. */
+  protected randInt32(): number {
+    return this.zeroFillingStaticStorage ? 0 : super.randInt32();
+  }
+
   /**
    * Dividing by zero. C leaves it undefined for integers, and the engine
    * computes in JavaScript numbers, where it quietly yields `Infinity` - a
@@ -1100,7 +1293,10 @@ export class PlivetCPP14Engine extends CPP14Engine {
     const info = this.declarationInfoByAddress.get(address);
     const type = scope.getRawType(address);
     if (info !== undefined && this.constBindsObject(info, type)) {
-      this.refuse('read-only-assignment', 'assignment of a read-only variable');
+      this.refuse(
+        'read-only-assignment',
+        'the assignment attempts to modify a const-qualified object'
+      );
     }
     const result =
       type.indexOf('*') === -1 && this.tableFor(type) !== null
@@ -1278,7 +1474,7 @@ export class PlivetCPP14Engine extends CPP14Engine {
     if (readOnly !== null) {
       this.refuse(
         'read-only-assignment',
-        `assignment of a record with the read-only member ${readOnly}`
+        `the assignment attempts to modify the const-qualified structure or union member ${readOnly}`
       );
     }
     for (const member of members) {
@@ -1430,9 +1626,9 @@ export class PlivetCPP14Engine extends CPP14Engine {
    * throw ends the program with nothing to show for it: the output stops, the
    * canvas holds the last state, and nothing says which line the program died
    * on or why. Writing the reason to the console before throwing is what turns
-   * that silence into a diagnostic. The throw still ends the run - a program
-   * that has done something C does not allow has no defined behaviour to
-   * continue with - and the console keeps everything printed up to that point.
+   * that silence into a diagnostic. The throw still ends the run because the
+   * detected operation would have undefined behavior, and the console keeps
+   * everything written to it up to that point.
    */
   private refuse(rule: string, message: string): never {
     const transcript = this.getStdout();
@@ -1449,7 +1645,7 @@ export class PlivetCPP14Engine extends CPP14Engine {
 
   /**
    * What C leaves undefined about a subscript: an index outside the array, and
-   * a subscript of a pointer that points at nothing.
+   * a subscript through a null pointer.
    *
    * Only an object whose declared type says how long it is can be checked. A
    * pointer knows nothing about the block it addresses - `p[7]` on a
@@ -1473,7 +1669,7 @@ export class PlivetCPP14Engine extends CPP14Engine {
       ) {
         this.refuse(
           'null-dereference',
-          `${name} points at nothing, so ${name}[${index}] has no object`
+          `${name} has a null pointer value, so ${name}[${index}] does not designate an object`
         );
       }
       return;
@@ -1486,8 +1682,8 @@ export class PlivetCPP14Engine extends CPP14Engine {
     if (index < 0 || length <= index) {
       this.refuse(
         'array-out-of-bounds',
-        `index ${index} is outside ${name}, which holds ${length}` +
-          `${dimensions.length === 1 ? '' : ' rows'}`
+        `index ${index} is outside the bounds of ${name}; valid ` +
+          `indices for its first dimension are 0 through ${length - 1}`
       );
     }
   }
@@ -1518,8 +1714,8 @@ export class PlivetCPP14Engine extends CPP14Engine {
     this.readUnwritten.add(address);
     this.warn(
       'uninitialized-read',
-      `${expr.name} has not been given a value yet, so this reads whatever ` +
-        `was left in its memory`,
+      `${expr.name} is evaluated before a value is stored in it; its value ` +
+        `is indeterminate, and using that value has undefined behavior`,
       rangeOfNode(expr)
     );
   }
@@ -1540,6 +1736,62 @@ export class PlivetCPP14Engine extends CPP14Engine {
       const memberAddress = address + Engine.structInfoSize + field[0];
       this.unwritten.add(memberAddress);
       this.noteUnwrittenRecord(member.type, memberAddress);
+    }
+  }
+
+  /** Whether every object in this declaration has static storage duration. */
+  private hasStaticStorage(
+    sourceInfo: ({
+      storageClasses: StorageClass[];
+    } | null)[],
+    modifiers: string[],
+    scope: Scope
+  ): boolean {
+    if (scope === scope.global) {
+      return true;
+    }
+    const classes = sourceInfo
+      .flatMap((info) => (info === null ? [] : info.storageClasses))
+      .concat(
+        modifiers.filter((item) => this.isStorageClass(item)) as StorageClass[]
+      );
+    return classes.some(
+      (item) =>
+        item === 'static' ||
+        item === 'extern' ||
+        item === '_Thread_local' ||
+        item === 'thread_local'
+    );
+  }
+
+  /** Replaces the stock engine's empty record members with static zeroes. */
+  private zeroInitializeRecord(
+    type: string,
+    descriptor: number,
+    scope: Scope
+  ): void {
+    const table = type.indexOf('*') === -1 ? this.tableFor(type) : null;
+    const layout = table?.layoutOf(type) ?? null;
+    const members = table?.membersOf(type) ?? null;
+    const memberBase = scope.objectOnMemory.get(descriptor);
+    if (layout === null || members === null || typeof memberBase !== 'number') {
+      return;
+    }
+    for (const member of members) {
+      const field = layout.get(member.name);
+      if (typeof field === 'undefined') {
+        continue;
+      }
+      const address = memberBase + field[0];
+      const nested =
+        member.type.indexOf('*') === -1 ? this.tableFor(member.type) : null;
+      if (nested === null) {
+        if (scope.objectOnMemory.has(address)) {
+          scope.objectOnMemory.set(address, 0);
+        }
+      } else {
+        this.zeroInitializeRecord(member.type, address, scope);
+      }
     }
   }
 

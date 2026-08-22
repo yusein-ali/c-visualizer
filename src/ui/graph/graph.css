@@ -175,6 +175,9 @@
   --plivet-graph-expression-assignment: #fff0c2;
   --plivet-graph-expression-operator: #dcecff;
   --plivet-graph-expression-operand: #f4f4f4;
+  --plivet-graph-expression-value: #ffffff;
+  --plivet-graph-expression-value-border: #b8c4cf;
+  --plivet-graph-expression-value-label: #5d6b78;
   --plivet-graph-expression-border: #202020;
   --plivet-graph-expression-link: #5c6773;
   --plivet-graph-stack-header: #f3f5f7;
@@ -219,6 +222,9 @@
   --plivet-graph-expression-assignment: #5a491d;
   --plivet-graph-expression-operator: #27445e;
   --plivet-graph-expression-operand: #323b44;
+  --plivet-graph-expression-value: #1f272e;
+  --plivet-graph-expression-value-border: #667786;
+  --plivet-graph-expression-value-label: #bac7d2;
   --plivet-graph-expression-border: #a7b2bc;
   --plivet-graph-expression-link: #8794a0;
   --plivet-graph-stack-header: #34414d;
@@ -327,7 +333,7 @@
  * copy of the palette to override.
  */
 .plivet-graph .plivet-object-cell {
-  cursor: default;
+  cursor: pointer;
 }
 
 .plivet-graph .plivet-object--focus {

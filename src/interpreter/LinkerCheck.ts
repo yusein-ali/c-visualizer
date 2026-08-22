@@ -7,18 +7,17 @@ import { UniParam } from 'unicoen.ts/dist/node/UniParam';
 import { LintDiagnostic, LintRange } from './TeachingLint';
 
 /**
- * The checks a linker would make, on the one translation unit there is.
+ * Linkage and program-structure checks over the visualizer's combined source.
  *
- * The compiler's own complaints are `TeachingLint`; these are the ones that
- * come afterwards, when the object files are put together, and they are the
- * ones a beginner meets last and understands least: the error arrives from a
- * program they have never heard of, names a symbol rather than a line, and
- * says nothing about where to look. Said at the second definition, or at the
- * call with nothing behind it, they are ordinary mistakes with ordinary
- * fixes.
+ * A native implementation diagnoses some of these while translating a
+ * translation unit and others while linking object files. c-visualizer has
+ * neither boundary: it combines its source files for one interpreter, so the
+ * useful and accurate distinction here is between declarations and
+ * definitions, not between compiler and linker phases.
  *
- * Three of them, and each is reported only where a linker would certainly
- * fail. What is deliberately not here is the call to a name this file never
+ * Three of them, and each is reported only where execution cannot be formed
+ * from the supplied source. What is deliberately not here is a call to a name
+ * this source never
  * declares: that is what a library function looks like from the tree, and a
  * rule that flagged `printf` because it cannot see `stdio.h` would teach a
  * reader to distrust the linter.
@@ -44,7 +43,7 @@ const rangeOf = (node: any): LintRange | null => {
   };
 };
 
-/** A function declaration with a body defines the function; a prototype does not. */
+/** A function declaration with a body is a definition; a prototype is not. */
 const hasBody = (node: any): boolean =>
   node.block !== null && typeof node.block !== 'undefined';
 
@@ -64,7 +63,7 @@ const calleeName = (call: any): string => {
 interface Scan {
   /** Functions with a body, by name, in the order they were defined. */
   definitions: Definition[];
-  /** Functions declared without a body: the promises a linker has to keep. */
+  /** Functions declared without a body. */
   prototypes: Map<string, Definition>;
   /** Objects with an initializer at file scope, in order. */
   objects: Definition[];
@@ -165,9 +164,9 @@ const duplicates = (
       rule,
       severity: 'error',
       message:
-        `${kind} \`${definition.name}\` is defined twice; the first ` +
-        `definition is on line ${earlier.line}. A linker takes one ` +
-        'definition of a name and refuses a program that offers two.',
+        `${kind} \`${definition.name}\` is defined more than once; the first ` +
+        `definition is on line ${earlier.line}. Only one definition with ` +
+        'that identifier is permitted here.',
       ...definition.range,
     });
   }
@@ -175,7 +174,7 @@ const duplicates = (
 };
 
 /**
- * What the linker would refuse, over one program. Every position comes from
+ * What prevents one executable program from being formed. Every position comes from
  * the tree, so unlike `teachingDiagnostics` this needs no copy of the source:
  * nothing here offers a fix, because none of the three has one edit that is
  * certainly the right one.
@@ -188,11 +187,8 @@ export function linkerDiagnostics(root: UniNode): LintDiagnostic[] {
   ];
 
   const defined = new Set(found.definitions.map((one) => one.name));
-  // A prototype is a promise that a definition exists somewhere. In one
-  // translation unit with no libraries to link against, the only somewhere is
-  // this file - so a promise nothing keeps is the classic undefined
-  // reference, and it is reported at the call rather than at the prototype,
-  // which is where the linker's own message would have sent the reader.
+  // The interpreter needs a definition before it can execute a declared
+  // function. Report the missing definition at the call that requires it.
   const said = new Set<string>();
   for (const call of found.calls) {
     if (
@@ -209,15 +205,15 @@ export function linkerDiagnostics(root: UniNode): LintDiagnostic[] {
       severity: 'error',
       message:
         `\`${call.name}\` is declared on line ${prototype.line} and called ` +
-        'here, but this program never defines it. A declaration says what a ' +
-        'function looks like; a definition is the body the linker has to find.',
+        'here, but the supplied source contains no definition. A function ' +
+        'declaration specifies its type; a function definition supplies the body to execute.',
       ...call.range,
     });
   }
 
-  // A program is what a linker makes out of object files, and it needs
-  // somewhere to start. Said only where the file defines something, so that
-  // an empty editor is not an error the moment it is opened.
+  // c-visualizer models a hosted C implementation, where program startup calls
+  // `main`. Said only where the source defines something, so an empty editor is
+  // not an error the moment it is opened.
   if (!defined.has('main')) {
     const first =
       found.prototypes.get('main') ||
@@ -233,8 +229,8 @@ export function linkerDiagnostics(root: UniNode): LintDiagnostic[] {
       rule: 'noEntryPoint',
       severity: 'error',
       message:
-        'This program defines no `main`. Execution begins there, so a linker ' +
-        'has nowhere to start and c-visualizer has nothing to run.',
+        'This program defines no `main`. In the hosted C environment modeled ' +
+        'by c-visualizer, program startup calls `main`, so there is nothing to run.',
       ...first.range,
       endLine: first.range.line,
       endColumn: first.range.column + 1,

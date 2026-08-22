@@ -16,6 +16,7 @@ export type IconName =
   | 'stop'
   | 'rewind'
   | 'stepBack'
+  | 'stepOver'
   | 'stepForward'
   | 'run'
   | 'zoomOut'
@@ -24,7 +25,10 @@ export type IconName =
   | 'download'
   | 'remove'
   | 'open'
-  | 'save';
+  | 'save'
+  | 'build'
+  | 'preprocessed'
+  | 'help';
 
 /*
  * The magnifier, in pieces: an outer circle and an inner one, which the
@@ -42,6 +46,9 @@ const paths: Record<IconName, string> = {
   // Bar plus two triangles: back past every step there is.
   rewind: 'M2 3h2v10H2zM14 3v10L8.5 8zM8 3v10L2.5 8z',
   stepBack: 'M11 2.5v11L3.5 8z',
+  // A curved arrow crossing a call without entering the frame beneath it.
+  stepOver:
+    'M2 8a6 6 0 0 1 10-4.5V1l3.5 3.5L12 8V5.4A4.5 4.5 0 0 0 3.5 8zM7 11a2 2 0 1 0 4 0 2 2 0 1 0-4 0z',
   stepForward: 'M5 2.5v11L12.5 8z',
   run: 'M2 3v10l5.5-5zM8 3v10l5.5-5z',
   // The editor's text size: a magnifier with a minus, nothing, or a plus.
@@ -59,6 +66,13 @@ const paths: Record<IconName, string> = {
   // of this were born, and the pair the reader will look for.
   open: 'M1.5 3h4.5l1.5 1.5h7v9h-13z',
   save: 'M2 2h9.5L14 4.5V14H2zM5.5 2.5h5v3.5h-5zM4.5 9h7v4.5h-7z',
+  // A hammer: compile the complete source set through the host's provider.
+  build: 'M2 12.8 8.8 6l1.2 1.2L3.2 14zM7 2l2-1 5 5-2.5 2.5z',
+  // The preprocessor is the part of C introduced by `#`; the hash stays
+  // recognisable at the same compact size as the surrounding file controls.
+  preprocessed:
+    'M5 2h1.5L6 5h3l.5-3H11l-.5 3H13v1.5h-2.8l-.5 3H12V11H9.5L9 14H7.5l.5-3H5l-.5 3H3l.5-3H1V9.5h2.8l.5-3H2V5h2.5zM5.8 6.5l-.5 3h3l.5-3z',
+  help: 'M6.5 11h2v2h-2zM8 2.5c2.5 0 4 1.3 4 3.3 0 1.5-.8 2.3-2.1 3.1-.9.5-1.1.9-1.1 1.6H6.9c0-1.5.6-2.2 1.8-2.9.9-.5 1.4-.9 1.4-1.7 0-1-.8-1.7-2.1-1.7-1.4 0-2.2.7-2.3 2H3.8C3.9 3.9 5.5 2.5 8 2.5z',
 };
 
 const SVG = 'http://www.w3.org/2000/svg';

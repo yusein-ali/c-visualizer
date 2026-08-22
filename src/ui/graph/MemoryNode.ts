@@ -78,7 +78,13 @@ const push = (
   part.attrs[selector] = attrs;
 };
 
-/** A frame heading, or the line an empty segment shows instead of rows. */
+/**
+ * A frame heading, or the line an empty segment shows instead of rows.
+ *
+ * A heading is the frame's own fold, and the whole band takes the click the
+ * way a segment's title bar does: the triangle says which way it will go, and
+ * a reader aiming at a frame is aiming at its name.
+ */
 function labelRow(
   part: Part,
   segment: MemorySegmentGeometry,
@@ -86,17 +92,48 @@ function labelRow(
   index: number
 ): void {
   const isGroup = row.kind === 'group';
-  push(part, 'rect', `row-${index}-body`, {
-    x: 0,
-    y: row.y,
-    width: segment.width,
-    height: row.height,
-    fill: isGroup ? GROUP_FILL : SURFACE,
-    stroke: GRID,
-    strokeWidth: 1,
-  });
+  const fold = isGroup ? row.fold : undefined;
+  const marks =
+    typeof fold === 'undefined'
+      ? undefined
+      : {
+          'data-frame-target': encodeURIComponent(fold.target),
+          class: 'plivet-fold-cell',
+        };
+  push(
+    part,
+    'rect',
+    `row-${index}-body`,
+    {
+      x: 0,
+      y: row.y,
+      width: segment.width,
+      height: row.height,
+      fill: isGroup ? GROUP_FILL : SURFACE,
+      stroke: GRID,
+      strokeWidth: 1,
+    },
+    marks
+  );
+  if (typeof fold !== 'undefined') {
+    push(part, 'text', `row-${index}-fold`, {
+      x: fold.x + fold.width / 2,
+      y: row.y + row.height / 2,
+      text: fold.text,
+      fill: HEADER_TEXT,
+      fontFamily: SANS,
+      fontSize: MEMORY_FONT_SIZE - 4,
+      textAnchor: 'middle',
+      dominantBaseline: 'central',
+      // The band under it takes the click, so the whole band is one target.
+      pointerEvents: 'none',
+    });
+  }
   push(part, 'text', `row-${index}-label`, {
-    x: isGroup ? MEMORY_PADDING_X : segment.width / 2,
+    x: isGroup
+      ? MEMORY_PADDING_X +
+        (typeof fold === 'undefined' ? 0 : fold.x + fold.width)
+      : segment.width / 2,
     y: row.y + row.height / 2,
     text: isGroup ? `${row.label}` : strings.memoryEmptySegment,
     fill: isGroup ? HEADER_TEXT : MUTED,

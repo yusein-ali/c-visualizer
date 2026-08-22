@@ -187,7 +187,9 @@ int main(){
   printf("%d %d\\n", b.id, b.value);
   return 0;
 }`);
-    expect(direct.output).toContain('read-only member id');
+    expect(direct.output).toContain(
+      'const-qualified structure or union member id'
+    );
     expect(direct.output).not.toContain('1 2');
     expect(memberValues(direct.states, 'b')).toEqual([3, 4]);
 
@@ -201,7 +203,9 @@ int main(){
   printf("%d\\n", b.scale);
   return 0;
 }`);
-    expect(nested.output).toContain('read-only member reading.raw');
+    expect(nested.output).toContain(
+      'const-qualified structure or union member reading.raw'
+    );
     expect(memberValues(nested.states, 'b')).toEqual([2]);
   });
 
@@ -216,7 +220,7 @@ int main(){
   printf("%d\\n", b.x);
   return 0;
 }`);
-    expect(result.output).toContain('read-only variable');
+    expect(result.output).toContain('const-qualified object');
     expect(memberValues(result.states, 'b')).toEqual([1]);
   });
 });

@@ -16,7 +16,7 @@ const states: DEBUG_STATE[] = [
 ];
 
 describe('control button enablement', () => {
-  it('answers for all six buttons in every debug state', () => {
+  it('answers for all seven buttons in every debug state', () => {
     for (const state of states) {
       const enabled = enablementFor(state);
       expect(Object.values(enabled).every((v) => typeof v === 'boolean')).toBe(
@@ -31,6 +31,7 @@ describe('control button enablement', () => {
       Stop: false,
       BackAll: false,
       StepBack: false,
+      StepOver: false,
       Step: true,
       StepAll: true,
     });
@@ -55,6 +56,7 @@ describe('control button enablement', () => {
 
   it('does not offer stepping forward once the program has ended', () => {
     expect(enablementFor('EOF').Step).toBe(false);
+    expect(enablementFor('EOF').StepOver).toBe(false);
     expect(enablementFor('EOF').StepAll).toBe(false);
     expect(enablementFor('EOF').StepBack).toBe(true);
   });

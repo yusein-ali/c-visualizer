@@ -1054,7 +1054,8 @@ it, and can be taken in any order or dropped.
    records what C leaves undefined but does not stop for. Four checks went in
    with the surface: division and remainder by zero, an index outside an array
    whose length the declaration gives, a dereference or subscript of a pointer
-   that points at nothing, and a read of a local nothing has written. The last
+   with a null pointer value, and evaluation of an automatic-storage-duration
+   object whose value is indeterminate. The last
    is the only warning - reading uninitialized memory is not something C stops
    for, and ending the run over it would teach that it does - and it is said
    once per object however often the read happens. A local enters that set only
@@ -1082,19 +1083,21 @@ it, and can be taken in any order or dropped.
      the current activation - the arguments it was called with, and how many
      times it has been entered.
    - **Function call.** The callee's declared signature, arguments paired with
-     the parameters they initialise, the values passed at this step, and the
+     the corresponding parameters, the values passed at this step, and the
      value returned once it returns. C passes by value and nothing on screen
      says so today; this is the single most reliable beginner misconception.
    - **`if`.** The controlling expression, the integer it evaluated to at this
-     step, and which branch was taken. C has no boolean type, so show the value
-     and the zero / nonzero reading of it rather than `true`.
+     step, and which branch was taken. Relational and equality operators yield
+     `int` values, so show 0 or 1 and explain the zero/nonzero interpretation
+     rather than displaying a JavaScript Boolean value.
    - **`for`.** The three clauses named as the standard names them -
      initialisation, controlling expression, iteration expression - the loop
      variables as they stand, and the iteration count so far.
    - **`while` and `do`-`while`.** The controlling expression, its current
      value, the iteration count, and for `do`-`while` the fact that the body ran
      before the first test.
-   - **`switch`.** The controlling expression's value, the label selected, and
+   - **`switch`.** The controlling expression's value, the matching case or
+     default label, and
      whether control falls into the next label. Fall-through is invisible in the
      source and is the classic trap.
    - **`return`.** The expression, the value it yields here, and the function it
@@ -1352,7 +1355,18 @@ it, and can be taken in any order or dropped.
 13. **One explanation of the current statement.** **Done.** A teaching view that says
     what the statement under the step marker does. Statement and Call stack
     occupy the canvas's two top columns; the expression expansion of Phase 8
-    item 6 is a separate full-width view below them. The expansion draws the
+    item 6 is a separate full-width view below them. Every argument in an
+    expansion is drawn under the function-call operator and tagged with the
+    corresponding parameter: a call assigns each evaluated argument value to
+    its corresponding parameter, so these relationships are never split across views. A call the
+    statement buries - one reached through an operand rather than through the
+    statement's own `=` or `return` - additionally gets a full-width view of
+    its own, rooted at the call with its arguments beneath it and headed by the
+    signature, collapsing on its own heading. A call whose arguments are all
+    bare names or literals is left out, as is one the statement is already
+    about, since the main expansion is that call's view already. These follow
+    the Expression switch rather than carrying one each, so the View menu does
+    not change length with the step. The expansion draws the
     operands, the operators, the evaluation order and the intermediate values;
     the explanation reads the whole statement - which kind of statement it is,
     which branch or which iteration this is, and what it leaves behind when it
@@ -1392,16 +1406,16 @@ it, and can be taken in any order or dropped.
     transition step on which a loop's controlling expression becomes false
     stays with that loop long enough to show the `0` that made control leave;
     the following step then names the following statement.
-    Assignment explanations put the source target, assigned expression,
-    resolved target, previous value and stored value on separate lines. A
-    computed target such as `arr[i]` is also shown as `arr[2]` whenever `i` is
-    known to be 2 at that step.
+    Assignment-expression explanations put the left operand, right operand,
+    object designated by the left operand, previously stored value, and newly
+    stored value on separate lines. A computed left operand such as `arr[i]`
+    is also shown as `arr[2]` whenever `i` is known to be 2 at that step.
 
 14. **A view of the call stack.** **Done.** The call stack is drawn beside the
     statement with the same slate disclosure heading and an independent fold,
-    innermost frame first: the function, the line the call is written on, the
-    arguments it was passed beside the parameters they filled, and how many
-    times the run has entered it. The memory map already draws the frames as
+    innermost frame first: the function, the line containing the call, each
+    argument value beside the corresponding parameter, and the number of
+    active invocations of a recursive function. The memory map already draws the frames as
     bands of storage, and that is a different question - a frame there is an
     address and the objects in it, and here it is a call. The arguments are
     what earn the view its place: C passes by value, nothing else on the
@@ -1410,15 +1424,15 @@ it, and can be taken in any order or dropped.
     `StepModel.frames`, built by `ConstructTrace` from the activations it
     already keeps, so nothing walks the interpreter's objects from outside.
 15. **A view of what the run has written.** **Done.** `MutationView` is the
-    collapsible Variables over time region beneath the JointJS paper, newest
+    collapsible Object writes over time region beneath the JointJS paper, newest
     write first: the frame it happened in, the object as the source names it,
     what it held before, what it holds after, and the line. Every other view
     says what memory holds now; this says what it held before, which is the
     question a reader asks when a value is wrong and they are looking for the
     statement that made it wrong. The frame column is why it is a view rather
-    than a column somewhere else: a write inside a callee is a write to the
-    callee's own copy, and naming the frame shows the by-value rule happening
-    instead of asserting it. The log lives in the recorder, bounded at 500
+    than a column somewhere else: naming the frame helps distinguish assignment
+    to a parameter object from assignment through a pointer to an object whose
+    lifetime began in a caller. The log lives in the recorder, bounded at 500
     writes, and rides every state by reference with the length it had at that
     step beside it - so attaching it costs a step nothing, and stepping back
     shows the log as it stood rather than a future the reader has not reached.
@@ -1427,10 +1441,10 @@ it, and can be taken in any order or dropped.
     expression itself produces.
 16. **A control panel for the views.** **Done.** One View disclosure in the
     canvas toolbar controls Statement, Call stack, Expression expansion,
-    Memory and Variables over time together with the individual memory regions.
+    Memory and Object writes over time together with the individual memory regions.
     All five sections start visible and each has the same slate disclosure at
     the content it controls; the first two form a row, Expression expansion and
-    Memory span both columns, and Variables over time is a native details region
+    Memory span both columns, and Object writes over time is a native details region
     under the paper. Switching the history off removes its rows as well as
     hiding it, so a long run costs a reader who is not looking at them no DOM
     rows.
@@ -1448,9 +1462,10 @@ it, and can be taken in any order or dropped.
     what is in it. A JSON file this version cannot read is refused with a
     sentence rather than dropped into the editor as text.
 18. **Several files open at once.** **Done.** A strip of tabs over the editor,
-    one per open file, with the translation unit marked: C compiles one, and
-    PLIVET's preprocessor discards `#include`, so exactly one of them runs and
-    pressing another file's marker makes that one the entry instead. This is
+    one per open source file, with the entry source marked. PLIVET concatenates
+    the sources, entry first, and unicoen parses the result as one translation
+    unit; it does not translate and link each file separately. Pressing another
+    file's marker makes that one the entry instead. This is
     the shape the interactive-code directive already has - the parts of a
     block are tabs, one of them is the main file, all of them are submitted -
     which is why constraint 7 asked for it, and the Worker protocol now

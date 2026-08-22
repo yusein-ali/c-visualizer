@@ -77,15 +77,15 @@ int main(void) {
   });
 });
 
-describe('an index outside its array', () => {
-  it('names the index and the length', () => {
+describe('an index outside its array bounds', () => {
+  it('names the index and the valid range', () => {
     const [found] = run(`int main(void) {
   int values[3] = {1, 2, 3};
   return values[5];
 }`).diagnostics;
     expect(found.rule).toBe('array-out-of-bounds');
     expect(found.message).toContain('5');
-    expect(found.message).toContain('3');
+    expect(found.message).toContain('0 through 2');
     expect(found.line).toBe(3);
   });
 
@@ -120,7 +120,7 @@ int main(void) {
   });
 });
 
-describe('a pointer that points at nothing', () => {
+describe('a null pointer', () => {
   it('stops a dereference of it', () => {
     const [found] = run(`int main(void) {
   int *p = 0;

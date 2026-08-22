@@ -30,6 +30,13 @@
   --plivet-button-bg: #f6f6f6;
   --plivet-button-hover-bg: #e7edf4;
   --plivet-button-color: #333333;
+  --plivet-debug-bg: #f3f3f3;
+  --plivet-debug-color: #333333;
+  --plivet-debug-grip: #777777;
+  --plivet-debug-hover-bg: rgb(0 0 0 / 8%);
+  --plivet-debug-border: rgb(0 0 0 / 14%);
+  --plivet-debug-shadow: rgb(0 0 0 / 28%);
+  --plivet-debug-focus: #007fd4;
 
   box-sizing: border-box;
   display: grid;
@@ -57,6 +64,12 @@
   --plivet-button-bg: rgb(58 58 58);
   --plivet-button-hover-bg: rgb(74 74 74);
   --plivet-button-color: rgb(241 241 241);
+  --plivet-debug-bg: #333333;
+  --plivet-debug-color: #f0f0f0;
+  --plivet-debug-grip: #a0a0a0;
+  --plivet-debug-hover-bg: rgb(255 255 255 / 10%);
+  --plivet-debug-border: rgb(255 255 255 / 10%);
+  --plivet-debug-shadow: rgb(0 0 0 / 45%);
   /*
    * The native controls - the theme `select`, the file input's button - are
    * drawn by the browser, and this is the only thing that tells it which way
@@ -197,6 +210,29 @@
  */
 .plivet:has(.plivet__splitter--active) {
   user-select: none;
+}
+
+/*
+ * The debug controls stay where the reader can reach them.
+ *
+ * The bar sits above a `62vh` editor with a console and an upload panel under
+ * it, so on any ordinary window scrolling down to read the end of a program
+ * took the execution buttons that move through it off the top of the screen - and
+ * the reader had to scroll back up to take one more step. It sticks to the
+ * top of the viewport instead, for as long as the column it belongs to is on
+ * screen, and paints the shell's own surface behind itself so the code does
+ * not run underneath it.
+ *
+ * `--plivet-controls-top` is where it comes to rest: a host page with a fixed
+ * banner of its own sets that to the banner's height, and standalone it is the
+ * top of the window.
+ */
+.plivet__controls {
+  position: sticky;
+  top: var(--plivet-controls-top, 0);
+  /* Above the editor's own layers, below CodeMirror's tooltips and panels. */
+  z-index: 3;
+  background-color: var(--plivet-surface);
 }
 
 /*

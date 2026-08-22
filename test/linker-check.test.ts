@@ -15,6 +15,17 @@ const lint = (code: string): LintDiagnostic[] => {
 const only = (code: string, rule: string): LintDiagnostic[] =>
   lint(code).filter((diagnostic) => diagnostic.rule === rule);
 
+const linked = (entry: string, complete: string): LintDiagnostic[] => {
+  const interpreter = new PlivetCPP14Interpreter();
+  const error = console.error;
+  console.error = () => undefined;
+  try {
+    return interpreter.getLints(entry, complete);
+  } finally {
+    console.error = error;
+  }
+};
+
 describe('linker diagnostics', () => {
   it('reports the second function definition and points back to the first', () => {
     const [found] = only(
@@ -74,6 +85,20 @@ int calculate(int n) { return n + 1; }
 `;
 
     expect(only(code, 'undefinedReference')).toEqual([]);
+  });
+
+  it('accepts a prototype whose definition is in another source file', () => {
+    const entry = `int helper(int value);
+int main(void) { return helper(3); }
+`;
+    const helper = `int helper(int value) { return value + 2; }
+`;
+
+    expect(
+      linked(entry, `${entry}\n${helper}`).filter(
+        (diagnostic) => diagnostic.rule === 'undefinedReference'
+      )
+    ).toEqual([]);
   });
 
   it('does not mistake an undeclared library call for an undefined reference', () => {

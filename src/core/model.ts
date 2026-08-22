@@ -107,6 +107,15 @@ export interface MemoryGroupModel {
   name: string;
   /** How many of the segment's rows, from where the previous group ended. */
   rows: number;
+  /**
+   * What the reader's decision to fold this group is filed under. It has to
+   * outlive the step: a frame the reader put away stays away while the
+   * program runs inside it, and rebuilding the model every step would
+   * otherwise open it again.
+   */
+  key: string;
+  /** Whether this is the frame the program is executing in. */
+  current: boolean;
 }
 
 /**
@@ -206,7 +215,7 @@ export interface FrameModel {
   name: string;
   /** 1-based line the function is defined on. */
   line: number;
-  /** The line the call was written on; null for the function nothing called. */
+  /** The line containing the call; null for the initial function invocation. */
   calledFrom: number | null;
   /** What it was passed, in order, spelled as C passed it: by value. */
   arguments: FrameArgumentModel[];
@@ -220,9 +229,9 @@ export interface FrameModel {
  * Every other view says what memory holds now. This one says what it held
  * before, which is the question a reader asks when a value is wrong and they
  * are looking for the statement that made it wrong - and across calls, which
- * is where C's by-value passing surprises people: a write inside a callee is
- * a write to the callee's own copy, and a log that says which frame it
- * happened in is the shortest way to see that.
+ * is where C's by-value argument passing surprises people. The named frame
+ * distinguishes a write to a parameter object from a write through a pointer
+ * to an object whose lifetime began in a caller.
  */
 export interface MutationModel {
   /** The object as the source names it: `total`, `arr[2]`, `*p`. */
@@ -239,6 +248,8 @@ export interface MutationModel {
 export interface FunctionModel {
   name: string;
   address: number;
+  /** Illustrative size of the compiled code in bytes. */
+  size: number;
 }
 
 export type ExpressionNodeKind = 'operand' | 'operator' | 'assignment';
@@ -259,12 +270,53 @@ export interface ExpressionNodeModel {
    * an operator's result once it has one. `null` until then.
    */
   value: string | null;
+  /**
+   * The parameter this node initialises, set only on the direct arguments of a
+   * call and only where the program defines the callee. It is what pairs an
+   * argument with the object it is copied into, which is the one thing a tree
+   * of operators cannot say on its own.
+   */
+  parameter?: string;
   children: ExpressionNodeModel[];
 }
 
 export interface ExpressionModel {
   range: CodeRangeModel;
   root: ExpressionNodeModel;
+}
+
+/**
+ * One call in the statement about to run, drawn with its arguments.
+ *
+ * The statement's own tree already contains the call, so this is not new
+ * information - it is the call on its own, away from whatever surrounds it.
+ * `total = total + twice(a * 2 + 1)` puts the argument three levels down a
+ * tree rooted at an assignment, where the question C's by-value passing raises
+ * - what value was actually copied into the parameter - is the hardest thing
+ * on the canvas to read.
+ *
+ * The unit is the call, not the argument. Arguments are what one call operator
+ * binds, in one go, positionally: pulling them apart into a view each would
+ * separate them from the operator that gives them their meaning and from each
+ * other. So the tree here is rooted at the call, its arguments beneath it,
+ * each tagged with the parameter it fills.
+ */
+export interface CallExpansionModel {
+  /**
+   * Stable across steps for one call site, so a reader who collapses a section
+   * keeps it collapsed as the program moves.
+   */
+  key: string;
+  /** The function being called, as `twice()`. */
+  callee: string;
+  /**
+   * The parameters it binds, in order. Empty where the callee cannot be
+   * resolved without running the program - a library function, or a call
+   * through a function pointer - and the view then names positions alone.
+   */
+  parameters: string[];
+  /** The call operator with its arguments under it. */
+  expression: ExpressionModel;
 }
 
 /** An interpreter code range: one-based lines, zero-based columns. */
@@ -378,6 +430,8 @@ export interface StepModel {
   functions: FunctionModel[];
   /** The current expression expanded into operands and operators. */
   expression: ExpressionModel | null;
+  /** The calls in it that pass a computed argument, each with its arguments. */
+  callExpansions: CallExpansionModel[];
   /** Every variable in scope, innermost frame last. */
   variables: VariableModel[];
   /** What the statement about to run reads or assigns, in source order. */
@@ -403,6 +457,7 @@ export const emptyStepModel = (): StepModel => ({
   memory: [],
   functions: [],
   expression: null,
+  callExpansions: [],
   variables: [],
   inlineValues: [],
   constructStates: [],
@@ -430,3 +485,22 @@ export const isWithinFold = (
 ): boolean =>
   group !== undefined &&
   (group === folded || group.startsWith(`${folded}${FOLD_SEPARATOR}`));
+
+/**
+ * Every group on the way down to this one, outermost first, ending with the
+ * group itself.
+ *
+ * A row is hidden by a fold anywhere above it, and an aggregate that nobody
+ * has clicked is folded - so the question is no longer "which groups did the
+ * reader close" but "is anything on this row's path closed", and the path is
+ * what a group's own name spells out.
+ */
+export const foldPathOf = (group: string): string[] =>
+  group
+    .split(FOLD_SEPARATOR)
+    .slice(1)
+    .map((_part, index, parts) =>
+      parts
+        .slice(0, index + 1)
+        .reduce((path, key) => `${path}${FOLD_SEPARATOR}${key}`, '')
+    );

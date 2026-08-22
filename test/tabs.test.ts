@@ -49,6 +49,23 @@ describe('the tab strip', () => {
     host.remove();
   });
 
+  it('explains the entry triangle when a source tab is hovered', () => {
+    const { host, tabs } = mounted();
+    tabs.setTabs([
+      { path: 'main.c', entry: true, active: true },
+      { path: 'notes.c', entry: false, active: false },
+    ]);
+    const [entry, other] = tabsOf(tabs);
+    expect(selectIn(entry).title).toBe(
+      'The filled triangle marks this as the entry source file'
+    );
+    expect(selectIn(other).title).toBe(
+      'Press the hollow triangle to make this the entry source file'
+    );
+    tabs.destroy();
+    host.remove();
+  });
+
   it('reports the file a reader picked', () => {
     const picked: string[] = [];
     const { host, tabs } = mounted({

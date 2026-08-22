@@ -132,6 +132,17 @@ const functionFor = (
   return prototype;
 };
 
+/** The body-bearing declaration of a named function, if this source has one. */
+export const functionDefinitionFor = (
+  constructs: Construct[],
+  name: string
+): Construct | null =>
+  constructs.find(
+    (construct) =>
+      construct.declaredFunction?.identifier === name &&
+      construct.declaredFunction.isDefinition
+  ) ?? null;
+
 const typeFor = (constructs: Construct[], name: string): Construct | null =>
   constructs.find((construct) =>
     (construct.declaredTypes ?? []).some((declared) => declared.name === name)

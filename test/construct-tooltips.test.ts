@@ -123,7 +123,7 @@ describe('what a construct is', () => {
       (construct) => construct.kind === kind && construct.line === line
     )!;
 
-  it('names the three clauses of a for loop as the standard names them', () => {
+  it('names the three parts of a for statement', () => {
     expect(
       at('for', 5).clauses?.map(({ label, text }) => ({ label, text }))
     ).toEqual([
@@ -133,20 +133,21 @@ describe('what a construct is', () => {
     ]);
   });
 
-  it('pairs each argument with the parameter it initialises', () => {
-    // C passes by value, and nothing on screen says so: writing the parameter
-    // beside the argument is the shortest way to say what a call does.
+  it('pairs each argument with its corresponding parameter', () => {
+    // C assigns each argument value to the corresponding parameter. Showing
+    // both makes the language's by-value semantics explicit.
     expect(at('call', 9).clauses).toEqual([
       { label: 'clauseArgument', text: 'int n = i' },
     ]);
   });
 
-  it('says which loop a continue restarts', () => {
+  it('says which iteration statement a continue statement restarts', () => {
     expect(at('continue', 7).enclosing).toEqual({ kind: 'for', line: 5 });
   });
 
-  it('says which construct a break leaves, not which one contains it', () => {
-    // The break is inside a switch inside a loop, and it leaves the switch.
+  it('says which construct a break statement leaves', () => {
+    // The break statement is inside a switch statement inside an iteration
+    // statement, and transfers control past the switch statement.
     expect(at('break', 16).enclosing).toEqual({ kind: 'switch', line: 11 });
   });
 
@@ -211,7 +212,7 @@ describe('what a construct is doing', () => {
     ]);
   });
 
-  it('counts how many times a function has been entered', () => {
+  it('counts the active invocations of a recursive function', () => {
     expect(factsFor(stepOn(steps, 24, 1), 'functionDec', 23)).toEqual([
       'factArgument=n = 2',
       'factTimesEntered=2',
@@ -279,10 +280,10 @@ int main(void) {
     source.setStep(before);
     expect(linesOf(source.explainStatement(code).statement)).toBe(
       [
-        'assignment statement',
-        'assigned object: arr[i]',
-        'assigned value: 7',
-        'assigned object at this step: arr[2]',
+        'assignment expression',
+        'left operand: arr[i]',
+        'right operand: 7',
+        'object designated by the left operand: arr[2]',
       ].join('\n')
     );
     expect(after.mutations.at(-1)?.target).toBe('arr[2]');
@@ -325,12 +326,12 @@ describe('the tooltip that says both halves', () => {
     const text = hovering(PROGRAM, stepOn(steps, 9, 1))(5, 2);
     expect(text).toBe(
       [
-        'for loop',
+        'for statement',
         'initialization: int i = 0',
         'controlling expression: i < 3',
         'iteration expression: i++',
         'evaluates to: 1',
-        'which C reads as true, because it is not zero',
+        'the scalar value compares unequal to 0, so C treats it as true',
         'iterations begun so far: 3',
       ].join('\n')
     );
@@ -339,7 +340,7 @@ describe('the tooltip that says both halves', () => {
   it('says only what is always true when nothing is running', () => {
     expect(hovering(PROGRAM)(5, 2)).toBe(
       [
-        'for loop',
+        'for statement',
         'initialization: int i = 0',
         'controlling expression: i < 3',
         'iteration expression: i++',
@@ -347,9 +348,9 @@ describe('the tooltip that says both halves', () => {
     );
   });
 
-  it('says which loop a continue restarts, and on which line', () => {
+  it('says which iteration statement a continue statement restarts', () => {
     expect(hovering(PROGRAM)(7, 6)).toBe(
-      'continue\nrestarts: for loop on line 5'
+      'continue statement\ncontinues with the next iteration of: for statement on line 5'
     );
   });
 

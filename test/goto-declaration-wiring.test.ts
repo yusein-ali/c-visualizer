@@ -62,6 +62,12 @@ const fakeClient = () => {
   return { client: client as unknown as InterpreterClient, sent };
 };
 
+const constructsOf = (source: string) => {
+  const interpreter = new PlivetCPP14Interpreter();
+  interpreter.setFileList(new Map());
+  return interpreter.getConstructs(source);
+};
+
 const mounted = (doc = PROGRAM) => {
   const host = document.createElement('div');
   document.body.appendChild(host);
@@ -73,7 +79,34 @@ const mounted = (doc = PROGRAM) => {
     doc,
   });
   const view = (controller as any).editor.view;
-  return { host, controller, view, sent };
+  return { host, bus, controller, view, sent };
+};
+
+const ENTRY = `int helper(int n);
+int main(void) {
+  return helper(2);
+}`;
+const HELPER = `int helper(int n) {
+  int result = n * 2;
+  return result;
+}`;
+
+const mountedFiles = () => {
+  const host = document.createElement('div');
+  document.body.appendChild(host);
+  const bus = new Bus();
+  const { client } = fakeClient();
+  const controller = new EditorController(host, {
+    bus,
+    client,
+    files: [
+      { path: 'main.c', text: ENTRY },
+      { path: 'helper.c', text: HELPER },
+    ],
+    entry: 'main.c',
+  });
+  const view = (controller as any).editor.view;
+  return { host, bus, controller, view };
 };
 
 /** The pointer arriving over the editor, which is what wakes the check. */
@@ -189,6 +222,86 @@ describe('ctrl-click, wired up', () => {
     view.dispatch({ selection: { anchor: 0 } });
     clickAt(view, at);
     expect(view.state.selection.main.anchor).toBe(0);
+    controller.destroy();
+    host.remove();
+  });
+});
+
+describe('memory-view navigation, wired up', () => {
+  it('goes from a function cell to the function definition', async () => {
+    const { host, bus, view, controller } = mounted();
+    approach(view);
+    await settled();
+
+    view.dispatch({ selection: { anchor: PROGRAM.length } });
+    bus.signal('navigateMemory', { kind: 'function', name: 'twice' });
+
+    expect(view.state.doc.lineAt(view.state.selection.main.anchor).number).toBe(
+      1
+    );
+    controller.destroy();
+    host.remove();
+  });
+
+  it('goes from an object cell to the object declaration', async () => {
+    const { host, bus, view, controller } = mounted();
+    approach(view);
+    await settled();
+
+    const model = {
+      ...emptyStepModel(),
+      variables: [
+        {
+          name: 'count',
+          key: 'main-count',
+          type: 'int',
+          value: '2',
+          address: 0x1000,
+        },
+      ],
+    };
+    controller.recieve({
+      output: '',
+      sourcecode: PROGRAM,
+      debugState: 'Debugging',
+      step: 1,
+      errors: [],
+      model,
+      constructs: constructsOf(PROGRAM),
+    } as Response);
+    view.dispatch({ selection: { anchor: 0 } });
+    bus.signal('navigateMemory', { kind: 'object', key: 'main-count' });
+
+    expect(view.state.doc.lineAt(view.state.selection.main.anchor).number).toBe(
+      5
+    );
+    controller.destroy();
+    host.remove();
+  });
+
+  it('opens the source tab that contains a function definition', () => {
+    const { host, bus, view, controller } = mountedFiles();
+    const source = `${ENTRY}\n${HELPER}`;
+    const model = {
+      ...emptyStepModel(),
+      functions: [{ name: 'helper', address: 0x1000, size: 16 }],
+    };
+    controller.recieve({
+      output: '',
+      sourcecode: source,
+      debugState: 'Debugging',
+      step: 1,
+      errors: [],
+      model,
+      constructs: constructsOf(source),
+    } as Response);
+
+    bus.signal('navigateMemory', { kind: 'function', name: 'helper' });
+
+    expect(controller.active()).toBe('helper.c');
+    expect(view.state.doc.lineAt(view.state.selection.main.anchor).number).toBe(
+      1
+    );
     controller.destroy();
     host.remove();
   });

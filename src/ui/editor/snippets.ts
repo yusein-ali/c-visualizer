@@ -23,7 +23,7 @@ import { Completion, snippetCompletion } from '@codemirror/autocomplete';
 const templates: { label: string; detail: string; template: string }[] = [
   {
     label: 'for',
-    detail: 'a loop with a counter',
+    detail: 'a for statement with a counter',
     template: [
       'for (int ${i} = 0; ${i} < ${count}; ${i}++) {',
       '\t${0}',
@@ -32,12 +32,12 @@ const templates: { label: string; detail: string; template: string }[] = [
   },
   {
     label: 'while',
-    detail: 'a loop that tests before the body',
+    detail: 'a while statement that tests before each iteration',
     template: ['while (${condition}) {', '\t${0}', '}'].join('\n'),
   },
   {
     label: 'switch',
-    detail: 'a selection with a default and a break',
+    detail: 'a switch statement with a default label and break statements',
     template: [
       'switch (${expression}) {',
       '\tcase ${constant}:',
@@ -50,19 +50,19 @@ const templates: { label: string; detail: string; template: string }[] = [
   },
   {
     label: 'struct',
-    detail: 'a structure definition, semicolon included',
+    detail: 'a structure type definition, including the terminating semicolon',
     template: ['struct ${Name} {', '\t${int} ${member};', '};${0}'].join('\n'),
   },
   {
     label: 'printf',
-    detail: 'a formatted write',
+    detail: 'a formatted write to the standard output stream',
     template: 'printf("${%d}\\n", ${value});${0}',
   },
   {
     // The `&` is the point of offering this one at all: a `scanf` without it
     // is the mistake the teaching linter spends a rule on.
     label: 'scanf',
-    detail: 'a formatted read, into the address of a variable',
+    detail: 'a formatted read into an object whose address is passed',
     template: 'scanf("${%d}", &${value});${0}',
   },
 ];

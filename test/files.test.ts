@@ -16,6 +16,15 @@ describe('the upload panel', () => {
   // holds is whatever the interpreter client read the file into.
   const bytes = (length: number) => new ArrayBuffer(length);
 
+  it('starts collapsed unless requested open', () => {
+    const parent = parentOf();
+    const collapsed = new FilePanel(parent);
+    const expanded = new FilePanel(parent, { open: true });
+
+    expect(collapsed.root.open).toBe(false);
+    expect(expanded.root.open).toBe(true);
+  });
+
   it('says where uploads will appear before there are any', () => {
     const parent = parentOf();
     new FilePanel(parent);

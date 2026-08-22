@@ -41,7 +41,7 @@ int main(){
 }`)
     ).toBe(
       'before\nc-visualizer stopped the program on line 5: ' +
-        'assignment of a read-only variable\n'
+        'the assignment attempts to modify a const-qualified object\n'
     );
   });
 
@@ -57,7 +57,7 @@ int main(){
 }`)
     ).toBe(
       'start \nc-visualizer stopped the program on line 5: ' +
-        'assignment of a read-only variable\n'
+        'the assignment attempts to modify a const-qualified object\n'
     );
   });
 
@@ -73,8 +73,8 @@ int main(){
   return 0;
 }`)
     ).toBe(
-      'c-visualizer stopped the program on line 7: assignment of a record ' +
-        'with the read-only member reading.raw\n'
+      'c-visualizer stopped the program on line 7: the assignment attempts ' +
+        'to modify the const-qualified structure or union member reading.raw\n'
     );
   });
 
@@ -89,7 +89,7 @@ int main(){
 }`)
     ).toBe(
       'c-visualizer stopped the program on line 5: ' +
-        'index 5 is outside the array, which holds 2\n'
+        'index 5 is outside the array bounds; valid indices are 0 through 1\n'
     );
   });
 
@@ -103,7 +103,8 @@ int main(){
 }`)
     ).toBe(
       'c-visualizer stopped the program on line 4: ' +
-        'cannot take the address of a register variable\n'
+        'the address operator cannot be applied to an object declared with ' +
+        'the register storage-class specifier\n'
     );
   });
 

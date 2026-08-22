@@ -3,6 +3,7 @@ import { ArrowGeometry, CellGeometry, Point, connectionColor } from './layout';
 import {
   CELL_HEIGHT,
   CellModel,
+  MemoryGroupModel,
   MemoryRegion,
   MemorySegmentModel,
   StepModel,
@@ -157,6 +158,8 @@ export interface MemoryRowGeometry {
   bandHeight: number;
   /** For a `group` row: the frame it names. Entry rows carry cells instead. */
   label?: string;
+  /** For a `group` row: whether the frame's own rows are put away. */
+  collapsed?: boolean;
   /**
    * The object the row draws, where it draws one. It is the same key the
    * editor's tooltip carries, so pointing at a variable on one side can light
@@ -346,12 +349,14 @@ function columnWidths(
 }
 
 /** Where the rows of each group start, so a frame is announced once. */
-function groupStarts(segment: MemorySegmentModel): Map<number, string> {
-  const starts = new Map<number, string>();
+function groupStarts(
+  segment: MemorySegmentModel
+): Map<number, MemoryGroupModel> {
+  const starts = new Map<number, MemoryGroupModel>();
   let index = 0;
   for (const group of segment.groups) {
     if (group.rows > 0) {
-      starts.set(index, group.name);
+      starts.set(index, group);
       index += group.rows;
     }
   }
@@ -368,18 +373,28 @@ function addressLabelOf(segment: MemorySegmentModel): string {
     return segment.rows.length === 0 ? '—' : `R0 – R${segment.rows.length - 1}`;
   }
   const addresses: number[] = [];
+  let endAddress: number | null = null;
   for (const row of segment.rows) {
+    let rowAddress: number | null = null;
+    let rowSize = 1;
     for (const cell of row) {
       if (cell.kind === 'address' && typeof cell.address === 'number') {
         addresses.push(cell.address);
+        rowAddress = cell.address;
       }
+      if (cell.kind === 'type' && typeof cell.size === 'number') {
+        rowSize = cell.size;
+      }
+    }
+    if (segment.key === 'text' && rowAddress !== null) {
+      endAddress = Math.max(endAddress ?? rowAddress, rowAddress + rowSize - 1);
     }
   }
   if (addresses.length === 0) {
     return `${formatAddress(segment.startAddress)} –`;
   }
   return `${formatAddress(Math.min(...addresses))} – ${formatAddress(
-    Math.max(...addresses)
+    endAddress ?? Math.max(...addresses)
   )}`;
 }
 
@@ -420,7 +435,7 @@ interface Anchor {
   right: number;
 }
 
-/** Just outside the node, so that a router sees a point and not an obstacle. */
+/** Just outside the node, so that an outgoing line clears its value cell. */
 const CLEARANCE = 3;
 
 /**
@@ -458,6 +473,8 @@ interface Routed {
   toCell: CellGeometry;
   fromAnchor: Anchor;
   toAnchor: Anchor;
+  /** The exact target row is put away, so the region title stands in for it. */
+  toHeading: boolean;
   color: string;
 }
 
@@ -516,15 +533,23 @@ const addressBandOf = (cell: CellGeometry): number =>
 
 /**
  * Where an arrow meets a row. The address column is the node's left-hand one,
- * so an arrow meeting a node on that side is taken inside and put down in the
- * top of the address cell, where its head is drawn whole and over white. The
- * other side is the value's, which is written out to the edge of the cell, so
- * an arrow meeting a node there stops just outside it as before.
+ * so a line meeting a node on that side is taken inside and put down in the
+ * top of the address cell, where it is drawn whole and over white. On the
+ * right, an outgoing line starts just outside the value cell, but an incoming
+ * arrow is taken inside the blank end of the caption band. Leaving its head
+ * outside made right-column pointers look detached from the row they named.
  */
-const endpointOf = (cell: CellGeometry, anchor: Anchor, side: Side): Point =>
+const endpointOf = (
+  cell: CellGeometry,
+  anchor: Anchor,
+  side: Side,
+  incoming: boolean
+): Point =>
   side === 'left'
     ? { x: anchor.left + ADDRESS_INSET_X, y: addressBandOf(cell) }
-    : { x: anchor.right + CLEARANCE, y: middleOf(cell) };
+    : incoming
+      ? { x: anchor.right - ADDRESS_INSET_X, y: addressBandOf(cell) }
+      : { x: anchor.right + CLEARANCE, y: middleOf(cell) };
 
 /**
  * One pointer, from the row of the object holding the address to the row of
@@ -541,10 +566,19 @@ function pointerArrow(
   color: string,
   fromSide: Side,
   toSide: Side,
-  laneX?: number
+  laneX?: number,
+  toHeading = false
 ): ArrowGeometry {
-  const from = endpointOf(fromCell, fromAnchor, fromSide);
-  const to = endpointOf(toCell, toAnchor, toSide);
+  const from = endpointOf(fromCell, fromAnchor, fromSide, false);
+  const to = toHeading
+    ? {
+        x:
+          toSide === 'left'
+            ? toAnchor.left + ADDRESS_INSET_X
+            : toAnchor.right - ADDRESS_INSET_X,
+        y: toCell.y,
+      }
+    : endpointOf(toCell, toAnchor, toSide, true);
   const arrow: ArrowGeometry = {
     key: `${fromCell.key}-${toCell.key}`,
     from,
@@ -587,6 +621,8 @@ export function layoutMemory(
   const nodeWidth = left;
 
   const visibleCells = new Map<string, CellGeometry>();
+  /** Address cells represented by their region heading while it is collapsed. */
+  const collapsedTargets = new Map<string, CellGeometry>();
   /** Where each cell's row meets its node's edges, for routing its arrows. */
   const cellAnchor = new Map<string, Anchor>();
   const segments: MemorySegmentGeometry[] = [];
@@ -610,13 +646,41 @@ export function layoutMemory(
     const starts = groupStarts(segment);
     const rows: MemoryRowGeometry[] = [];
 
-    // A collapsed segment builds no rows at all, so its cells never reach
-    // `visibleCells` and the pointers into it are dropped with them.
+    // A collapsed segment builds no rows at all. Its address cells still get
+    // a temporary anchor near the clear top edge of its title bar, so a
+    // visible pointer can say which closed region contains its destination.
+    // Sources remain absent: a pointer value that is put away cannot emit a
+    // line until its own region is reopened.
+    if (collapsed) {
+      for (const row of segment.rows) {
+        for (const cell of row) {
+          if (cell.kind !== 'address') {
+            continue;
+          }
+          const target = cellGeometry(cell.key, cell.kind, '', 0, 0);
+          target.y = segmentTop + 6;
+          collapsedTargets.set(cell.key, target);
+          cellAnchor.set(cell.key, {
+            side,
+            left: columnX[side],
+            right: columnX[side] + nodeWidth,
+          });
+        }
+      }
+    }
     const modelRows = collapsed ? [] : segment.rows;
+    /** The model row a folded frame's own rows run up to, exclusive. */
+    let framedUntil = -1;
     modelRows.forEach((row, index) => {
       const parts = partsOf(row);
       const frame = starts.get(index);
       if (typeof frame !== 'undefined') {
+        // A frame nobody has clicked is drawn open only while it is the one
+        // running: the calls underneath it are what the reader came from
+        // rather than what they are stepping through, and the map is a lot
+        // shorter for saying so.
+        const frameFolded = folds.isFrameFolded(frame.key, !frame.current);
+        framedUntil = frameFolded ? index + frame.rows : -1;
         rows.push({
           kind: 'group',
           key: `${segment.key}-group-${index}`,
@@ -624,12 +688,20 @@ export function layoutMemory(
           height: MEMORY_GROUP_HEIGHT,
           bandY: 0,
           bandHeight: MEMORY_GROUP_HEIGHT,
-          label: frame,
+          label: frame.name,
+          collapsed: frameFolded,
           indent: 0,
           cells: [],
+          fold: {
+            key: `${segment.key}-group-${index}-fold`,
+            target: frame.key,
+            text: frameFolded ? FOLD_CLOSED : FOLD_OPEN,
+            x: MEMORY_PADDING_X,
+            width: MEMORY_FOLD_WIDTH,
+          },
         });
       }
-      if (folds.hides(parts.foldGroup)) {
+      if (index < framedUntil || folds.hides(parts.foldGroup)) {
         return;
       }
 
@@ -703,10 +775,13 @@ export function layoutMemory(
     });
 
     // A group whose every row is folded away announces a frame that is not
-    // there; drop it rather than leave a heading over nothing.
+    // there; drop it rather than leave a heading over nothing. A frame the
+    // reader folded is the exception - the heading is the only thing left to
+    // click to get it back.
     const kept = rows.filter(
       (row, index) =>
         row.kind !== 'group' ||
+        row.collapsed === true ||
         (index + 1 < rows.length && rows[index + 1].kind === 'entry')
     );
     const columnHeaderHeight = collapsed ? 0 : MEMORY_COLUMN_HEADER_HEIGHT;
@@ -757,9 +832,11 @@ export function layoutMemory(
   const routed = model.pointers
     .map((pointer) => {
       const fromCell = visibleCells.get(pointer.from);
-      const toCell = visibleCells.get(pointer.to);
+      const visibleTarget = visibleCells.get(pointer.to);
+      const toCell = visibleTarget ?? collapsedTargets.get(pointer.to);
       if (fromCell === undefined || toCell === undefined) {
-        // One end is folded away, or is in a segment this step does not show.
+        // The source is put away, the target is folded within an open region,
+        // or one end is in a region this step does not show at all.
         return null;
       }
       return {
@@ -767,6 +844,7 @@ export function layoutMemory(
         toCell,
         fromAnchor: cellAnchor.get(pointer.from) as Anchor,
         toAnchor: cellAnchor.get(pointer.to) as Anchor,
+        toHeading: visibleTarget === undefined,
         color: connectionColor(pointer.from, pointer.to),
       };
     })
@@ -825,7 +903,7 @@ export function layoutMemory(
     columnX[0] + nodeWidth + GUTTER_EDGE_X + lane * GUTTER_LANE_X;
 
   const arrows = routed.map((one, index) => {
-    const { fromCell, toCell, fromAnchor, toAnchor, color } = one;
+    const { fromCell, toCell, fromAnchor, toAnchor, toHeading, color } = one;
     fromCell.colors.push(color);
     toCell.colors.push(color);
     const lane = laneOf[index];
@@ -845,7 +923,8 @@ export function layoutMemory(
         color,
         rightwards ? 'right' : 'left',
         rightwards ? 'left' : 'right',
-        crossingX(crossingLaneOf[index])
+        crossingX(crossingLaneOf[index]),
+        toHeading
       );
     }
     // Down the outside of its own column, where the pointers crossing between
@@ -861,7 +940,8 @@ export function layoutMemory(
       color,
       side,
       side,
-      side === 'left' ? fromAnchor.left - reach : fromAnchor.right + reach
+      side === 'left' ? fromAnchor.left - reach : fromAnchor.right + reach,
+      toHeading
     );
   });
 

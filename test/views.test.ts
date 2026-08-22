@@ -51,15 +51,15 @@ describe('the call stack beside the statement', () => {
     ]);
   });
 
-  it('pairs passed values with the parameters they initialized', () => {
+  it('pairs argument values with their corresponding parameters', () => {
     const [current] = callStackRows(stepOn(2).frames);
     expect(current.arguments).toBe('n = 1');
-    expect(current.where).toBe('called from line 7');
+    expect(current.where).toBe('call on line 7');
     expect(current.current).toBe(true);
   });
 });
 
-describe('variables over time under the canvas', () => {
+describe('object writes over time under the canvas', () => {
   const mounted = () => {
     const host = document.createElement('div');
     document.body.appendChild(host);
@@ -87,7 +87,7 @@ describe('variables over time under the canvas', () => {
     expect(outside[outside.length - 1].after).toBe('2');
   });
 
-  it('records every increment made by a preprocessed for loop', () => {
+  it('records every increment made by a preprocessed for statement', () => {
     // S5 hands the visualizer ordinary preprocessed C; this is the loop shape
     // used by those exercises after preprocessing.
     const loop = stepsOf(`int main(void) {

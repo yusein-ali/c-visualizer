@@ -7,6 +7,7 @@ import { extractVariables } from '../src/core/variables';
 import { layoutMemory, FoldState, StepModel } from '../src/core';
 import { HoverTextSource } from '../src/app/hoverText';
 import { memoryNodeOf } from '../src/ui/graph/MemoryNode';
+import { memoryNavigationTarget } from '../src/ui/graph';
 import { focusField, setFocusRange } from '../src/ui/editor';
 import { plivetHoverSource } from '../src/ui/editor/tooltip';
 
@@ -97,6 +98,25 @@ describe('the key a row and a tooltip share', () => {
       'data-object-key'
     );
     expect(marked).toBe(true);
+  });
+
+  it('turns an object row into an object navigation target', () => {
+    const { model } = stepWithBoth();
+    const count = model.variables.find(
+      (variable) => variable.name === 'count'
+    )!;
+    expect(memoryNavigationTarget(model, count.key)).toEqual({
+      kind: 'object',
+      key: count.key,
+    });
+  });
+
+  it('turns a text-segment row into a function navigation target', () => {
+    const { model } = stepWithBoth();
+    expect(memoryNavigationTarget(model, 'text-main')).toEqual({
+      kind: 'function',
+      name: 'main',
+    });
   });
 });
 

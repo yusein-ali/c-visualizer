@@ -125,6 +125,12 @@ describe('what a configuration may say', () => {
     });
   });
 
+  it('opts into the host-backed Build button with its deployed key', () => {
+    expect(parseConfig('{"support-build": true}')).toEqual({
+      supportBuild: true,
+    });
+  });
+
   it('carries the canvas sections and the memory regions', () => {
     expect(
       parseConfig(
@@ -179,8 +185,12 @@ describe('what the configuration decides', () => {
     const parent = parentOf();
     const bar = new ControlBar(parent, { preprocessor: false });
 
-    expect(parent.textContent).not.toContain(strings.preprocessedButton);
-    expect(parent.textContent).toContain(strings.howToUse);
+    expect(
+      parent.querySelector(`[aria-label="${strings.preprocessedButton}"]`)
+    ).toBeNull();
+    expect(
+      parent.querySelector(`[aria-label="${strings.howToUse}"]`)
+    ).not.toBeNull();
 
     bar.destroy();
   });
@@ -189,7 +199,9 @@ describe('what the configuration decides', () => {
     const parent = parentOf();
     const bar = new ControlBar(parent, {});
 
-    expect(parent.textContent).toContain(strings.preprocessedButton);
+    expect(
+      parent.querySelector(`[aria-label="${strings.preprocessedButton}"]`)
+    ).not.toBeNull();
 
     bar.destroy();
   });

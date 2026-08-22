@@ -47,11 +47,11 @@ describe('editor tooltip addresses', () => {
         })
       )
     ).toBe(
-      'pointer\ntype: int *\nvalue: 0xABCD\npoints at: count = 7\naddress: 0x1234'
+      'pointer\ntype: int *\nvalue: 0xABCD\npoints to: count = 7\naddress: 0x1234'
     );
   });
 
-  it('formats variable declarations as labelled lines', () => {
+  it('formats object declarations as labelled lines', () => {
     expect(
       factLines(
         formatVariableDeclaration({
@@ -64,10 +64,10 @@ describe('editor tooltip addresses', () => {
       )
     ).toBe(
       'type: Counter\n' +
-        'storage class: static\n' +
-        'qualifiers: const, volatile\n' +
+        'storage-class specifiers: static\n' +
+        'type qualifiers: const, volatile\n' +
         'identifier: count\n' +
-        'value: 1'
+        'initializer: 1'
     );
   });
 
@@ -92,8 +92,8 @@ describe('editor tooltip addresses', () => {
         // has no room for a list inside a cell.
         'parameter: c: enum Color\n' +
         'parameter: values: const int * const\n' +
-        'storage class: static\n' +
-        'declares: a definition, with a body'
+        'storage-class / function specifiers: static\n' +
+        'declares: a function definition, with a body'
     );
   });
 
@@ -110,7 +110,7 @@ describe('editor tooltip addresses', () => {
           storageClasses: [],
         })
       )
-    ).toContain('declares: a declaration, with no body');
+    ).toContain('declares: a function declaration, not a definition');
   });
 
   it('says none for a function that takes no parameters', () => {
@@ -128,12 +128,12 @@ describe('editor tooltip addresses', () => {
       'return type: int\n' +
         'identifier: main\n' +
         'parameters: none\n' +
-        'storage class: none\n' +
-        'declares: a definition, with a body'
+        'storage-class / function specifiers: none\n' +
+        'declares: a function definition, with a body'
     );
   });
 
-  it('identifies a typedef name without assigning it a storage class', () => {
+  it('identifies a typedef name without assigning it a storage-class specifier', () => {
     expect(
       factLines(
         formatTypeDeclaration({
@@ -144,7 +144,9 @@ describe('editor tooltip addresses', () => {
         })
       )
     ).toBe(
-      'type: enum Mode\n' + 'qualifiers: const\n' + 'typedef name: ReadOnlyMode'
+      'type: enum Mode\n' +
+        'type qualifiers: const\n' +
+        'typedef name: ReadOnlyMode'
     );
   });
 
@@ -158,7 +160,7 @@ describe('editor tooltip addresses', () => {
           name: 'Point',
         })
       )
-    ).toBe('type: struct Point\n' + 'qualifiers: none\n' + 'tag: Point');
+    ).toBe('type: struct Point\n' + 'type qualifiers: none\n' + 'tag: Point');
   });
 
   it('says none when a type declaration has no qualifiers', () => {
@@ -173,7 +175,7 @@ describe('editor tooltip addresses', () => {
       )
     ).toBe(
       'type: struct without a tag\n' +
-        'qualifiers: none\n' +
+        'type qualifiers: none\n' +
         'typedef name: Point'
     );
   });
@@ -207,7 +209,7 @@ describe('editor tooltip addresses', () => {
       )
     ).toBe(
       'type: const int * const\n' +
-        'structure or union: struct Device\n' +
+        'containing structure or union type: struct Device\n' +
         'identifier: status'
     );
   });
@@ -236,17 +238,25 @@ describe('the tooltip as a table', () => {
   it('gives a sentence the width of the table rather than a heading', () => {
     // A note about the language has no left-hand column to stand in.
     const dom = hoverDom({
-      title: 'do-while loop',
-      facts: [{ label: 'the body runs once before the first test', value: '' }],
+      title: 'do-while statement',
+      facts: [
+        {
+          label:
+            'the body is executed before the controlling expression is first evaluated',
+          value: '',
+        },
+      ],
     });
     const cell = dom.querySelector('td')!;
     expect(cell.colSpan).toBe(2);
-    expect(cell.textContent).toBe('the body runs once before the first test');
+    expect(cell.textContent).toBe(
+      'the body is executed before the controlling expression is first evaluated'
+    );
     expect(dom.querySelector('th')).toBeNull();
   });
 
   it('says the headline alone when there is nothing else to say', () => {
-    const dom = hoverDom({ title: 'break', facts: [] });
+    const dom = hoverDom({ title: 'break statement', facts: [] });
     expect(dom.querySelector('table')).toBeNull();
   });
 });

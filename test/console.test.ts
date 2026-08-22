@@ -19,14 +19,27 @@ afterEach(() => {
 });
 
 describe('output', () => {
-  it('always identifies the panel as the STDIO Console', () => {
+  it('identifies the panel as the standard streams', () => {
     const { parent } = mount();
     const title = parent.querySelector('.plivet-console-title');
 
-    expect(title?.textContent).toBe('STDIO Console');
+    expect(title?.textContent).toBe('Standard streams');
     expect(
       parent.querySelector('.plivet-console')?.getAttribute('aria-label')
-    ).toBe('STDIO Console');
+    ).toBe('Standard streams');
+  });
+
+  it('starts collapsed and can be toggled from its summary', () => {
+    const { console, parent } = mount();
+
+    expect(console.root.open).toBe(false);
+    expect(parent.querySelector('summary')?.textContent).toBe(
+      'Standard streams'
+    );
+    console.root.open = true;
+    expect(console.root.open).toBe(true);
+    console.root.open = false;
+    expect(console.root.open).toBe(false);
   });
 
   it('shows what the program printed, as text', () => {
@@ -34,6 +47,7 @@ describe('output', () => {
     console.setOutput('<not markup>\n');
     expect(output.textContent).toBe('<not markup>\n');
     expect(output.querySelector('*')).toBeNull();
+    expect(console.root.open).toBe(true);
   });
 });
 
@@ -43,6 +57,7 @@ describe('input', () => {
     expect(field.disabled).toBe(true);
     console.setAccepting(true);
     expect(field.disabled).toBe(false);
+    expect(console.root.open).toBe(true);
     console.setAccepting(false);
     expect(field.disabled).toBe(true);
   });

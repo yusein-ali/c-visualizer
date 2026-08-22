@@ -77,9 +77,21 @@ describe('what the statement section says', () => {
     expect(explanation.parts).toEqual([]);
   });
 
+  it('names a nested compound statement instead of its function', () => {
+    const code = `int main(void) {
+  {
+    int value = 1;
+  }
+  return 0;
+}`;
+    const step = stepOn(stepsOf(code), 2);
+
+    expect(explaining(code, step).statement?.title).toBe('compound statement');
+  });
+
   it('names the statement under the marker and its clauses', () => {
     const explanation = explaining(PROGRAM, stepOn(steps, 6));
-    expect(explanation.statement!.title).toBe('for loop');
+    expect(explanation.statement!.title).toBe('for statement');
     const said = explanation.statement!.facts.map(
       (fact) => `${fact.label}: ${fact.value}`
     );
@@ -102,10 +114,10 @@ describe('what the statement section says', () => {
       headerSteps.map(
         (step) => explaining(PROGRAM, step).statement?.title ?? null
       )
-    ).toEqual(headerSteps.map(() => 'for loop'));
+    ).toEqual(headerSteps.map(() => 'for statement'));
   });
 
-  it('does not call an assignment in a for header an assignment statement', () => {
+  it('attributes an assignment expression in a for header to the for statement', () => {
     const code = `int main(void) {
   int i = 0;
   for (i = 0; i < 3; i = i + 1) {
@@ -120,10 +132,10 @@ describe('what the statement section says', () => {
     expect(loopSteps.length).toBeGreaterThan(1);
     expect(
       loopSteps.map((step) => explaining(code, step).statement?.title ?? null)
-    ).toEqual(loopSteps.map(() => 'for loop'));
+    ).toEqual(loopSteps.map(() => 'for statement'));
   });
 
-  it('shows the false condition on the step where a for loop exits', () => {
+  it('shows the zero controlling expression when a for statement completes', () => {
     const code = `int main(void) {
   int i = 0;
   for (i = 0; i < 4; i = i + 1) {
@@ -148,13 +160,50 @@ describe('what the statement section says', () => {
     const explanation = explaining(code, exited);
     const card = statementCard(exited, explanation, false);
 
-    expect(explanation.statement?.title).toBe('for loop');
+    // The statement under the marker is what the view explains. The loop the
+    // run has just left is a note beside it saying how control got here - it
+    // used to replace the statement outright, which is how a reader standing
+    // on the `switch` after a `do`-`while` was told about the loop behind them
+    // instead of about the switch in front of them.
+    expect(explanation.statement?.title).toBe('return statement');
     expect(card.context).toBe(
-      'Loop exited after evaluating its controlling expression on line 3'
+      'At line: 5 · for statement on line 3 completed: its controlling expression evaluated to 0'
     );
-    expect(card.description).toContain('Evaluates to: 0');
-    expect(card.description).toContain(
-      'C reads the evaluated expression as false because it is zero.'
+  });
+
+  it('explains the loop it left where the marker has nothing of its own', () => {
+    // The exited loop is still the whole answer on a step the outline names no
+    // construct for - the head of a block, a bare call - because there the
+    // question "why am I here" is the only one the step raises.
+    const code = `int main(void) {
+  int i = 0;
+  for (i = 0; i < 4; i = i + 1) {
+  }
+  return i;
+}`;
+    const run = stepsOf(code);
+    const exited = run.find(
+      (step) =>
+        step.constructStates.some(
+          (state) =>
+            state.kind === 'for' &&
+            state.facts.some(
+              (fact) =>
+                fact.label === 'factConditionValue' && fact.value === '0'
+            )
+        ) && step.codeRange !== null
+    )!;
+    const source = new HoverTextSource();
+    // The loop is named and the statement after it is not, which is the shape
+    // of a step the outline records no construct for.
+    source.setConstructs(
+      constructsOf(code).filter((one) => one.kind === 'for')
+    );
+    source.setStep(exited);
+    const explanation = source.explainStatement(code);
+    expect(explanation.statement?.title).toBe('for statement');
+    expect(explanation.context).toBe(
+      'Iteration statement completed after its controlling expression on line 3'
     );
   });
 
@@ -238,7 +287,13 @@ describe('what the statement section says', () => {
 
     expect(source.explainStatement(PROGRAM).statement).toEqual({
       title: 'function definition',
-      facts: [{ label: 'argument', value: 'n = 1', code: true }],
+      facts: [
+        {
+          label: 'argument value assigned to parameter',
+          value: 'n = 1',
+          code: true,
+        },
+      ],
     });
   });
 });
@@ -250,8 +305,8 @@ describe('the statement teaching card', () => {
     const step = stepOn(steps, 6);
     const card = statementCard(step, explaining(PROGRAM, step), false);
 
-    expect(card.title).toBe('For loop');
-    expect(card.context).toBe('Currently executing on line 6');
+    expect(card.title).toBe('For statement');
+    expect(card.context).toBe('At line: 6');
     expect(card.description).toContain('Initialization: int i = 0');
   });
 
@@ -270,7 +325,8 @@ describe('the statement teaching card', () => {
             { label: 'controlling expression', value: 'n < 3', code: true },
             { label: 'evaluates to', value: '0', code: true },
             {
-              label: 'which C reads as false, because it is zero',
+              label:
+                'the scalar value compares equal to 0, so C treats it as false',
               value: '',
             },
             {
@@ -287,7 +343,7 @@ describe('the statement teaching card', () => {
     expect(card.description).toBe(
       'Controlling expression: n < 3\n' +
         'Evaluates to: 0\n' +
-        'C reads the evaluated expression as false because it is zero.\n' +
+        'The scalar value compares equal to 0, so C treats it as false.\n' +
         'The else branch is the one running.'
     );
   });
@@ -310,7 +366,7 @@ describe('the statement teaching card', () => {
               code: true,
             },
             { label: 'evaluates to', value: '3', code: true },
-            { label: 'label selected', value: 'case 3', code: true },
+            { label: 'matching label', value: 'case 3', code: true },
             {
               label: 'control fell through from an earlier label',
               value: '',
@@ -325,12 +381,12 @@ describe('the statement teaching card', () => {
     expect(card.description).toBe(
       'Controlling expression: choice + 1\n' +
         'Evaluates to: 3\n' +
-        'Label selected: case 3\n' +
+        'Matching label: case 3\n' +
         'Control fell through from an earlier label.'
     );
   });
 
-  it('puts every part of a for loop on its own line', () => {
+  it('puts every part of a for statement on its own line', () => {
     const step = emptyStepModel();
     step.codeRange = {
       begin: { x: 2, y: 6 },
@@ -340,14 +396,15 @@ describe('the statement teaching card', () => {
       step,
       {
         statement: {
-          title: 'for loop',
+          title: 'for statement',
           facts: [
             { label: 'initialization', value: 'int i = 0', code: true },
             { label: 'controlling expression', value: 'i < 3', code: true },
             { label: 'iteration expression', value: 'i++', code: true },
             { label: 'evaluates to', value: '1', code: true },
             {
-              label: 'which C reads as true, because it is not zero',
+              label:
+                'the scalar value compares unequal to 0, so C treats it as true',
               value: '',
             },
             { label: 'iterations begun so far', value: '3', code: true },
@@ -363,10 +420,48 @@ describe('the statement teaching card', () => {
         'Controlling expression: i < 3\n' +
         'Iteration expression: i++\n' +
         'Evaluates to: 1\n' +
-        'C reads the evaluated expression as true because it is not zero.\n' +
+        'The scalar value compares unequal to 0, so C treats it as true.\n' +
         'Iterations begun so far: 3'
     );
   });
+
+  it.each(['while statement', 'do-while statement'])(
+    'puts every part of a %s on its own line',
+    (title) => {
+      const step = emptyStepModel();
+      step.codeRange = {
+        begin: { x: 2, y: 6 },
+        end: { x: 30, y: 6 },
+      };
+      const card = statementCard(
+        step,
+        {
+          statement: {
+            title,
+            facts: [
+              { label: 'controlling expression', value: 'i < 3', code: true },
+              { label: 'evaluates to', value: '1', code: true },
+              {
+                label:
+                  'the scalar value compares unequal to 0, so C treats it as true',
+                value: '',
+              },
+              { label: 'iterations begun so far', value: '2', code: true },
+            ],
+          },
+          parts: [],
+        },
+        false
+      );
+
+      expect(card.description).toBe(
+        'Controlling expression: i < 3\n' +
+          'Evaluates to: 1\n' +
+          'The scalar value compares unequal to 0, so C treats it as true.\n' +
+          'Iterations begun so far: 2'
+      );
+    }
+  );
 
   it('puts every part of a function call on its own line', () => {
     const step = emptyStepModel();
@@ -380,9 +475,17 @@ describe('the statement teaching card', () => {
         statement: {
           title: 'function call — twice',
           facts: [
-            { label: 'argument', value: 'int n = i', code: true },
-            { label: 'argument', value: 'n = 1', code: true },
-            { label: 'returns', value: '2', code: true },
+            {
+              label: 'argument value assigned to parameter',
+              value: 'int n = i',
+              code: true,
+            },
+            {
+              label: 'argument value assigned to parameter',
+              value: 'n = 1',
+              code: true,
+            },
+            { label: 'return value', value: '2', code: true },
           ],
         },
         parts: [],
@@ -391,7 +494,9 @@ describe('the statement teaching card', () => {
     );
 
     expect(card.description).toBe(
-      'Argument: int n = i\nArgument: n = 1\nReturns: 2'
+      'Argument value assigned to parameter: int n = i\n' +
+        'Argument value assigned to parameter: n = 1\n' +
+        'Return value: 2'
     );
   });
 
@@ -405,17 +510,21 @@ describe('the statement teaching card', () => {
       step,
       {
         statement: {
-          title: 'assignment statement',
+          title: 'assignment expression',
           facts: [
-            { label: 'assigned object', value: 'arr[i]', code: true },
-            { label: 'assigned value', value: 'source + 1', code: true },
+            { label: 'left operand', value: 'arr[i]', code: true },
+            { label: 'right operand', value: 'source + 1', code: true },
             {
-              label: 'assigned object at this step',
+              label: 'object designated by the left operand',
               value: 'arr[2]',
               code: true,
             },
-            { label: 'previous value', value: '0', code: true },
-            { label: 'value stored', value: '7', code: true },
+            { label: 'previously stored value', value: '0', code: true },
+            {
+              label: 'stored value after assignment',
+              value: '7',
+              code: true,
+            },
           ],
         },
         parts: [],
@@ -424,11 +533,11 @@ describe('the statement teaching card', () => {
     );
 
     expect(card.description).toBe(
-      'Assigned object: arr[i]\n' +
-        'Assigned value: source + 1\n' +
-        'Assigned object at this step: arr[2]\n' +
-        'Previous value: 0\n' +
-        'Value stored: 7'
+      'Left operand: arr[i]\n' +
+        'Right operand: source + 1\n' +
+        'Object designated by the left operand: arr[2]\n' +
+        'Previously stored value: 0\n' +
+        'Stored value after assignment: 7'
     );
   });
 
@@ -442,13 +551,17 @@ describe('the statement teaching card', () => {
       step,
       {
         statement: {
-          title: 'variable declaration',
+          title: 'object declaration',
           facts: [
             { label: 'type', value: 'int[4]', code: true },
-            { label: 'storage class', value: 'auto', code: true },
-            { label: 'qualifiers', value: 'none', code: true },
+            {
+              label: 'storage-class specifiers',
+              value: 'auto',
+              code: true,
+            },
+            { label: 'type qualifiers', value: 'none', code: true },
             { label: 'identifier', value: 'a', code: true },
-            { label: 'value', value: 'uninitialized', code: true },
+            { label: 'initializer', value: 'none', code: true },
           ],
         },
         parts: [],
@@ -458,23 +571,29 @@ describe('the statement teaching card', () => {
 
     expect(card.description).toBe(
       'Type: int[4]\n' +
-        'Storage class: auto\n' +
-        'Qualifiers: none\n' +
+        'Storage-class specifiers: auto\n' +
+        'Type qualifiers: none\n' +
         'Identifier: a\n' +
-        'Value: uninitialized'
+        'Initializer: none'
     );
   });
 
   it('gives useful guidance before execution starts', () => {
     const card = statementCard(emptyStepModel(), explaining(PROGRAM), false);
 
-    expect(card.title).toBe('No active statement');
+    expect(card.title).toBe('No current statement');
     expect(card.context).toContain('Start or step through the program');
     expect(card.description).toBe('');
   });
 
   it('groups produced expression values only when requested', () => {
-    const step = steps.find((one) => one.expression !== null)!;
+    // A statement that has produced nothing yet has nothing to group, and
+    // every assignment now draws an expansion - so the step is chosen by
+    // having parts rather than by having a tree.
+    const step = steps.find(
+      (one) => 0 < explaining(PROGRAM, one).parts.length
+    )!;
+    expect(step).toBeDefined();
     const explanation = explaining(PROGRAM, step);
 
     expect(statementCard(step, explanation, false).values).toEqual([]);
@@ -495,8 +614,6 @@ describe('the statement teaching card', () => {
     };
     const card = statementCard(step, explaining(PROGRAM, step), false);
 
-    expect(card.context).toBe(
-      `Currently executing on line ${step.expression!.range.begin.y}`
-    );
+    expect(card.context).toBe(`At line: ${step.expression!.range.begin.y}`);
   });
 });

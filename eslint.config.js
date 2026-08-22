@@ -86,6 +86,10 @@ module.exports = tseslint.config(
     },
   },
   {
+    files: ['debug/**/*.js'],
+    languageOptions: { globals: globals.browser },
+  },
+  {
     // The build's own configuration and scripts: CommonJS, running in Node.
     files: ['*.js', 'scripts/**/*.js'],
     languageOptions: {

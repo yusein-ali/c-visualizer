@@ -112,10 +112,10 @@ describe('constructs for the editor', () => {
     expect(found.find((c) => c.kind === 'variableDec')!.detail).toBe(
       [
         'type: int',
-        'storage class: auto',
-        'qualifiers: none',
+        'storage-class specifiers: auto',
+        'type qualifiers: none',
         'identifier: n',
-        'value: 1',
+        'initializer: 1',
       ].join('\n')
     );
     expect(found.find((c) => c.kind === 'call')!.detail).toBe('sqrt');
@@ -163,15 +163,15 @@ int main(){
     ).toBe(
       [
         'type: enum Mode',
-        'storage class: auto',
-        'qualifiers: none',
+        'storage-class specifiers: auto',
+        'type qualifiers: none',
         'identifier: current',
-        'value: ON',
+        'initializer: ON',
       ].join('\n')
     );
   });
 
-  it('describes complete variable declarations and initialization', () => {
+  it('describes complete object declarations and initialization', () => {
     const code = `struct Point { int x; };
 int main(){
   static const int * volatile pointer = 0;
@@ -188,23 +188,21 @@ int main(){
     ).toBe(
       [
         'type: int *',
-        'storage class: static',
-        'qualifiers: const, volatile',
+        'storage-class specifiers: static',
+        'type qualifiers: const, volatile',
         'identifier: pointer',
-        'value: 0',
+        'initializer: 0',
       ].join('\n')
     );
     expect(
       found.find(
         (construct) => construct.kind === 'variableDec' && construct.line === 4
       )!.detail
-    ).toContain('value: uninitialized');
+    ).toContain('initializer: none');
 
     const second = constructAt(found, 5, code.split('\n')[4].indexOf('second'));
     expect(second).not.toBeNull();
-    expect(second!.detail).toContain(
-      'identifier: second\nvalue: uninitialized'
-    );
+    expect(second!.detail).toContain('identifier: second\ninitializer: none');
     expect(
       found.find(
         (construct) => construct.kind === 'variableDec' && construct.line === 6
@@ -372,7 +370,9 @@ int main(){
     ]);
     expect(
       constructAt(constructs('union Value { int whole; };'), 1, 1)!.detail
-    ).toBe(['type: union Value', 'qualifiers: none', 'tag: Value'].join('\n'));
+    ).toBe(
+      ['type: union Value', 'type qualifiers: none', 'tag: Value'].join('\n')
+    );
   });
 
   it('reports a record with no tag as one written without a tag', () => {
@@ -519,7 +519,7 @@ struct Point makePoint(void){
     expect(hovered!.declaredFunction!.returnType).toBe('struct Point');
   });
 
-  it('keeps an object declared after a record body a variable declaration', () => {
+  it('keeps an object declared after a structure or union body an object declaration', () => {
     const code = 'struct Point { int x; }point;';
     const found = constructAt(constructs(code), 1, code.indexOf('point'));
     expect(found).not.toBeNull();

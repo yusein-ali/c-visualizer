@@ -10,6 +10,7 @@ import {
   applyBreakpoints,
   breakpointGutter,
   breakpointRows,
+  toggleBreakpoint,
 } from './breakpoints';
 import { lintGutter } from '@codemirror/lint';
 import {
@@ -134,6 +135,13 @@ export class DebugExtensions {
 
   setBreakpoints(view: EditorView, rows: number[]): void {
     applyBreakpoints(view, rows);
+  }
+
+  /** Toggle the breakpoint on the line holding the primary cursor. */
+  toggleBreakpoint(view: EditorView): void {
+    view.dispatch({
+      effects: toggleBreakpoint.of(view.state.selection.main.head),
+    });
   }
 
   /**

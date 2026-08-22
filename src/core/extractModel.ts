@@ -9,7 +9,10 @@ import {
   framesOf as callFramesOf,
   mutationsOf,
 } from '../interpreter/ConstructTrace';
-import { expressionTraceOf } from '../interpreter/ExpressionTrace';
+import {
+  callExpansionsOfState,
+  expressionTraceOf,
+} from '../interpreter/ExpressionTrace';
 import { statementNames } from '../interpreter/StatementNames';
 import {
   declarationInfoOf,
@@ -25,6 +28,7 @@ import {
 import {
   CellModel,
   CodeRangeModel,
+  CallExpansionModel,
   ExpressionModel,
   ExpressionNodeModel,
   FunctionModel,
@@ -410,8 +414,25 @@ function framesOf(entries: MemoryEntry[]): MemoryGroupModel[] {
     if (typeof last !== 'undefined' && last.name === entry.owner) {
       last.rows += entry.rows.length;
     } else {
-      groups.push({ name: entry.owner, rows: entry.rows.length });
+      groups.push({
+        name: entry.owner,
+        rows: entry.rows.length,
+        // Depth and name together: a fold survives a step, and it has to stay
+        // attached to the same call while the program runs inside it. The
+        // name alone would tie two frames of one recursive function to one
+        // another; the depth alone would move a fold onto whoever took the
+        // place of a call that returned.
+        key: `frame-${groups.length}-${entry.owner}`,
+        // The stack is built outermost first, so the last frame with anything
+        // in it is the one being executed. Filled in below, once they are all
+        // known.
+        current: false,
+      });
     }
+  }
+  const innermost = groups[groups.length - 1];
+  if (typeof innermost !== 'undefined') {
+    innermost.current = true;
   }
   return groups;
 }
@@ -488,6 +509,7 @@ class MemoryCollector {
           addressCell,
         ],
       ];
+      rows[0][0].size = fn.size;
       addresses.declare(fn.address, addressCell.key);
       entries.push({
         address: fn.address,
@@ -586,12 +608,16 @@ function withOperandValues(
   expression: ExpressionModel | null,
   variables: VariableModel[]
 ): ExpressionModel | null {
-  if (expression === null) {
-    return null;
-  }
-  const scope = new Map(
-    variables.map((variable) => [variable.name, variable.value])
-  );
+  return expression === null ? null : filled(expression, scopeOf(variables));
+}
+
+const scopeOf = (variables: VariableModel[]): Map<string, string> =>
+  new Map(variables.map((variable) => [variable.name, variable.value]));
+
+const filled = (
+  expression: ExpressionModel,
+  scope: Map<string, string>
+): ExpressionModel => {
   const fill = (node: ExpressionNodeModel): ExpressionNodeModel => {
     const held = node.value === null ? scope.get(node.text) : undefined;
     return {
@@ -601,6 +627,26 @@ function withOperandValues(
     };
   };
   return { ...expression, root: fill(expression.root) };
+};
+
+/**
+ * The same filling for the calls drawn on their own. They are cut from the
+ * statement's tree, so a name in one holds exactly what the same name holds in
+ * the statement - reading them against a second scope would be a way for one
+ * screen to show two answers.
+ */
+function withCallValues(
+  calls: CallExpansionModel[],
+  variables: VariableModel[]
+): CallExpansionModel[] {
+  if (calls.length === 0) {
+    return [];
+  }
+  const scope = scopeOf(variables);
+  return calls.map((call) => ({
+    ...call,
+    expression: filled(call.expression, scope),
+  }));
 }
 
 /**
@@ -641,7 +687,12 @@ function inlineValuesFor(
 }
 
 function codeRangeOf(execState: ExecState): CodeRangeModel | null {
-  const { codeRange } = execState.getNextExpr();
+  // A run that ends with nothing selected has no next expression at all - a
+  // `switch` whose value matches no label and which declares no `default`
+  // leaves the statement without ever entering one - so this is read rather
+  // than destructured.
+  const next = execState.getNextExpr();
+  const codeRange = next === null ? null : next.codeRange;
   if (!codeRange) {
     return null;
   }
@@ -673,7 +724,7 @@ export function extractModel(execState?: ExecState | null): StepModel {
     }
   }
   const functions: FunctionModel[] = runtimeFunctionsOf(execState).map(
-    ({ name, address }) => ({ name, address })
+    ({ name, address, size }) => ({ name, address, size })
   );
   memory.addFunctions(functions, addresses);
   memory.addStrings(runtimeStringsOf(execState), addresses);
@@ -684,6 +735,7 @@ export function extractModel(execState?: ExecState | null): StepModel {
     memory: memory.segments(),
     functions,
     expression: withOperandValues(expressionTraceOf(execState), variables),
+    callExpansions: withCallValues(callExpansionsOfState(execState), variables),
     variables,
     inlineValues: inlineValuesFor(execState, variables),
     constructStates: constructStatesOf(execState),

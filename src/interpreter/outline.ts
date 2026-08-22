@@ -1,6 +1,7 @@
 import { UniNode } from 'unicoen.ts/dist/node/UniNode';
 import { UniBreak } from 'unicoen.ts/dist/node/UniBreak';
 import { UniBinOp } from 'unicoen.ts/dist/node/UniBinOp';
+import { UniBlock } from 'unicoen.ts/dist/node/UniBlock';
 import { UniCast } from 'unicoen.ts/dist/node/UniCast';
 import { UniClassDec } from 'unicoen.ts/dist/node/UniClassDec';
 import { UniContinue } from 'unicoen.ts/dist/node/UniContinue';
@@ -65,6 +66,7 @@ import {
 type NodeClass = abstract new (...args: any[]) => object;
 
 const KINDS: Array<[NodeClass, string]> = [
+  [UniBlock, 'compound'],
   [UniDoWhile, 'doWhile'],
   [UniWhile, 'while'],
   [UniEnhancedFor, 'for'],
@@ -179,10 +181,10 @@ function detailOf(
 const declarationText = (declaration: VariableDeclarationDetail): string =>
   [
     `type: ${declaration.type}`,
-    `storage class: ${declaration.storageClasses.join(', ') || 'none'}`,
-    `qualifiers: ${declaration.qualifiers.join(', ') || 'none'}`,
+    `storage-class specifiers: ${declaration.storageClasses.join(', ') || 'none'}`,
+    `type qualifiers: ${declaration.qualifiers.join(', ') || 'none'}`,
     `identifier: ${declaration.identifier}`,
-    `value: ${declaration.initialValue || 'uninitialized'}`,
+    `initializer: ${declaration.initialValue || 'none'}`,
   ].join('\n');
 
 const unique = (values: string[]): string[] =>
@@ -529,7 +531,7 @@ function typedefDetails(
 const typeDeclarationText = (declaration: TypeDeclarationDetail): string =>
   [
     `type: ${declaration.type}`,
-    `qualifiers: ${declaration.qualifiers.join(', ') || 'none'}`,
+    `type qualifiers: ${declaration.qualifiers.join(', ') || 'none'}`,
     `${declaration.nameKind === 'tag' ? 'tag' : 'typedef name'}: ${
       declaration.name || 'none'
     }`,
@@ -561,7 +563,7 @@ const enumeratorText = (declaration: EnumeratorDetail): string =>
 const recordFieldText = (declaration: RecordFieldDetail): string =>
   [
     `type: ${declaration.type}`,
-    `structure or union: ${declaration.record}`,
+    `containing structure or union type: ${declaration.record}`,
     `identifier: ${declaration.identifier}`,
   ].join('\n');
 
@@ -708,7 +710,7 @@ function typedefAliases(code: string, masked: string): Construct[] {
 /**
  * Aggregate definitions as they appear in the source, before the execution
  * passes erase enum definitions and before the mapper wraps records in a
- * variable declaration. A record followed by an object declarator ends at its
+ * object declaration. A structure or union specifier followed by an object declarator ends at its
  * closing brace, leaving that trailing declarator to the AST's variable mark.
  *
  * Typedefs are read here too, bodies and aliases alike: the parser keeps only
@@ -789,6 +791,111 @@ export function typeDeclarations(code: string): Construct[] {
  * hovering `for (i = 0; i < n; i++)` is asking about what they wrote, and the
  * mapper's own spelling of an expression is not always that.
  */
+/**
+ * A `switch`'s labels, in the order it writes them, spelled as it writes them.
+ *
+ * These are read from the source rather than from the tree because the tree
+ * does not have them. The mapper folds stacked labels into one case - `case 1:
+ * case 2:` arrives as a single unit holding the constant `1` - so a listing
+ * built from `node.cases` silently drops every label that shares a body, which
+ * is exactly the shape a reader most needs spelled out. Reading the text also
+ * keeps a character constant looking like one: the tree turns `'a'` into the
+ * string `a`, and `case a` is a different program.
+ *
+ * No range is attached. A label is two tokens around a constant and the useful
+ * span differs between them; a clause without a range simply cannot be
+ * hovered, which costs nothing here because the statement view is where these
+ * are read.
+ */
+function caseClauses(node: any, source: string): ConstructClause[] {
+  const range = node === null ? null : node.codeRange;
+  if (!range || !range.begin || !range.end) {
+    return [];
+  }
+  return labelsWrittenIn(sourceForRange(source, range)).map((text) => ({
+    label: 'clauseCase',
+    text,
+  }));
+}
+
+/**
+ * The labels written at the top level of one `switch` body.
+ *
+ * Depth keeps a `switch` nested inside a case from lending its labels to the
+ * one around it, and literals and comments are stepped over so that a `case`
+ * written inside a string is text rather than a label.
+ */
+function labelsWrittenIn(text: string): string[] {
+  const labels: string[] = [];
+  const isWord = (at: number): boolean => /[A-Za-z0-9_]/.test(text[at] ?? '');
+  /** Steps over a comment or a literal, or returns the same position. */
+  const skip = (at: number): number => {
+    if (text[at] === '/' && text[at + 1] === '/') {
+      let j = at + 2;
+      while (j < text.length && text[j] !== '\n') {
+        j += 1;
+      }
+      return j;
+    }
+    if (text[at] === '/' && text[at + 1] === '*') {
+      let j = at + 2;
+      while (j < text.length && !(text[j] === '*' && text[j + 1] === '/')) {
+        j += 1;
+      }
+      return Math.min(text.length, j + 2);
+    }
+    if (text[at] === '"' || text[at] === "'") {
+      const quote = text[at];
+      let j = at + 1;
+      while (j < text.length && text[j] !== quote) {
+        j += text[j] === '\\' ? 2 : 1;
+      }
+      return Math.min(text.length, j + 1);
+    }
+    return at;
+  };
+  let depth = 0;
+  let i = 0;
+  while (i < text.length) {
+    const stepped = skip(i);
+    if (stepped !== i) {
+      i = stepped;
+      continue;
+    }
+    if (text[i] === '{') {
+      depth += 1;
+      i += 1;
+      continue;
+    }
+    if (text[i] === '}') {
+      depth -= 1;
+      i += 1;
+      continue;
+    }
+    if (depth !== 1) {
+      i += 1;
+      continue;
+    }
+    if (text.startsWith('default', i) && !isWord(i - 1) && !isWord(i + 7)) {
+      labels.push('default');
+      i += 7;
+      continue;
+    }
+    if (text.startsWith('case', i) && !isWord(i - 1) && !isWord(i + 4)) {
+      let j = i + 4;
+      while (j < text.length && text[j] !== ':') {
+        const over = skip(j);
+        j = over === j ? j + 1 : over;
+      }
+      labels.push(`case ${normalizeSpace(text.slice(i + 4, j)).trim()}`.trim());
+      i = j + 1;
+      continue;
+    }
+    i += 1;
+  }
+  return labels;
+}
+
 function clausesOf(
   node: any,
   kind: string,
@@ -829,8 +936,15 @@ function clausesOf(
     case 'if':
     case 'while':
     case 'doWhile':
-    case 'switch':
       return clause('clauseCondition', node.cond);
+    // A `switch` is its labels as much as its controlling expression: the
+    // reader's question is which of them the value selects, and a record
+    // naming only the expression cannot be read against the answer.
+    case 'switch':
+      return [
+        ...clause('clauseCondition', node.cond),
+        ...caseClauses(node, source),
+      ];
     case 'for':
       return [
         ...clause('clauseInitialization', node.init),
@@ -992,14 +1106,15 @@ export function outline(
     node: any,
     automaticStorage: boolean = false,
     containingRecord: string | null = null,
-    enclosure: EnclosingConstruct[] = []
+    enclosure: EnclosingConstruct[] = [],
+    parent: any = null
   ) => {
     if (node === null || typeof node !== 'object') {
       return;
     }
     if (Array.isArray(node)) {
       node.forEach((child) =>
-        visit(child, automaticStorage, containingRecord, enclosure)
+        visit(child, automaticStorage, containingRecord, enclosure, parent)
       );
       return;
     }
@@ -1008,7 +1123,15 @@ export function outline(
     }
     const isRecordField =
       containingRecord !== null && node instanceof UniVariableDec;
-    const kind = isRecordField ? 'recordField' : kindOf(node);
+    const parsedKind = isRecordField ? 'recordField' : kindOf(node);
+    // Function and control-flow bodies are already named by their owning
+    // construct. A block that is itself an item in another block is a compound
+    // statement in its own right. Requiring that parent also keeps a recovery
+    // UniBlock from incomplete source out of the outline.
+    const kind =
+      parsedKind === 'compound' && !(parent instanceof UniBlock)
+        ? null
+        : parsedKind;
     const range = node.codeRange;
     if (kind !== null && range && range.begin && range.end) {
       const declarations =
@@ -1098,7 +1221,13 @@ export function outline(
         : enclosure;
     for (const field of Array.from(node.fields.keys()) as string[]) {
       if (field !== 'comments' && field !== 'codeRange') {
-        visit(node[field], childAutomaticStorage, childRecord, childEnclosure);
+        visit(
+          node[field],
+          childAutomaticStorage,
+          childRecord,
+          childEnclosure,
+          node
+        );
       }
     }
   };

@@ -70,9 +70,9 @@ export const formatVariableDeclaration = (
   fact(strings.qualifiers, declaration.qualifiers.join(', ') || strings.none),
   fact(strings.identifier, declaration.identifier, true),
   fact(
-    strings.value,
+    strings.initializer,
     declaration.initialValue === null
-      ? strings.uninitialized
+      ? strings.noInitializer
       : declaration.initialValue,
     true
   ),
@@ -136,7 +136,7 @@ export const formatFunctionDeclaration = (
         )
       )),
   fact(
-    strings.storageClass,
+    strings.functionSpecifiers,
     declaration.storageClasses.join(', ') || strings.none
   ),
   fact(
@@ -348,7 +348,16 @@ export class HoverTextSource {
     // have. Falling back to the marker keeps simple, unexpanded statements.
     const range = this.expression?.range ?? this.codeRange;
     const exited = this.exitedLoopRecord();
-    if (exited !== null) {
+    const construct =
+      range === null ? null : statementConstructAt(this.constructs, range);
+    // The loop that has just ended explains the step only where the marker has
+    // nothing of its own to say. It used to explain every step it was attached
+    // to, so a reader standing on the `switch` after a `do`-`while` was told
+    // about the loop they had left rather than about the statement in front of
+    // them - and the loop's own record was the same one shown on the step
+    // before. Where the marker is on a construct, the exit stays as a note
+    // beside it: how control reached this statement, not what it is.
+    if (construct === null && exited !== null) {
       return {
         statement: this.constructRecord(exited.construct),
         context: `${strings.statementLoopExitedOnLine} ${exited.conditionLine}`,
@@ -358,12 +367,20 @@ export class HoverTextSource {
     if (range === null) {
       return emptyStatementExplanation();
     }
-    const construct = statementConstructAt(this.constructs, range);
     return {
       statement:
         construct === null
           ? this.constructStateRecord(range)
           : this.constructRecord(construct),
+      ...(exited === null
+        ? {}
+        : {
+            context: `${strings.statementOnLine} ${range.begin.y} · ${nameOfKind(
+              exited.construct.kind
+            )} ${strings.onLine} ${exited.conditionLine} ${
+              strings.statementLoopAlsoEnded
+            } ${exited.value}`,
+          }),
       parts: this.expressionParts(source),
     };
   }
@@ -376,11 +393,14 @@ export class HoverTextSource {
   private exitedLoopRecord(): {
     construct: Construct;
     conditionLine: number;
+    /** What the test came to, which is the whole of why the loop ended. */
+    value: string;
   } | null {
     if (this.expression !== null) {
       return null;
     }
     let found: Construct | null = null;
+    let value = '0';
     const size = (construct: Construct): number =>
       (construct.endLine - construct.line) * 1000 +
       (construct.endColumn - construct.column);
@@ -404,6 +424,9 @@ export class HoverTextSource {
         (found === null || size(construct) < size(found))
       ) {
         found = construct;
+        value =
+          state.facts.find((fact) => fact.label === 'factConditionValue')
+            ?.value ?? '0';
       }
     }
     if (found === null) {
@@ -415,6 +438,7 @@ export class HoverTextSource {
     return {
       construct: found,
       conditionLine: condition?.range?.begin.y ?? found.line,
+      value,
     };
   }
 
@@ -438,9 +462,26 @@ export class HoverTextSource {
         found = state;
       }
     }
-    return found === null
-      ? null
-      : { title: nameOfKind(found.kind), facts: found.facts.map(runtimeFact) };
+    if (found === null) {
+      return null;
+    }
+    // The runtime facts alone say what the construct is doing without saying
+    // what it is. Standing on `case 2:` inside a `switch`, the reader is asked
+    // to hold the labels in their head from the line the switch opened on -
+    // which is the one thing the construct record already knows.
+    const state = found;
+    const declared = this.constructs.find(
+      (one) =>
+        one.kind === state.kind &&
+        one.line === state.range.begin.y &&
+        one.column === state.range.begin.x
+    );
+    return {
+      title: nameOfKind(state.kind),
+      facts: (declared?.clauses ?? [])
+        .map(clauseFact)
+        .concat(state.facts.map(runtimeFact)),
+    };
   }
 
   /**
@@ -507,10 +548,25 @@ export class HoverTextSource {
    * declarator is written - three facts, each held by whoever owns it.
    */
   declarationOf(object: string): Construct | null {
-    const variable = this.variables.find((one) => one.key === object);
+    // Member and element rows extend their containing object's key. They have
+    // storage of their own in the memory map, but their source declaration is
+    // the declaration of the outermost named object.
+    const variable = this.variables
+      .filter((one) => one.key === object || object.startsWith(`${one.key}-`))
+      .sort((left, right) => right.key.length - left.key.length)[0];
     if (typeof variable === 'undefined') {
       return null;
     }
+    const owner = variable.key.slice(0, -(variable.name.length + 1));
+    const functions = this.constructs.filter(
+      (construct) =>
+        construct.kind === 'functionDec' &&
+        construct.declaredFunction?.isDefinition === true
+    );
+    const functionAt = (line: number): Construct | undefined =>
+      functions.find(
+        (construct) => construct.line <= line && line <= construct.endLine
+      );
     let found: Construct | null = null;
     const size = (construct: Construct) =>
       (construct.endLine - construct.line) * 1000 + construct.endColumn;
@@ -518,11 +574,33 @@ export class HoverTextSource {
       const declared = (construct.variableDeclarations ?? []).some(
         (declaration) => declaration.identifier === variable.name
       );
-      if (declared && (found === null || size(construct) < size(found))) {
+      const containing = functionAt(construct.line);
+      const inRightFrame =
+        owner === 'GLOBAL'
+          ? typeof containing === 'undefined'
+          : containing?.declaredFunction?.identifier === owner;
+      if (
+        declared &&
+        inRightFrame &&
+        (found === null || size(construct) < size(found))
+      ) {
         found = construct;
       }
     }
-    return found;
+    if (found !== null) {
+      return found;
+    }
+    // Parameters live in a frame like locals but are declared by the function
+    // definition itself, which is the range ordinary go-to-declaration uses.
+    return (
+      functions.find(
+        (construct) =>
+          construct.declaredFunction?.identifier === owner &&
+          construct.declaredFunction?.parameters.some(
+            (parameter) => parameter.identifier === variable.name
+          ) === true
+      ) ?? null
+    );
   }
 
   /**

@@ -22,7 +22,7 @@ import strings from '../../strings';
 export interface PlivetConsoleOptions {
   /** Initial transcript. */
   output?: string;
-  /** Permanent heading above input and output. */
+  /** Collapsible heading above input and output. */
   title?: string;
   /**
    * A line the user submitted, without its terminating newline. Empty is a
@@ -47,7 +47,7 @@ const defaults = {
 };
 
 export class PlivetConsole {
-  readonly root: HTMLDivElement;
+  readonly root: HTMLDetailsElement;
 
   private readonly transcript: HTMLPreElement;
   private readonly field: HTMLTextAreaElement;
@@ -60,12 +60,12 @@ export class PlivetConsole {
     this.onInput = options.onInput;
     this.inputHint = config.inputHint;
 
-    this.root = document.createElement('div');
+    this.root = document.createElement('details');
     this.root.className = 'plivet-console';
     this.root.setAttribute('role', 'region');
     this.root.setAttribute('aria-label', config.title);
 
-    const title = document.createElement('h2');
+    const title = document.createElement('summary');
     title.className = 'plivet-console-title';
     title.textContent = config.title;
 
@@ -91,6 +91,10 @@ export class PlivetConsole {
     this.root.append(title, this.transcript, this.field);
     parent.appendChild(this.root);
 
+    // Output supplied at construction represents program I/O already in
+    // progress, so it follows the same expansion rule as later stdout.
+    this.root.open = config.output !== '';
+
     this.setDark(config.dark);
     this.setFontSize(config.fontSize);
     this.setAccepting(false);
@@ -102,6 +106,7 @@ export class PlivetConsole {
       return;
     }
     this.transcript.textContent = output;
+    this.root.open = true;
     this.scrollToEnd();
   }
 
@@ -119,6 +124,7 @@ export class PlivetConsole {
       this.fitField();
       return;
     }
+    this.root.open = true;
     // The program is waiting, and the editor is read-only for the duration of
     // the session, so there is nothing else the keyboard could usefully do.
     this.field.focus();

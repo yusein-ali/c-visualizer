@@ -8,9 +8,9 @@ import './views.css';
  * Every other view says what memory holds now. This says what it held before,
  * which is the question a reader asks when a value is wrong and they are
  * looking for the statement that made it wrong. The frame is the column that
- * makes it worth a view of its own: a write inside a callee is a write to the
- * callee's own copy, and a log that names the frame shows C's by-value
- * passing happening rather than asserting it.
+ * makes it worth a view of its own: it helps distinguish assignment to a
+ * parameter object from assignment through a pointer to an object whose
+ * lifetime began in a caller.
  */
 export class MutationView {
   readonly root: HTMLDetailsElement;

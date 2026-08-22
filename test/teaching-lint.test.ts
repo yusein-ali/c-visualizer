@@ -24,7 +24,7 @@ const rules = (code: string): string[] =>
 const only = (code: string, rule: string): LintDiagnostic[] =>
   lint(code).filter((diagnostic) => diagnostic.rule === rule);
 
-describe('scanf without the address of its target', () => {
+describe('scanf without a pointer to its destination object', () => {
   it('reports the argument, and offers the & as a fix', () => {
     const code = `int main(void) {
   int n;
@@ -58,7 +58,7 @@ describe('scanf without the address of its target', () => {
     expect(rules(code)).not.toContain('scanf-address');
   });
 
-  it('says nothing about an array, which is already an address', () => {
+  it('accepts an array argument, which is converted to a pointer here', () => {
     const code = `int main(void) {
   char name[8];
   scanf("%s", name);
@@ -69,7 +69,7 @@ describe('scanf without the address of its target', () => {
   });
 });
 
-describe('an assignment used as a condition', () => {
+describe('an assignment used as a controlling expression', () => {
   it('reports it, and offers == as a fix', () => {
     const code = `int main(void) {
   int n = 0;
@@ -80,7 +80,7 @@ describe('an assignment used as a condition', () => {
     const [found] = only(code, 'assignment-as-condition');
     expect(found).toBeDefined();
     expect(found.line).toBe(3);
-    expect(found.message).toContain('== compares');
+    expect(found.message).toContain('== is the equality operator');
     expect(found.fix).toEqual({
       label: 'Compare with ==',
       line: 3,
@@ -91,7 +91,7 @@ describe('an assignment used as a condition', () => {
     });
   });
 
-  it('reports one in a while as well as in an if', () => {
+  it('reports one in a while statement as well as in an if statement', () => {
     const code = `int main(void) {
   int n = 0;
   while (n = 1) { break; }
@@ -122,8 +122,8 @@ describe('a format string that disagrees with its arguments', () => {
 `;
     const [found] = only(code, 'format-arguments');
     expect(found).toBeDefined();
-    expect(found.message).toContain('2 conversions');
-    expect(found.message).toContain('1 argument');
+    expect(found.message).toContain('2 conversion specifications');
+    expect(found.message).toContain('1 corresponding argument');
   });
 
   it('does not count a doubled per cent sign as a conversion', () => {
@@ -158,7 +158,7 @@ describe('a format string that disagrees with its arguments', () => {
     expect(rules(code)).not.toContain('format-arguments');
   });
 
-  it('reads what a scanf argument points at, not the pointer itself', () => {
+  it('checks the type of the object a scanf argument points to', () => {
     const code = `int main(void) {
   double d = 0.0;
   scanf("%d", &d);
@@ -167,12 +167,12 @@ describe('a format string that disagrees with its arguments', () => {
 `;
     const [found] = only(code, 'format-arguments');
     expect(found).toBeDefined();
-    expect(found.message).toContain('points at');
+    expect(found.message).toContain('points to');
   });
 });
 
-describe('a variable read before it holds anything', () => {
-  it('reports the read', () => {
+describe('an object evaluated while its value is indeterminate', () => {
+  it('reports the evaluation', () => {
     const code = `int main(void) {
   int n;
   return n + 1;
@@ -181,7 +181,7 @@ describe('a variable read before it holds anything', () => {
     const [found] = only(code, 'uninitialized-read');
     expect(found).toBeDefined();
     expect(found.line).toBe(3);
-    expect(found.message).toContain('not defined');
+    expect(found.message).toContain('undefined behavior');
   });
 
   it('counts an assignment in either arm of a branch', () => {
@@ -196,7 +196,7 @@ describe('a variable read before it holds anything', () => {
     expect(rules(code)).not.toContain('uninitialized-read');
   });
 
-  it('counts having its address taken as a value arriving', () => {
+  it('treats taking its address as a possible store through the pointer', () => {
     const code = `int main(void) {
   int n;
   scanf("%d", &n);
@@ -216,14 +216,14 @@ describe('a variable read before it holds anything', () => {
     expect(only(code, 'uninitialized-read').length).toBe(1);
   });
 
-  it('says nothing about an argument, which arrives with a value', () => {
+  it('says nothing about a parameter, which receives an argument value', () => {
     const code = `int twice(int n) { return n * 2; }
 int main(void) { return twice(2); }
 `;
     expect(rules(code)).not.toContain('uninitialized-read');
   });
 
-  it('does not mistake a structure or union member for a variable read', () => {
+  it('does not mistake a member name for an object-identifier evaluation', () => {
     const code = `struct Pair { int left; int right; };
 union Number { int whole; char byte; };
 int main(void) {
@@ -245,7 +245,14 @@ int main(void) { return left; }
   });
 });
 
-describe('a function that can reach its end without returning', () => {
+describe('a non-void function whose closing brace is reachable', () => {
+  it('does not treat a function prototype as a body with no return', () => {
+    const code = `int helper(int value);
+int main(void) { return helper(3); }
+`;
+    expect(rules(code)).not.toContain('missing-return');
+  });
+
   it('reports the signature', () => {
     const code = `int pick(int n) {
   if (n) { return 1; }
@@ -277,7 +284,7 @@ int main(void) { return 0; }
     expect(rules(code)).not.toContain('missing-return');
   });
 
-  it('says nothing about main, which returns zero on its own', () => {
+  it('says nothing about main, whose closing brace returns zero', () => {
     const code = `int main(void) {
   int n = 1;
   n = n + 1;

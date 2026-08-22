@@ -1,11 +1,11 @@
 import { dia, shapes } from '@joint/core';
 import {
   ArrowGeometry,
+  CallExpansionModel,
   Geometry,
   MemoryGeometry,
   MemoryRegion,
   ExpressionModel,
-  ExpressionNodeModel,
   FoldState,
   Point,
   StepModel,
@@ -17,8 +17,11 @@ import strings from '../../strings';
 import { IconName, iconFor } from '../controls/icons';
 import { MutationView } from '../views';
 import { graphGeometry, memoryGeometry } from './geometry';
+import { expressionGeometry } from './expressionLayout';
+import { expressionNodeOf } from './ExpressionNode';
 import { ViewPanelHandle, viewPanel } from './ViewPanel';
 import { callStackRows } from './callStack';
+import { callHeading } from './callSection';
 import { emptyStatementExplanation, StatementExplanation } from '../records';
 import { MemoryNode, memoryNodeOf } from './MemoryNode';
 import { StackTable, stackTableOf } from './StackTable';
@@ -46,14 +49,30 @@ export interface PlivetGraphOptions {
    * and what the editor can mark the declaration of.
    */
   onFocus?: (object: string | null) => void;
+  /** Follow a memory row back to the source that declared what it shows. */
+  onNavigate?: (target: MemoryNavigationTarget) => void;
 }
+
+/** What a double-clicked row in the memory view names in the source. */
+export type MemoryNavigationTarget =
+  | { kind: 'object'; key: string }
+  | { kind: 'function'; name: string };
+
+/** Functions share the row-key mechanism with objects, but name definitions. */
+export const memoryNavigationTarget = (
+  model: StepModel,
+  key: string
+): MemoryNavigationTarget => {
+  const fn = model.functions.find(
+    (candidate) => `text-${candidate.name}` === key
+  );
+  return typeof fn === 'undefined'
+    ? { kind: 'object', key }
+    : { kind: 'function', name: fn.name };
+};
 
 /** The class the focused object's boxes are painted through. */
 const FOCUS_CLASS = 'plivet-object--focus';
-
-/** How many levels of operands and operators the expression expands into. */
-const depthOf = (node: ExpressionNodeModel): number =>
-  node.children.length === 0 ? 0 : 1 + Math.max(...node.children.map(depthOf));
 
 /**
  * The canvas is read from cause to state. Statement and Call stack share its
@@ -65,8 +84,6 @@ const depthOf = (node: ExpressionNodeModel): number =>
 const HEADING_HEIGHT = 26;
 /** The room between a heading and the section it names. */
 const HEADING_GAP = 10;
-/** One line of the statement's reading, and the room under the last of them. */
-const STATEMENT_LINE_HEIGHT = 20;
 const CARD_TITLE_HEIGHT = 38;
 const CARD_CONTEXT_HEIGHT = 28;
 const CARD_DESCRIPTION_HEIGHT = 58;
@@ -109,7 +126,32 @@ export const wrappedTextHeight = (
   return Math.max(minimum, renderedLines * 18 + 12);
 };
 
-type CanvasSection = 'statement' | 'callStack' | 'expression' | 'memory';
+/** An unavailable expression has no empty-state body to disclose. */
+export const expressionSectionIsCollapsed = (
+  expression: ExpressionModel | null,
+  manuallyCollapsed: boolean
+): boolean => expression === null || manuallyCollapsed;
+
+/**
+ * The disclosure bands on the canvas. The four fixed ones are the layout; the
+ * `call:` keys are one per call expanded at the current step, and they carry
+ * the call site's own key so a reader who collapses one keeps it collapsed
+ * while the program runs rather than having it reopen under them every time
+ * the step changes.
+ */
+type CanvasSection =
+  | 'statement'
+  | 'callStack'
+  | 'expression'
+  | 'memory'
+  | `call:${string}`;
+
+const isCanvasSection = (value: string): value is CanvasSection =>
+  value === 'statement' ||
+  value === 'callStack' ||
+  value === 'expression' ||
+  value === 'memory' ||
+  value.startsWith('call:');
 
 const lowered = (point: Point, dy: number): Point => ({
   x: point.x,
@@ -193,6 +235,7 @@ export class PlivetGraph {
   /** The last object reported out, so one hover is one call. */
   private reported: string | null = null;
   private readonly onFocus?: (object: string | null) => void;
+  private readonly onNavigate?: (target: MemoryNavigationTarget) => void;
 
   constructor(
     private readonly container: HTMLElement,
@@ -201,6 +244,7 @@ export class PlivetGraph {
     this.model = options.model || emptyStepModel();
     this.explanation = options.explanation ?? emptyStatementExplanation();
     this.onFocus = options.onFocus;
+    this.onNavigate = options.onNavigate;
     if (typeof options.views !== 'undefined') {
       this.view.apply(options.views);
     }
@@ -263,23 +307,25 @@ export class PlivetGraph {
         target === null
           ? null
           : target.closest(
-              '[data-section-target], [data-fold-target], [data-collapse-target]'
+              '[data-section-target], [data-fold-target], [data-frame-target], [data-collapse-target]'
             );
       if (hit === null) {
         return;
       }
       const group = hit.getAttribute('data-fold-target');
+      const frame = hit.getAttribute('data-frame-target');
       const segment = hit.getAttribute('data-collapse-target');
       const section = hit.getAttribute('data-section-target');
-      if (
-        section === 'statement' ||
-        section === 'callStack' ||
-        section === 'expression' ||
-        section === 'memory'
-      ) {
+      if (section !== null && isCanvasSection(section)) {
         this.toggleSection(section);
       } else if (group !== null) {
         this.folds.toggle(decodeURIComponent(group));
+      } else if (frame !== null) {
+        // Like a segment, and for the same reason: a frame nobody has clicked
+        // is drawn from where the program is rather than from a stored
+        // answer, so the click flips what the reader can see.
+        const key = decodeURIComponent(frame);
+        this.folds.toggleFrame(key, this.frameIsFolded(key));
       } else if (segment !== null) {
         // What the click flips is what the user is looking at: a segment
         // nobody has clicked is drawn collapsed when it is empty, and the
@@ -302,6 +348,9 @@ export class PlivetGraph {
       this.pointedAt(event)
     );
     this.paperHost.addEventListener('mouseleave', () => this.report(null));
+    this.paperHost.addEventListener('dblclick', (event: MouseEvent) =>
+      this.navigateFromMemory(event)
+    );
 
     this.resizeObserver =
       typeof ResizeObserver === 'undefined'
@@ -311,6 +360,18 @@ export class PlivetGraph {
       this.resizeObserver.observe(this.container);
     }
     this.render(this.model);
+  }
+
+  /** How the frame with this key is drawn at the moment, folded or not. */
+  private frameIsFolded(key: string): boolean {
+    for (const segment of this.memory.segments) {
+      for (const row of segment.rows) {
+        if (row.kind === 'group' && row.fold?.target === key) {
+          return row.collapsed === true;
+        }
+      }
+    }
+    return false;
   }
 
   render(model: StepModel, explanation?: StatementExplanation): void {
@@ -353,6 +414,18 @@ export class PlivetGraph {
       cells.push(...this.expressionSectionCells(model, ORIGIN_X, nextY));
       nextY =
         Math.max(this.contentHeight, nextY + HEADING_HEIGHT) + SECTION_GAP;
+
+      // One band per call, holding that call's arguments together. These
+      // follow the Expression switch rather than carrying one each: a View
+      // menu that grew an entry per call would change length with the step.
+      // They do not follow the tree's own fold, because collapsing the
+      // statement tree to read a call alone is the reason a reader would
+      // collapse it.
+      for (const call of model.callExpansions) {
+        cells.push(...this.callSectionCells(call, ORIGIN_X, nextY));
+        nextY =
+          Math.max(this.contentHeight, nextY + HEADING_HEIGHT) + SECTION_GAP;
+      }
     }
 
     const baseMemory = memoryGeometry(model, this.folds, this.view);
@@ -462,6 +535,23 @@ export class PlivetGraph {
     this.report(object === null ? null : decodeURIComponent(object));
   }
 
+  /** Follow any box in a memory row; non-memory canvas cells carry no key. */
+  private navigateFromMemory(event: MouseEvent): void {
+    if (event.button !== 0 || typeof this.onNavigate === 'undefined') {
+      return;
+    }
+    const target = event.target as Element | null;
+    const hit = target === null ? null : target.closest('[data-object-key]');
+    const encoded = hit?.getAttribute('data-object-key');
+    if (encoded === null || typeof encoded === 'undefined') {
+      return;
+    }
+    event.preventDefault();
+    this.onNavigate(
+      memoryNavigationTarget(this.model, decodeURIComponent(encoded))
+    );
+  }
+
   private report(object: string | null): void {
     if (object === this.reported) {
       return;
@@ -473,6 +563,12 @@ export class PlivetGraph {
   }
 
   private toggleSection(section: CanvasSection): void {
+    // The unavailable-expression heading is an automatic collapsed state, not
+    // a user preference. Ignore clicks on it so the next real expression can
+    // open normally instead of inheriting a click made on an empty section.
+    if (section === 'expression' && this.model.expression === null) {
+      return;
+    }
     if (this.collapsed.has(section)) {
       this.collapsed.delete(section);
     } else {
@@ -537,9 +633,9 @@ export class PlivetGraph {
     x: number,
     y: number,
     section: CanvasSection,
-    width: number
+    width: number,
+    collapsed: boolean = this.collapsed.has(section)
   ): dia.Element {
-    const collapsed = this.collapsed.has(section);
     const heading = new shapes.standard.Rectangle({ z: 4 });
     heading.position(x, y);
     heading.resize(width, HEADING_HEIGHT);
@@ -702,31 +798,60 @@ export class PlivetGraph {
     originX: number,
     originY: number
   ): dia.Cell[] {
+    const collapsed = expressionSectionIsCollapsed(
+      model.expression,
+      this.collapsed.has('expression')
+    );
     const cells: dia.Cell[] = [
       this.sectionHeading(
         strings.graphExpressionHeading,
         originX,
         originY,
         'expression',
-        TWO_COLUMN_WIDTH
+        TWO_COLUMN_WIDTH,
+        collapsed
       ),
     ];
-    if (this.collapsed.has('expression')) {
+    if (collapsed || model.expression === null) {
       return cells;
     }
     const bodyY = originY + HEADING_HEIGHT + HEADING_GAP;
-    if (model.expression === null) {
-      cells.push(
-        this.messageLine(
-          [strings.expressionNotAvailable],
-          originX,
-          bodyY,
-          TWO_COLUMN_WIDTH
-        )
-      );
-    } else {
-      cells.push(...this.expressionCells(model.expression, originX, bodyY));
+    cells.push(...this.expressionCells(model.expression, originX, bodyY));
+    return cells;
+  }
+
+  /**
+   * One call with its arguments, below the statement that makes it.
+   *
+   * The tree is rooted at the call operator, so the arguments stay under the
+   * thing that binds them; the heading carries the signature, so the reader
+   * can pair them left to right with the parameters they fill.
+   */
+  private callSectionCells(
+    call: CallExpansionModel,
+    originX: number,
+    originY: number
+  ): dia.Cell[] {
+    const section: CanvasSection = `call:${call.key}`;
+    const cells: dia.Cell[] = [
+      this.sectionHeading(
+        callHeading(call),
+        originX,
+        originY,
+        section,
+        TWO_COLUMN_WIDTH
+      ),
+    ];
+    if (this.collapsed.has(section)) {
+      return cells;
     }
+    cells.push(
+      ...this.expressionCells(
+        call.expression,
+        originX,
+        originY + HEADING_HEIGHT + HEADING_GAP
+      )
+    );
     return cells;
   }
 
@@ -923,40 +1048,6 @@ export class PlivetGraph {
     return cell;
   }
 
-  /** A plain full-width message, used when a visual section has no model. */
-  private messageLine(
-    lines: string[],
-    x: number,
-    y: number,
-    width: number
-  ): dia.Element {
-    const text = lines.join('\n');
-    const charactersPerLine = Math.max(1, Math.floor((width - 24) / 7.4));
-    const renderedLines = lines.reduce(
-      (count, line) =>
-        count + Math.max(1, Math.ceil(line.length / charactersPerLine)),
-      0
-    );
-    const height = Math.max(32, renderedLines * STATEMENT_LINE_HEIGHT);
-    const line = new shapes.standard.Rectangle({ z: 4 });
-    line.position(x, y);
-    line.resize(width, height);
-    line.attr({
-      body: { fill: 'none', stroke: 'none' },
-      label: {
-        text,
-        fill: 'var(--plivet-graph-message, #3c4a58)',
-        fontFamily: 'system-ui, sans-serif',
-        fontSize: 14,
-        ...leftAlignedLabel(2, height),
-        textWrap: { width: -12, height: -6 },
-      },
-    });
-    this.contentWidth = Math.max(this.contentWidth, x + width + ORIGIN_X);
-    this.contentHeight = Math.max(this.contentHeight, y + height + ORIGIN_X);
-    return line;
-  }
-
   private expressionCells(
     expression: ExpressionModel,
     originX: number,
@@ -967,106 +1058,40 @@ export class PlivetGraph {
     const gapX = 18;
     const gapY = 30;
     const treeTop = originY;
-    const widths = new Map<string, number>();
-    const measure = (node: ExpressionNodeModel): number => {
-      const width =
-        node.children.length === 0
-          ? 1
-          : node.children.reduce((sum, child) => sum + measure(child), 0);
-      widths.set(node.key, width);
-      return width;
-    };
-    const totalLeaves = measure(expression.root);
+    const geometry = expressionGeometry(
+      expression.root,
+      { x: originX, y: treeTop },
+      { nodeWidth, nodeHeight, gapX, gapY }
+    );
     const cells: dia.Cell[] = [];
-    const nodes = new Map<string, shapes.standard.Rectangle>();
-
-    const place = (
-      node: ExpressionNodeModel,
-      leftLeaf: number,
-      depth: number
-    ): void => {
-      const leaves = widths.get(node.key) || 1;
-      const x =
-        originX + (leftLeaf + leaves / 2) * (nodeWidth + gapX) - nodeWidth / 2;
-      const y = treeTop + depth * (nodeHeight + gapY);
-      const element = new shapes.standard.Rectangle({ z: 4 });
-      element.position(x, y);
-      element.resize(nodeWidth, nodeHeight);
-      element.attr({
-        body: {
-          fill:
-            node.kind === 'assignment'
-              ? 'var(--plivet-graph-expression-assignment, #fff0c2)'
-              : node.kind === 'operator'
-                ? 'var(--plivet-graph-expression-operator, #dcecff)'
-                : 'var(--plivet-graph-expression-operand, #f4f4f4)',
-          stroke: 'var(--plivet-graph-expression-border, #202020)',
-          strokeWidth: node.kind === 'operand' ? 1 : 2,
-          rx: 5,
-          ry: 5,
-        },
-        label: {
-          // The tree is the expansion: an operator over the operands it takes
-          // and what it made of them. Nothing here needs numbering.
-          // An operator that has not run yet is worth nothing yet, and an
-          // empty line says that better than a sentence about it does.
-          text:
-            node.value === null ? node.text : `${node.text}\n= ${node.value}`,
-          fill: 'var(--plivet-graph-ink, #111111)',
-          fontFamily: "Consolas, 'Courier New', monospace",
-          fontSize: 13,
-          textWrap: { width: -12, height: -8, ellipsis: true },
+    for (const placed of geometry.nodes) {
+      cells.push(expressionNodeOf(placed));
+    }
+    for (const connected of geometry.links) {
+      const link = new shapes.standard.Link({ z: 3 });
+      link.source(connected.source);
+      link.target(connected.target);
+      if (connected.vertices.length !== 0) {
+        link.vertices(connected.vertices);
+      }
+      link.connector('rounded', { radius: 5 });
+      link.attr({
+        line: {
+          stroke: 'var(--plivet-graph-expression-link, #5c6773)',
+          strokeWidth: 1.5,
+          targetMarker: { type: 'none' },
         },
       });
-      nodes.set(node.key, element);
-      cells.push(element);
+      cells.push(link);
+    }
 
-      let childLeft = leftLeaf;
-      for (const child of node.children) {
-        place(child, childLeft, depth + 1);
-        childLeft += widths.get(child.key) || 1;
-      }
-    };
-    place(expression.root, 0, 0);
-
-    const connect = (node: ExpressionNodeModel): void => {
-      const parent = nodes.get(node.key);
-      if (typeof parent === 'undefined') {
-        return;
-      }
-      for (const child of node.children) {
-        const childElement = nodes.get(child.key);
-        if (typeof childElement !== 'undefined') {
-          const link = new shapes.standard.Link({ z: 3 });
-          link.source(parent, { anchor: { name: 'bottom' } });
-          link.target(childElement, { anchor: { name: 'top' } });
-          link.router('orthogonal', { padding: 8 });
-          link.connector('rounded', { radius: 5 });
-          link.attr({
-            line: {
-              stroke: 'var(--plivet-graph-expression-link, #5c6773)',
-              strokeWidth: 1.5,
-              targetMarker: { type: 'none' },
-            },
-          });
-          cells.push(link);
-        }
-        connect(child);
-      }
-    };
-    connect(expression.root);
-
-    const treeWidth = Math.max(
-      nodeWidth,
-      totalLeaves * (nodeWidth + gapX) - gapX
-    );
     this.contentWidth = Math.max(
       this.contentWidth,
-      originX + treeWidth + ORIGIN_X
+      originX + geometry.width + ORIGIN_X
     );
     this.contentHeight = Math.max(
       this.contentHeight,
-      treeTop + (depthOf(expression.root) + 1) * (nodeHeight + gapY) + ORIGIN_X
+      treeTop + geometry.height + ORIGIN_X
     );
     return cells;
   }

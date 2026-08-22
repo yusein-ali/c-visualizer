@@ -333,7 +333,7 @@ describe('function pointers: on the canvas', () => {
     const { states } = execute(
       `${H}int main(){ int (*op)(int, int) = add; op = sub; return 0; }`
     );
-    expect(rowFor(states, 'op')[2]).toBe('sub (0x1004)');
+    expect(rowFor(states, 'op')[2]).toBe('sub (0x1030)');
   });
 
   it('shows each element of an array of function pointers', () => {
@@ -342,7 +342,7 @@ describe('function pointers: on the canvas', () => {
     );
     expect(rowFor(states, 'ops')[0]).toBe('int (*[2])(int, int)');
     expect(rowFor(states, 'ops[0]')[3]).toBe('add (0x1000)');
-    expect(rowFor(states, 'ops[1]')[3]).toBe('sub (0x1004)');
+    expect(rowFor(states, 'ops[1]')[3]).toBe('sub (0x1030)');
   });
 
   it('says nothing about a pointer that holds nothing', () => {
@@ -367,7 +367,7 @@ describe('function pointers: hovering a variable', () => {
     const { states } = execute(
       `${H}int main(){ int (*op)(int, int) = sub; return 0; }`
     );
-    expect(hoverText(states, 'op')).toContain('value: sub (0x1004)');
+    expect(hoverText(states, 'op')).toContain('value: sub (0x1030)');
   });
 
   it('shows an address rather than a decimal for a pointer holding none', () => {
@@ -383,7 +383,7 @@ describe('function pointers: hovering a variable', () => {
     );
     const text = hoverText(states, 'ops');
     expect(text).toContain('type: int (*[2])(int, int)');
-    expect(text).toContain('[add (0x1000), sub (0x1004)]');
+    expect(text).toContain('[add (0x1000), sub (0x1030)]');
   });
 
   it('reports the same address the canvas draws', () => {

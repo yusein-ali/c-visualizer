@@ -20,7 +20,7 @@ export interface FilePanelOptions {
   /** Files chosen from the input. The caller reads and stores them. */
   onUpload?: (files: FileList) => void;
   onDelete?: (filename: string) => void;
-  /** Whether the panel starts open. It did, as a Bootstrap panel. */
+  /** Whether the panel starts open. Defaults to collapsed. */
   open?: boolean;
 }
 
@@ -36,7 +36,7 @@ export class FilePanel {
 
     this.root = document.createElement('details');
     this.root.className = 'plivet-files';
-    this.root.open = options.open !== false;
+    this.root.open = options.open ?? false;
 
     const summary = document.createElement('summary');
     summary.className = 'plivet-files__summary';

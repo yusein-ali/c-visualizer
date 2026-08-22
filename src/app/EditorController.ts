@@ -7,7 +7,10 @@ import {
   Response,
   RuntimeDiagnosticModel,
   DEBUG_STATE,
+  ExecutionSource,
+  FileSyntaxErrors,
   StepModel,
+  SourceLocation,
   SyntaxErrorModel,
 } from '../core';
 import strings from '../strings';
@@ -20,15 +23,27 @@ import {
   SessionJSON,
   PlivetEditor,
   ProgramCompletions,
+  goTo,
   rangeOf,
   TeachingDiagnostic,
 } from '../ui/editor';
-import { declarationFor, macroDefinitionLine } from './declarations';
+import {
+  declarationFor,
+  functionDefinitionFor,
+  macroDefinitionLine,
+} from './declarations';
 import { HoverTextSource } from './hoverText';
 import { libraryHelp, libraryNames } from './libraryHelp';
 import { Bus } from './emitter';
 import { TabBar } from '../ui/tabs';
 import type { ZOOM_COMMAND } from '../ui/controls';
+import type { MemoryNavigationTarget } from '../ui/graph';
+import type {
+  DiagnosticOptions,
+  ExternalDiagnostic,
+  SourceSnapshot,
+  Unsubscribe,
+} from './host';
 
 /**
  * The editor's place in the application: it holds the source, sends every
@@ -63,6 +78,10 @@ export interface EditorControllerOptions {
    * exercise usually takes.
    */
   editableRegions?: EditableRegion[];
+  /** Reports a complete immutable snapshot after any source change. */
+  onSourceChange?: (snapshot: SourceSnapshot) => void;
+  /** Reports tab changes, which do not themselves change the source revision. */
+  onActiveFileChange?: (path: string) => void;
 }
 
 /**
@@ -94,6 +113,42 @@ const asDiagnostic = (found: RuntimeDiagnosticModel): TeachingDiagnostic => ({
   endLine: found.endLine,
   endColumn: found.endColumn + 1,
 });
+
+const isPosition = (
+  value: ExternalDiagnostic['from'] | undefined
+): value is ExternalDiagnostic['from'] =>
+  typeof value !== 'undefined' &&
+  Number.isInteger(value.line) &&
+  0 <= value.line &&
+  Number.isInteger(value.column) &&
+  0 <= value.column;
+
+/** Host coordinates are zero-based and end-exclusive; editor rows are 1-based. */
+const externalDiagnostic = (
+  source: string,
+  found: ExternalDiagnostic
+): TeachingDiagnostic | null => {
+  if (
+    found.path === '' ||
+    found.message === '' ||
+    !['error', 'warning', 'info'].includes(found.severity) ||
+    !isPosition(found.from) ||
+    !isPosition(found.to) ||
+    found.to.line < found.from.line ||
+    (found.to.line === found.from.line && found.to.column < found.from.column)
+  ) {
+    return null;
+  }
+  return {
+    rule: found.code ?? source,
+    severity: found.severity,
+    message: found.message,
+    line: found.from.line + 1,
+    column: found.from.column,
+    endLine: found.to.line + 1,
+    endColumn: found.to.column,
+  };
+};
 
 /**
  * The library as the completion list wants it: a name, its signature and the
@@ -161,9 +216,29 @@ export class EditorController {
    * goes to its `#define` has only this list to resolve it against.
    */
   private expansions: Expansion[] = [];
+  /** The composed run's constructs, restored when execution returns to entry. */
+  private executionConstructs: Construct[] = [];
   private syntaxErrors: SyntaxErrorModel[] = [];
   private teachingLints: TeachingDiagnostic[] = [];
+  /** The tab whose parser and teaching diagnostics these arrays describe. */
+  private localDiagnosticsPath: string | null = null;
   private runtimeLints: TeachingDiagnostic[] = [];
+  /** Source text already checked in each tab, to avoid parsing on every call. */
+  private readonly checkedSources = new Map<string, string>();
+  /** Parser errors found across all files before Start/Run was refused. */
+  private readonly preflightErrors = new Map<string, SyntaxErrorModel[]>();
+  /** Findings supplied by each host service, then by source path. */
+  private readonly externalLints = new Map<
+    string,
+    Map<string, TeachingDiagnostic[]>
+  >();
+  private readonly sourceListeners = new Set<
+    (snapshot: SourceSnapshot) => void
+  >();
+  private readonly activeFileListeners = new Set<(path: string) => void>();
+  private revision = 0;
+  /** Prevent tab restoration and other internal document swaps becoming edits. */
+  private suppressEditorChange = false;
 
   constructor(mount: HTMLElement, options: EditorControllerOptions) {
     const {
@@ -174,9 +249,17 @@ export class EditorController {
       files,
       entry,
       editableRegions = [],
+      onSourceChange,
+      onActiveFileChange,
     } = options;
     this.bus = bus;
     this.client = client;
+    if (typeof onSourceChange !== 'undefined') {
+      this.sourceListeners.add(onSourceChange);
+    }
+    if (typeof onActiveFileChange !== 'undefined') {
+      this.activeFileListeners.add(onActiveFileChange);
+    }
     const opened =
       typeof files === 'undefined' || files.length === 0
         ? [{ path: strings.savedFileName, text: doc, session: null }]
@@ -244,6 +327,9 @@ export class EditorController {
         }
       }
     );
+    this.bus.slot('navigateMemory', (target: MemoryNavigationTarget) =>
+      this.navigateFromMemory(target)
+    );
     this.checkOnApproach();
     this.bus.slot('zoom', (command: ZOOM_COMMAND) => {
       if (command === 'In') {
@@ -304,9 +390,10 @@ export class EditorController {
    */
   replaceCode(code: string): void {
     this.bus.signal('debug', 'Stop');
-    this.editor.replaceCode(code);
+    this.withSuppressedEditorChange(() => this.editor.replaceCode(code));
     this.sourcecode = code;
     this.fileAt(this.activePath).text = code;
+    this.sourceChanged();
     this.bus.signal('debug', 'SyntaxCheck');
   }
 
@@ -322,12 +409,18 @@ export class EditorController {
    */
   restore(session: SessionJSON): void {
     this.bus.signal('debug', 'Stop');
-    this.editor.debug.restore(this.editor.view, session);
+    this.withSuppressedEditorChange(() =>
+      this.editor.debug.restore(this.editor.view, session)
+    );
     this.sourcecode = this.editor.getCode();
+    this.fileAt(this.activePath).text = this.sourcecode;
+    this.sourceChanged();
     this.bus.signal('debug', 'SyntaxCheck');
   }
 
   destroy(): void {
+    this.sourceListeners.clear();
+    this.activeFileListeners.clear();
     this.tabs.destroy();
     this.editor.destroy();
   }
@@ -344,12 +437,118 @@ export class EditorController {
     );
   }
 
+  /** The complete value a host compiles, saves or submits. */
+  sourceSnapshot(): SourceSnapshot {
+    return {
+      files: this.openFiles(),
+      entry: this.entryPath,
+      active: this.activePath,
+      revision: this.revision,
+    };
+  }
+
+  onSourcesChanged(listener: (snapshot: SourceSnapshot) => void): Unsubscribe {
+    this.sourceListeners.add(listener);
+    return () => this.sourceListeners.delete(listener);
+  }
+
+  onActiveFileChanged(listener: (path: string) => void): Unsubscribe {
+    this.activeFileListeners.add(listener);
+    return () => this.activeFileListeners.delete(listener);
+  }
+
   entry(): string {
     return this.entryPath;
   }
 
   active(): string {
     return this.activePath;
+  }
+
+  /**
+   * Replace the complete source set with a host-provided version.
+   * Invalid or empty file sets are refused without changing the editor.
+   */
+  updateFiles(files: SourceFile[], entry?: string): boolean {
+    const paths = new Set<string>();
+    if (files.length === 0) {
+      return false;
+    }
+    for (const file of files) {
+      if (
+        typeof file.path !== 'string' ||
+        file.path === '' ||
+        typeof file.text !== 'string' ||
+        paths.has(file.path)
+      ) {
+        return false;
+      }
+      paths.add(file.path);
+    }
+    this.bus.signal('debug', 'Stop');
+    this.files = files.map((file) => ({ ...file, session: null }));
+    this.entryPath =
+      typeof entry !== 'undefined' && paths.has(entry)
+        ? entry
+        : this.files[0].path;
+    this.activePath = this.entryPath;
+    this.sourcecode = this.fileAt(this.activePath).text;
+    this.withSuppressedEditorChange(() =>
+      this.editor.replaceCode(this.sourcecode)
+    );
+    this.clearLocalDiagnostics();
+    this.showTabs();
+    this.sourceChanged();
+    this.signalActiveFileChanged();
+    this.bus.signal('debug', 'SyntaxCheck');
+    return true;
+  }
+
+  /**
+   * Replace one host service's findings without disturbing any other source.
+   * False means the result belonged to an obsolete source revision.
+   */
+  setExternalDiagnostics(
+    source: string,
+    diagnostics: ExternalDiagnostic[],
+    options: DiagnosticOptions = {}
+  ): boolean {
+    if (
+      source.trim() === '' ||
+      (typeof options.revision !== 'undefined' &&
+        options.revision !== this.revision)
+    ) {
+      return false;
+    }
+    const knownPaths = new Set(this.files.map((file) => file.path));
+    const byPath = new Map<string, TeachingDiagnostic[]>();
+    for (const found of diagnostics) {
+      if (
+        typeof found !== 'object' ||
+        found === null ||
+        typeof found.path !== 'string' ||
+        typeof found.message !== 'string' ||
+        !knownPaths.has(found.path)
+      ) {
+        continue;
+      }
+      const converted = externalDiagnostic(source, found);
+      if (converted === null) {
+        continue;
+      }
+      const previous = byPath.get(found.path) ?? [];
+      previous.push(converted);
+      byPath.set(found.path, previous);
+    }
+    this.externalLints.set(source, byPath);
+    this.showDiagnostics();
+    return true;
+  }
+
+  clearExternalDiagnostics(source: string): void {
+    if (this.externalLints.delete(source)) {
+      this.showDiagnostics();
+    }
   }
 
   /**
@@ -366,6 +565,7 @@ export class EditorController {
       existing.session = null;
     }
     this.activate(path, true);
+    this.sourceChanged();
   }
 
   /**
@@ -374,7 +574,7 @@ export class EditorController {
    * session and put back when they return, because a tab that forgot where
    * they were is a tab they have to find their place in twice.
    */
-  private activate(path: string, force = false): void {
+  private activate(path: string, force = false, syntaxCheck = true): void {
     if (path === this.activePath && !force) {
       return;
     }
@@ -386,16 +586,37 @@ export class EditorController {
     const arriving = this.fileAt(path);
     this.activePath = path;
     if (arriving.session === null) {
-      this.editor.replaceCode(arriving.text);
+      this.withSuppressedEditorChange(() =>
+        this.editor.replaceCode(arriving.text)
+      );
     } else {
-      this.editor.debug.restore(this.editor.view, arriving.session);
+      this.withSuppressedEditorChange(() =>
+        this.editor.debug.restore(this.editor.view, arriving.session!)
+      );
     }
     this.sourcecode = this.editor.getCode();
+    if (path === this.entryPath) {
+      this.constructs = this.executionConstructs;
+      this.hover.setConstructs(this.executionConstructs);
+      this.completions.setConstructs(this.executionConstructs);
+    } else {
+      // Interpreter constructs use composed-source lines. Until they are
+      // mapped per file, showing them over a helper tab would point at the
+      // wrong text; live values and the step marker remain available.
+      this.constructs = [];
+      this.hover.setConstructs([]);
+      this.completions.setConstructs([]);
+      this.setExpansions([]);
+    }
     this.showTabs();
+    this.showDiagnostics();
+    this.signalActiveFileChanged();
     // A file that is not the one that runs has no marks of its own to show:
     // the parser is answering about the translation unit, and drawing its
     // findings over another file would be pointing at the wrong lines.
-    this.bus.signal('debug', 'SyntaxCheck');
+    if (syntaxCheck) {
+      this.bus.signal('debug', 'SyntaxCheck');
+    }
   }
 
   private setEntry(path: string): void {
@@ -404,6 +625,8 @@ export class EditorController {
     // The program that runs has changed, so what the run and the checker said
     // about the old one is no longer about anything.
     this.bus.signal('debug', 'Stop');
+    this.clearLocalDiagnostics();
+    this.sourceChanged();
     this.bus.signal('debug', 'SyntaxCheck');
   }
 
@@ -414,9 +637,10 @@ export class EditorController {
     this.files = this.files.filter((file) => file.path !== path);
     if (this.activePath === path) {
       this.activate(this.entryPath, true);
-      return;
+    } else {
+      this.showTabs();
     }
-    this.showTabs();
+    this.sourceChanged();
   }
 
   private fileAt(path: string): OpenFile {
@@ -443,6 +667,10 @@ export class EditorController {
   private edited(code: string) {
     this.sourcecode = code;
     this.fileAt(this.activePath).text = code;
+    if (this.suppressEditorChange) {
+      return;
+    }
+    this.sourceChanged();
     setTimeout(() => {
       if (code === this.sourcecode) {
         this.bus.signal('debug', 'SyntaxCheck');
@@ -450,11 +678,52 @@ export class EditorController {
     }, 1000);
   }
 
+  private withSuppressedEditorChange(run: () => void): void {
+    this.suppressEditorChange = true;
+    try {
+      run();
+    } finally {
+      this.suppressEditorChange = false;
+    }
+  }
+
+  /** One source mutation invalidates every remote answer for the old revision. */
+  private sourceChanged(): void {
+    this.revision += 1;
+    // Linker results for every file can change when any one file changes.
+    this.checkedSources.clear();
+    this.preflightErrors.clear();
+    this.externalLints.clear();
+    this.showDiagnostics();
+    const snapshot = this.sourceSnapshot();
+    for (const listener of this.sourceListeners) {
+      listener(snapshot);
+    }
+  }
+
+  private signalActiveFileChanged(): void {
+    for (const listener of this.activeFileListeners) {
+      listener(this.activePath);
+    }
+  }
+
+  private clearLocalDiagnostics(): void {
+    this.constructs = [];
+    this.executionConstructs = [];
+    this.syntaxErrors = [];
+    this.teachingLints = [];
+    this.localDiagnosticsPath = null;
+    this.runtimeLints = [];
+    this.preflightErrors.clear();
+  }
+
   send(controlEvent: CONTROL_EVENT, stdinText?: string) {
     const files = this.openFiles();
     const entry = this.fileAt(this.entryPath);
+    const checkedPath = this.activePath;
     const request: Request = {
-      // The text that runs is the entry's, whichever tab is on the screen.
+      // Older servers read this entry text. Current ones compose `files` and
+      // use `entry` as the primary file and source-map origin.
       sourcecode:
         this.entryPath === this.activePath ? this.sourcecode : entry.text,
       controlEvent,
@@ -462,6 +731,7 @@ export class EditorController {
       lineNumOfBreakpoint: this.breakpoints(),
       files,
       entry: this.entryPath,
+      active: checkedPath,
     };
     if (controlEvent === 'SyntaxCheck') {
       this.client
@@ -469,34 +739,30 @@ export class EditorController {
         .then((response: Response) => {
           // A slower check for text that has since changed must not replace
           // the construct map delivered by Start for the program now running.
-          const currentEntry = this.fileAt(this.entryPath);
-          const currentEntryText =
-            this.entryPath === this.activePath
+          const checkedFile = this.fileAt(checkedPath);
+          const currentText =
+            checkedPath === this.activePath
               ? this.sourcecode
-              : currentEntry.text;
-          if (response.sourcecode !== currentEntryText) {
+              : checkedFile.text;
+          if (
+            response.sourcecode !== currentText ||
+            checkedPath !== this.activePath
+          ) {
             return;
           }
+          this.checkedSources.set(checkedPath, currentText);
           const { errors, expansions, constructs, lints } = response;
           const seen = typeof constructs === 'undefined' ? [] : constructs;
           // What the modifier-hover link resolves a name against. It is kept here
           // rather than asked of the hover, because the hover is handed the
           // constructs and does not hand them back.
           this.constructs = seen;
-          // The canvas always explains the entry file, even while another tab
-          // is visible. Its syntax map must therefore not be cleared below.
-          this.statement.setConstructs(seen);
-          // What the parser found is about the translation unit. While the
-          // reader is looking at another file, the marks come off rather than
-          // land on lines they are not about.
-          if (this.entryPath !== this.activePath) {
-            this.constructs = [];
-            this.setSyntaxError([], []);
-            this.setExpansions([]);
-            this.hover.setConstructs([]);
-            this.completions.setConstructs([]);
-            return;
+          // The canvas explains the entry program. A helper's local construct
+          // ranges belong to its editor tab and must not replace that map.
+          if (checkedPath === this.entryPath) {
+            this.statement.setConstructs(seen);
           }
+          this.localDiagnosticsPath = checkedPath;
           this.setSyntaxError(
             errors,
             typeof lints === 'undefined' ? [] : lints
@@ -524,6 +790,11 @@ export class EditorController {
       });
   }
 
+  /** Toggle the breakpoint on the line the editor's primary cursor is in. */
+  toggleBreakpoint(): void {
+    this.editor.debug.toggleBreakpoint(this.editor.view);
+  }
+
   /** Breakpoints as the interpreter counts them: zero-based rows. */
   private breakpoints(): number[] {
     return this.editor.debug.rows(this.editor.view.state);
@@ -531,16 +802,28 @@ export class EditorController {
 
   recieve(response: Response) {
     try {
-      const { debugState, model, output, step, runtime, coverage } = response;
+      const { debugState, model, output, step, runtime, coverage, location } =
+        response;
+      if (
+        typeof response.fileErrors !== 'undefined' &&
+        response.fileErrors.length !== 0
+      ) {
+        this.showPreflightErrors(response.fileErrors, response.diagnosticPath);
+      } else if (debugState !== 'Stop') {
+        this.preflightErrors.clear();
+      }
       this.setDebugging(debugState !== 'Stop');
+      this.showSourceLocation(location, debugState);
       if (typeof response.constructs !== 'undefined') {
         this.statement.setConstructs(response.constructs);
+        this.executionConstructs = response.constructs;
         if (this.entryPath === this.activePath) {
           this.hover.setConstructs(response.constructs);
           this.completions.setConstructs(response.constructs);
         }
       }
-      this.hover.setStep(model);
+      const editorModel = this.editorStep(model, location);
+      this.hover.setStep(editorModel);
       this.statement.setStep(model);
       this.showWatches();
       this.setRuntimeDiagnostics(typeof runtime === 'undefined' ? [] : runtime);
@@ -548,17 +831,19 @@ export class EditorController {
         this.editor.view,
         typeof coverage === 'undefined' ? [] : coverage
       );
+      // Running suspends redraw, not the controls: Stop and Restart must be
+      // enabled while the Worker is advancing through a long call or run.
+      this.bus.signal('changeState', debugState, step);
       if (debugState === 'Executing') {
         return;
       }
-      this.bus.signal('changeState', debugState, step);
       this.bus.signal('changeOutput', output);
       this.bus.signal(
         'draw',
         model,
         this.statement.explainStatement(response.sourcecode)
       );
-      this.setHighlightOnCode(debugState, model);
+      this.setHighlightOnCode(debugState, editorModel);
     } catch (e) {
       console.log(e);
       alert(e);
@@ -576,6 +861,75 @@ export class EditorController {
     }
     this.isDebugging = isDebugging;
     this.editor.debug.setReadOnly(this.editor.view, isDebugging);
+  }
+
+  /** Refuse a malformed program and bring its first failing file into view. */
+  private showPreflightErrors(
+    found: FileSyntaxErrors[],
+    firstPath: string | undefined
+  ): void {
+    this.preflightErrors.clear();
+    for (const file of found) {
+      this.preflightErrors.set(file.path, file.errors);
+    }
+    const path =
+      typeof firstPath !== 'undefined' && this.preflightErrors.has(firstPath)
+        ? firstPath
+        : found[0].path;
+    if (
+      path !== this.activePath &&
+      this.files.some((file) => file.path === path)
+    ) {
+      this.activate(path, false, false);
+    } else {
+      this.showDiagnostics();
+    }
+  }
+
+  private showSourceLocation(
+    location: SourceLocation | undefined,
+    debugState: DEBUG_STATE
+  ): void {
+    // The interpreter can finish while its last retained expression is the
+    // callee's return. There is no next expression to provide the caller's
+    // range at EOF, but every frame has unwound, so leave the reader at the
+    // entry/caller file rather than on a function that is no longer running.
+    const path = debugState === 'EOF' ? this.entryPath : location?.path;
+    if (
+      typeof path === 'undefined' ||
+      path === this.activePath ||
+      !this.files.some((file) => file.path === path)
+    ) {
+      return;
+    }
+    // This is navigation, not an edit: preserve both tab sessions. The syntax
+    // checker uses a throwaway interpreter, so checking a helper does not
+    // disturb the Worker session that led us into it.
+    this.activate(path, false, false);
+    if (this.checkedSources.get(path) !== this.sourcecode) {
+      this.bus.signal('debug', 'SyntaxCheck');
+    }
+  }
+
+  /** Keep live values but remove composed-source ranges from a shifted tab. */
+  private editorStep(
+    model: StepModel,
+    location: SourceLocation | undefined
+  ): StepModel {
+    if (
+      typeof location === 'undefined' ||
+      model.codeRange === null ||
+      model.codeRange.begin.y === location.range.begin.y
+    ) {
+      return model;
+    }
+    return {
+      ...model,
+      codeRange: location.range,
+      expression: null,
+      constructStates: [],
+      evaluations: [],
+    };
   }
 
   setHighlightOnCode(debugState: DEBUG_STATE, model: StepModel) {
@@ -702,6 +1056,46 @@ export class EditorController {
     );
   }
 
+  /** Reveal the declaration represented by a double-clicked memory row. */
+  private navigateFromMemory(target: MemoryNavigationTarget): void {
+    const executionConstructs =
+      this.executionConstructs.length === 0
+        ? this.constructs
+        : this.executionConstructs;
+    const declaration =
+      target.kind === 'function'
+        ? functionDefinitionFor(executionConstructs, target.name)
+        : this.statement.declarationOf(target.key);
+    if (declaration === null) {
+      return;
+    }
+    const source = new ExecutionSource(
+      this.openFiles(),
+      this.entryPath,
+      this.fileAt(this.entryPath).text
+    );
+    const location = source.locate({
+      begin: { x: declaration.column, y: declaration.line },
+      end: { x: declaration.endColumn, y: declaration.endLine },
+    });
+    if (location === null) {
+      return;
+    }
+    if (location.path !== this.activePath) {
+      this.activate(location.path, false, false);
+    }
+    goTo(
+      this.editor.view,
+      rangeOf(
+        this.editor.view.state.doc,
+        location.range.begin.y,
+        location.range.begin.x,
+        location.range.end.y,
+        location.range.end.x
+      )
+    );
+  }
+
   setExpansions(expansions: Expansion[]) {
     this.expansions = expansions;
     this.hover.setExpansions(expansions);
@@ -737,10 +1131,18 @@ export class EditorController {
   }
 
   private showDiagnostics() {
+    const external = Array.from(this.externalLints.values()).flatMap(
+      (byPath) => byPath.get(this.activePath) ?? []
+    );
+    const showsLocal = this.activePath === this.localDiagnosticsPath;
+    const showsRuntime = this.activePath === this.entryPath;
+    const refused = this.preflightErrors.get(this.activePath);
     this.editor.debug.showDiagnostics(
       this.editor.view,
-      this.syntaxErrors,
-      this.teachingLints.concat(this.runtimeLints)
+      refused ?? (showsLocal ? this.syntaxErrors : []),
+      (showsLocal ? this.teachingLints : [])
+        .concat(showsRuntime ? this.runtimeLints : [])
+        .concat(external)
     );
   }
 }

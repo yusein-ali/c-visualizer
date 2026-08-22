@@ -88,9 +88,15 @@ const descriptionOf = (
   const sentences: string[] = [];
   const functionCall = sentenceCase(strings.constructCall);
   const assignment = sentenceCase(strings.constructAssignment);
+  // The constructs made of named clauses. A `for` reads as its three parts on
+  // three lines rather than as one sentence listing them, and a `while` is the
+  // same construct with two of the parts left out - so the loops are read the
+  // same way whichever of them the reader is standing on.
   const multilineConstructs = new Set([
     sentenceCase(strings.constructIf),
     sentenceCase(strings.constructFor),
+    sentenceCase(strings.constructWhile),
+    sentenceCase(strings.constructDoWhile),
     sentenceCase(strings.constructSwitch),
   ]);
 

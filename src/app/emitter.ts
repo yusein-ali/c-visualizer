@@ -1,5 +1,6 @@
 import type { CONTROL_EVENT, DEBUG_STATE, StepModel } from '../core';
 import type { StatementExplanation } from '../ui/records';
+import type { MemoryNavigationTarget } from '../ui/graph';
 import type { Theme } from './theme';
 import type { ZOOM_COMMAND } from '../ui/controls';
 
@@ -10,7 +11,8 @@ export type event =
   | 'changeOutput'
   | 'zoom'
   | 'draw'
-  | 'focusObject';
+  | 'focusObject'
+  | 'navigateMemory';
 
 /**
  * What each event carries. The signatures were `any[]` while React components
@@ -36,6 +38,8 @@ export interface EventPayloads {
    * side ignores what it said itself, and marks what the other one says.
    */
   focusObject: [object: string | null, origin: 'editor' | 'graph'];
+  /** A memory row the editor should reveal in source. */
+  navigateMemory: [target: MemoryNavigationTarget];
 }
 
 type Listener = (...args: any[]) => void;

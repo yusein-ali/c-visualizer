@@ -7,13 +7,14 @@ import {
   CellModel,
   ExpressionNodeModel,
   FoldState,
+  Response,
   Server,
   StepHistory,
   StepModel,
   ViewOptions,
   extractModel,
   foldGroupOf,
-  isWithinFold,
+  foldPathOf,
   MEMORY_ALIGNMENT,
   layout,
   narrowToType,
@@ -146,6 +147,7 @@ describe('extractModel', () => {
       memory: [],
       functions: [],
       expression: null,
+      callExpansions: [],
       variables: [],
       inlineValues: [],
       constructStates: [],
@@ -225,6 +227,46 @@ int main(void) {
     ).toBe(model.memory.length);
   });
 
+  it('zero-initializes objects in the BSS before execution begins', () => {
+    const random = jest.spyOn(Math, 'random').mockReturnValue(0.75);
+    const code = `
+struct Pair { int x; int y; };
+int zeroGlobal;
+int *nullGlobal;
+int zeroes[2];
+struct Pair point;
+int main(void) {
+  static int zeroLocal;
+  int observed = zeroGlobal + (nullGlobal != 0) + zeroes[0] + zeroes[1]
+    + point.x + point.y + zeroLocal;
+  return observed;
+}
+`;
+    try {
+      const model = modelWith(execute(code), (candidate) =>
+        candidate.memory.some((segment) =>
+          segment.rows.some((row) =>
+            row.some((item) => item.kind === 'name' && item.text === 'observed')
+          )
+        )
+      );
+      const valueOf = (name: string): string => {
+        const row = model.memory
+          .flatMap((segment) => segment.rows)
+          .find((candidate) =>
+            candidate.some((item) => item.kind === 'name' && item.text === name)
+          );
+        expect(row).toBeDefined();
+        return row!.find((item) => item.kind === 'value')!.text;
+      };
+      expect(valueOf('zeroGlobal')).toBe('0');
+      expect(valueOf('zeroLocal')).toBe('0');
+      expect(valueOf('observed')).toBe('0');
+    } finally {
+      random.mockRestore();
+    }
+  });
+
   it('expands the statement that is about to run, as plain data', () => {
     const code = `
 int main(void) {
@@ -240,10 +282,15 @@ int main(void) {
       .filter((model) => model.expression !== null);
     expect(models.length).toBeGreaterThanOrEqual(2);
     const declaration = models.find(
-      (model) => model.expression!.root.kind === 'assignment'
+      (model) => model.expression!.root.children[1]?.text === '+'
     );
     expect(declaration).toBeDefined();
-    expect(declaration!.expression!.root.text).toBe('=');
+    // Target, assignment operator and value remain separate, in source order.
+    expect(declaration!.expression!.root).toMatchObject({
+      kind: 'assignment',
+      text: '=',
+    });
+    expect(declaration!.expression!.root.children).toHaveLength(2);
     expect(declaration!.expression!.root.children[0].text).toBe('result');
     const ternary = models.find((model) => {
       const visit = (node: ExpressionNodeModel): boolean =>
@@ -293,7 +340,10 @@ int main(void) {
       model.expression!.root.children.some((child) => child.text === 'twice()')
     );
     expect(call).toBeDefined();
-    const argument = call!.expression!.root.children[1].children[0];
+    const callNode = call!.expression!.root.children.find(
+      (child) => child.text === 'twice()'
+    )!;
+    const argument = callNode.children[0];
     expect(argument.text).toBe('+');
     // `a` is in scope and holds 1; the addition has not happened yet.
     expect(argument.children[0]).toMatchObject({ text: 'a', value: '1' });
@@ -339,13 +389,66 @@ int main(void) {
     });
   });
 
-  it('leaves a declaration with nothing to expand alone', () => {
-    // A call earns the window for its arguments; a statement with neither an
-    // operator nor a call has no picture to draw, and drawing an empty one
-    // would put a window under every line of a program.
+  it('draws the plainest assignment as target, equals and value', () => {
+    // `int i = 0;` and `i = 0;` used to draw nothing at all, for holding no
+    // operator to expand. Three boxes are the whole of what an assignment does
+    // - this object is written, by this operator, with that value - and a view that
+    // comes and goes with how much arithmetic a line happens to contain is
+    // harder to follow than one that is always there.
     const code = `
 int main(void) {
   int i = 0;
+  i = 1;
+  return i;
+}
+`;
+    const roots = execute(code)
+      .map(extractModel)
+      .filter((model) => model.expression !== null)
+      .map((model) => model.expression!.root);
+    expect(roots.length).toBeGreaterThan(0);
+    for (const root of roots) {
+      expect(root).toMatchObject({
+        kind: 'assignment',
+        text: '=',
+      });
+      expect(root.children).toHaveLength(2);
+      expect(root.children[0].text).toBe('i');
+    }
+  });
+
+  it('keeps equals separate when the assignment target is computed', () => {
+    const code = `
+int main(void) {
+  int values[2] = { 0, 0 };
+  int i = 1;
+  values[i] = 7;
+  return values[i];
+}
+`;
+    const computed = execute(code)
+      .map(extractModel)
+      .map((model) => model.expression?.root ?? null)
+      .find(
+        (root) =>
+          root !== null &&
+          root.kind === 'assignment' &&
+          root.text === '=' &&
+          root.children[0].children.length !== 0
+      );
+
+    expect(computed).not.toBeNull();
+    expect(computed?.children).toHaveLength(2);
+    expect(computed?.children[1].text).toBe('7');
+  });
+
+  it('leaves a statement with nothing to expand alone', () => {
+    // A declaration that initialises nothing has written nothing, and a
+    // `return` of a name is that name; drawing a box for either would put a
+    // window under every line of a program.
+    const code = `
+int main(void) {
+  int i;
   return i;
 }
 `;
@@ -408,12 +511,13 @@ describe('layout', () => {
       (m) => cellsOf(m).filter((cell) => cell.kind === 'fold').length > 0
     );
     const folds = new FoldState();
-    const open = layout(arrays, folds);
+    // An aggregate opens closed, so this is the drawing before any click.
+    const closed = layout(arrays, folds);
     const group = cellsOf(arrays).find(
       (cell) => cell.kind === 'fold'
     )!.foldTarget!;
     folds.toggle(group);
-    const closed = layout(arrays, folds);
+    const open = layout(arrays, folds);
 
     const rowCount = (geometry: { stacks: { rows: unknown[] }[] }) =>
       geometry.stacks.reduce((sum, stack) => sum + stack.rows.length, 0);
@@ -437,18 +541,35 @@ describe('layout', () => {
 });
 
 describe('fold state', () => {
-  it('hides a group and everything nested inside it', () => {
+  it('names every group on the way down to a row', () => {
     const outer = foldGroupOf(undefined, 'array');
     const inner = foldGroupOf(outer, 'member');
-    expect(isWithinFold(inner, outer)).toBe(true);
-    expect(isWithinFold(outer, inner)).toBe(false);
+    expect(foldPathOf(inner)).toEqual([outer, inner]);
+    expect(foldPathOf(outer)).toEqual([outer]);
+  });
 
+  it('starts every aggregate closed and opens one level per click', () => {
+    const outer = foldGroupOf(undefined, 'array');
+    const inner = foldGroupOf(outer, 'member');
     const folds = new FoldState();
-    folds.toggle(outer);
+
+    // An array of structs is two folds deep, and nothing is open until the
+    // reader says so - a frame full of expanded aggregates is the shape of
+    // the data rather than the shape of the frame.
+    expect(folds.hides(outer)).toBe(true);
     expect(folds.hides(inner)).toBe(true);
     expect(folds.hides(undefined)).toBe(false);
+
     folds.toggle(outer);
+    expect(folds.hides(outer)).toBe(false);
+    // The group inside it is still closed on its own account.
+    expect(folds.hides(inner)).toBe(true);
+    folds.toggle(inner);
     expect(folds.hides(inner)).toBe(false);
+
+    // Closing the outer one again takes everything under it with it.
+    folds.toggle(outer);
+    expect(folds.hides(inner)).toBe(true);
   });
 
   it('does not confuse a group with one whose name starts the same', () => {
@@ -456,7 +577,29 @@ describe('fold state', () => {
     const other = foldGroupOf(undefined, 'counter');
     const folds = new FoldState();
     folds.toggle(folded);
+    folds.toggle(other);
+    expect(folds.hides(folded)).toBe(false);
     expect(folds.hides(other)).toBe(false);
+    folds.toggle(folded);
+    expect(folds.hides(folded)).toBe(true);
+    expect(folds.hides(other)).toBe(false);
+  });
+
+  it('keeps a frame the reader opened, and closes the ones they have not', () => {
+    const folds = new FoldState();
+    // The caller is the one that knows which frame is running; this only
+    // remembers the answers the reader gave.
+    expect(folds.isFrameFolded('frame-0-main', true)).toBe(true);
+    expect(folds.isFrameFolded('frame-1-twice', false)).toBe(false);
+
+    folds.toggleFrame('frame-0-main', true);
+    expect(folds.isFrameFolded('frame-0-main', true)).toBe(false);
+    // And it survives the run moving on, which is the whole point of keeping
+    // it out of the model.
+    expect(folds.isFrameFolded('frame-0-main', false)).toBe(false);
+
+    folds.clear();
+    expect(folds.isFrameFolded('frame-0-main', true)).toBe(true);
   });
 });
 
@@ -590,8 +733,8 @@ int main(void) {
 
     expect(started.constructs).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ kind: 'call', line: 3 }),
-        expect.objectContaining({ kind: 'variableDec', line: 11 }),
+        expect.objectContaining({ kind: 'call', line: 4 }),
+        expect.objectContaining({ kind: 'variableDec', line: 12 }),
       ])
     );
   });
@@ -605,16 +748,79 @@ int main(void) {
     const started = await request('Start');
     const stepped = await request('Step');
     for (const response of [started, stepped]) {
-      expect(response.model.functions).toEqual([
-        { name: 'recursiveToThree', address: 0x1000 },
-        { name: 'main', address: 0x1004 },
-      ]);
-      expect(
-        response.model.memory
-          .find(({ key }) => key === 'text')!
-          .rows.flatMap((row) => row.map(({ text }) => text))
-      ).toEqual(expect.arrayContaining(['recursiveToThree', 'main']));
+      const [recursive, main] = response.model.functions;
+      expect(recursive).toMatchObject({
+        name: 'recursiveToThree',
+        address: 0x1000,
+      });
+      expect(recursive.size).toBeGreaterThan(0);
+      expect(recursive.size % 16).toBe(0);
+      expect(main).toMatchObject({
+        name: 'main',
+        address: recursive.address + recursive.size,
+      });
+      expect(main.size).toBeGreaterThan(0);
+      expect(main.size % 16).toBe(0);
+      const stdioNames = ['printf', 'fopen', 'fgets', 'fputs', 'fclose'];
+      expect(response.model.functions.slice(-stdioNames.length)).toEqual(
+        stdioNames.map((name, index) => ({
+          name,
+          address: main.address + main.size + index * 16,
+          size: 16,
+        }))
+      );
+      const text = response.model.memory
+        .find(({ key }) => key === 'text')!
+        .rows.flatMap((row) => row.map(({ text }) => text));
+      expect(text).toEqual(
+        expect.arrayContaining(['recursiveToThree', 'main', ...stdioNames])
+      );
+      expect(text).not.toContain('scanf');
     }
+  });
+
+  it('puts only referenced stdio routines in text memory', async () => {
+    const response = await quiet(() =>
+      new Server().send({
+        controlEvent: 'Start',
+        sourcecode: 'int main(void) { getchar(); fflush(0); return 0; }',
+      })
+    );
+    const [main, getchar, fflush] = response.model.functions;
+
+    expect(getchar).toEqual({
+      name: 'getchar',
+      address: main.address + main.size,
+      size: 16,
+    });
+    expect(fflush).toEqual({
+      name: 'fflush',
+      address: getchar.address + getchar.size,
+      size: 16,
+    });
+    expect(response.model.functions.map(({ name }) => name)).toEqual([
+      'main',
+      'getchar',
+      'fflush',
+    ]);
+  });
+
+  it('estimates text size as 16 bytes per parsed expression', async () => {
+    const server = new Server();
+    const response = await quiet(() =>
+      server.send({
+        controlEvent: 'Start',
+        sourcecode: `int literal(void) { return 1; }
+int sum(void) { return 1 + 2; }
+int main(void) { return 0; }`,
+      })
+    );
+
+    expect(response.model.functions).toEqual([
+      { name: 'literal', address: 0x1000, size: 16 },
+      { name: 'sum', address: 0x1010, size: 48 },
+      { name: 'main', address: 0x1040, size: 16 },
+    ]);
   });
 
   it('steps back through every step to the first one', async () => {
@@ -631,6 +837,45 @@ int main(void) {
     }
     // Down to the beginning, and then it stays there.
     expect(walked).toEqual([5, 4, 3, 2, 1, 0, 0, 0]);
+  });
+
+  it('steps over a function call and keeps the skipped states in history', async () => {
+    const source = [
+      'int add(int value) {',
+      '  int result = value + 1;',
+      '  return result;',
+      '}',
+      'int main(void) {',
+      '  int before = 1;',
+      '  int after = add(before);',
+      '  after = after + 1;',
+      '  return after;',
+      '}',
+    ].join('\n');
+    const server = new Server();
+    const command = (controlEvent: CONTROL_EVENT) =>
+      quiet(() => server.send({ controlEvent, sourcecode: source }));
+    let response = await command('Start');
+    for (
+      let step = 0;
+      step < 20 && response.location?.range.begin.y !== 7;
+      step += 1
+    ) {
+      response = await command('Step');
+    }
+    expect(response.location?.range.begin.y).toBe(7);
+    const before = response.step;
+    const finished = new Promise<Response>((resolve) => {
+      server.onRunEvent = (_event, result) => resolve(result);
+    });
+
+    expect((await command('StepOver')).debugState).toBe('Executing');
+    const stepped = await finished;
+
+    expect(stepped.location?.range.begin.y).toBe(8);
+    expect(stepped.step).toBeGreaterThan(before + 1);
+    const back = await command('StepBack');
+    expect(back.step).toBe(stepped.step - 1);
   });
 
   it('returns to the first state after a run longer than the history', async () => {

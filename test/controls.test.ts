@@ -31,8 +31,16 @@ const mount = () => {
     debug: inGroup('debug'),
     zoom: inGroup('zoom'),
     status: parent.querySelector('.plivet-controls__status') as HTMLElement,
+    toolbar: parent.querySelector(
+      '.plivet-controls__group--debug'
+    ) as HTMLElement,
+    dragHandle: parent.querySelector(
+      '.plivet-controls__drag'
+    ) as HTMLButtonElement,
     theme: parent.querySelector('select') as HTMLSelectElement,
-    help: parent.querySelector('.plivet-controls__help') as HTMLButtonElement,
+    help: parent.querySelector(
+      `[aria-label="${strings.howToUse}"]`
+    ) as HTMLButtonElement,
     helped: () => helped,
   };
 };
@@ -42,11 +50,80 @@ afterEach(() => {
 });
 
 describe('the debug controls', () => {
+  it('moves from its grip and resets to its centred position', () => {
+    const { toolbar, dragHandle } = mount();
+    const owner = toolbar.closest('.plivet-controls')
+      ?.parentElement as HTMLElement;
+    owner.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        top: 0,
+        right: 600,
+        bottom: 400,
+        width: 600,
+        height: 400,
+      }) as DOMRect;
+    toolbar.getBoundingClientRect = () =>
+      ({
+        left: 180,
+        top: 60,
+        right: 420,
+        bottom: 96,
+        width: 240,
+        height: 36,
+      }) as DOMRect;
+
+    dragHandle.dispatchEvent(
+      new MouseEvent('pointerdown', {
+        bubbles: true,
+        clientX: 200,
+        clientY: 70,
+      })
+    );
+    dragHandle.dispatchEvent(
+      new MouseEvent('pointermove', {
+        bubbles: true,
+        clientX: 280,
+        clientY: 120,
+      })
+    );
+    dragHandle.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
+
+    expect(toolbar.style.getPropertyValue('--plivet-debug-x')).toBe('80px');
+    expect(toolbar.style.getPropertyValue('--plivet-debug-y')).toBe('50px');
+
+    dragHandle.dispatchEvent(
+      new KeyboardEvent('keydown', { bubbles: true, key: 'Enter' })
+    );
+    expect(toolbar.style.getPropertyValue('--plivet-debug-x')).toBe('');
+    expect(toolbar.style.getPropertyValue('--plivet-debug-y')).toBe('');
+  });
+
+  it('offers keyboard movement from a named grip', () => {
+    const { toolbar, dragHandle } = mount();
+
+    expect(toolbar.getAttribute('role')).toBe('toolbar');
+    expect(toolbar.getAttribute('aria-label')).toBe(strings.debugToolbar);
+    expect(dragHandle.getAttribute('aria-label')).toBe(
+      strings.moveDebugToolbar
+    );
+    dragHandle.dispatchEvent(
+      new KeyboardEvent('keydown', { bubbles: true, key: 'ArrowRight' })
+    );
+    dragHandle.dispatchEvent(
+      new KeyboardEvent('keydown', { bubbles: true, key: 'ArrowDown' })
+    );
+
+    expect(toolbar.style.getPropertyValue('--plivet-debug-x')).toBe('16px');
+    expect(toolbar.style.getPropertyValue('--plivet-debug-y')).toBe('16px');
+  });
+
   it('enables exactly what the debug state allows', () => {
     const { bar, debug } = mount();
 
     // No session: the two forward buttons are what starts one.
     expect(debug.map((button) => button.disabled)).toEqual([
+      true,
       true,
       true,
       true,
@@ -66,31 +143,41 @@ describe('the debug controls', () => {
       false,
       true,
       true,
+      true,
     ]);
   });
 
   it('sends the command the state binds the forward buttons to', () => {
     const { bar, debug, commands } = mount();
 
-    debug[4].click();
     debug[5].click();
+    debug[6].click();
     expect(commands).toEqual(['Start', 'Exec']);
 
     bar.setDebugState('Debugging', 1);
-    debug[4].click();
     debug[5].click();
+    debug[6].click();
     expect(commands.slice(2)).toEqual(['Step', 'StepAll']);
   });
 
   it('titles a button with the command it currently carries', () => {
     const { bar, debug } = mount();
 
-    expect(debug[5].title).toBe(strings.debugExec);
+    expect(debug[6].title).toBe(strings.debugExec);
     bar.setDebugState('First', 0);
-    expect(debug[5].title).toBe(strings.debugStepAll);
+    expect(debug[6].title).toBe(strings.debugStepAll);
     // The title is the button's accessible name: the icon inside it is
     // decorative, and there is no text.
-    expect(debug[5].getAttribute('aria-label')).toBe(strings.debugStepAll);
+    expect(debug[6].getAttribute('aria-label')).toBe(strings.debugStepAll);
+  });
+
+  it('sends Step Over as its own debug command', () => {
+    const { bar, debug, commands } = mount();
+    bar.setDebugState('Debugging', 2);
+
+    expect(debug[4].title).toBe(strings.debugStepOver);
+    debug[4].click();
+    expect(commands).toEqual(['StepOver']);
   });
 
   it('counts steps only while there are steps to count', () => {
@@ -121,6 +208,74 @@ describe('the debug controls', () => {
 });
 
 describe('the rest of the bar', () => {
+  it('orders the utility groups with theme last and separates them', () => {
+    const { parent } = mount();
+    const root = parent.querySelector('.plivet-controls')!;
+    const utilityOrder = Array.from(root.children)
+      .filter(
+        (element) =>
+          element.classList.contains('plivet-controls__group--files') ||
+          element.getAttribute('aria-label') === strings.preprocessedButton ||
+          element.classList.contains('plivet-controls__group--zoom') ||
+          element.getAttribute('aria-label') === strings.howToUse ||
+          element.getAttribute('aria-label') === strings.theme
+      )
+      .map(
+        (element) =>
+          Array.from(element.classList).find((name) =>
+            name.startsWith('plivet-controls__group--')
+          ) ?? element.getAttribute('aria-label')
+      );
+
+    expect(utilityOrder).toEqual([
+      'plivet-controls__group--files',
+      strings.preprocessedButton,
+      'plivet-controls__group--zoom',
+      strings.howToUse,
+      strings.theme,
+    ]);
+    expect(
+      parent.querySelectorAll('.plivet-controls > .plivet-controls__divider')
+    ).toHaveLength(4);
+  });
+
+  it('adds Build only when a host-backed build is configured', () => {
+    const parent = document.createElement('div');
+    let builds = 0;
+    const without = new ControlBar(parent);
+    expect(parent.querySelector('[aria-label="Build"]')).toBeNull();
+    without.destroy();
+
+    const withBuild = new ControlBar(parent, {
+      build: true,
+      onBuild: () => (builds += 1),
+    });
+    const button = parent.querySelector<HTMLButtonElement>(
+      '[aria-label="Build"]'
+    );
+    const groups = Array.from(
+      parent.querySelectorAll<HTMLElement>('.plivet-controls__group')
+    ).map((group) =>
+      Array.from(group.classList).find((name) =>
+        name.startsWith('plivet-controls__group--')
+      )
+    );
+    expect(groups).toEqual([
+      'plivet-controls__group--files',
+      'plivet-controls__group--debug',
+      'plivet-controls__group--zoom',
+    ]);
+    expect(button?.closest('.plivet-controls__group--debug')).not.toBeNull();
+    expect(
+      button?.previousElementSibling?.classList.contains(
+        'plivet-controls__divider--debug'
+      )
+    ).toBe(true);
+    button?.click();
+    expect(builds).toBe(1);
+    withBuild.destroy();
+  });
+
   it('reports the editor text size the user asked for', () => {
     const { zoom, zooms } = mount();
     for (const button of zoom) {

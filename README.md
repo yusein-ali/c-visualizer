@@ -4,10 +4,12 @@
 [![Node.js CI](https://github.com/yusein-ali/c-visualizer/actions/workflows/test.yml/badge.svg)](https://github.com/yusein-ali/c-visualizer/actions/workflows/test.yml)
 
 `c-visualizer` is a browser-only C program visualizer and step debugger. Write
-or open a C program, run it one statement at a time, and inspect the current
-statement, call stack, variables, memory regions, arrays, and pointer
-relationships. Parsing, execution, history, and visualization all remain in
-the browser; the application has no backend.
+or load C source, execute it one statement at a time, and inspect the current
+statement, active function invocations, declared objects, array elements,
+structure and union members, and pointer relationships. Its memory map is an
+explicit teaching model of common implementation regions, not a layout
+required by the C language. Parsing, interpretation, history, and
+visualization all remain in the browser; the application has no backend.
 
 ## Attribution and disclaimer
 
@@ -64,16 +66,18 @@ The fork modernizes PLIVET and reshapes it into an embeddable teaching widget:
   learners connect source code with C semantics and identify problems where
   they occur.
 - **Richer execution visualization** presents the current statement and
-  expression, call stack, registers, read-only and initialized data, BSS, heap,
-  stack frames, and variable mutations. Collapsible sections, configurable
-  views, and editor-to-canvas cross-highlighting help learners focus on the
-  part of program state they are studying.
+  expression, active function invocations, object writes, and an explicitly
+  implementation-oriented memory model covering register-class objects,
+  static storage, allocated storage, automatic storage, string literals, and
+  function code. Collapsible sections, configurable views, and
+  editor-to-canvas cross-highlighting help learners focus on the part of
+  program state they are studying.
 - **A more complete debugging workflow** includes breakpoints, forward and
-  backward history navigation, run-to-breakpoint, standard input and output,
+  backward history navigation, run-to-breakpoint, standard input and output streams,
   and a resizable workspace with independent text and canvas zoom. These make
   the tool useful for both guided demonstrations and self-directed debugging.
 - **Source and session workflows** add multiple source tabs with an explicit
-  entry file, opening and saving C files, restoring visualizer sessions,
+  entry source file, loading and saving C source files, restoring visualizer sessions,
   protected exercise regions, uploaded runtime data files, and a preprocessed
   source comparison. These support realistic exercises and future integration
   with A+ and Sphinx course material.
@@ -119,6 +123,28 @@ npm run build
 The production build is written to `dist/`, including a generated third-party
 license report.
 
+### Debug the deployed host integration
+
+In VS Code, run **c-visualizer: deployed host integration**. It builds the
+three deployed scripts with source maps, starts a local server on port 8090,
+and opens the host integration harness. The same workflow is available from a
+terminal:
+
+```sh
+npm run debug:host-integration -- --port 8090
+```
+
+The harness exercises Build through a simulated A+ provider, diagnostics on
+both source tabs, host Save and Update controls, direct diagnostics, and source
+revision callbacks. Starting and stepping the sample follows its function call
+from `main.c` into `helper.c` and switches the visible tab automatically.
+Start and Run first syntax-check every supplied source file; either action is
+refused when one fails, and the first failing tab opens with its diagnostic.
+Use its two mode links to test both an existing
+`window.CodeMirror` supplied by the host and c-visualizer's fallback loader.
+The active instance is available as `window.debugVisualizer` and the last
+saved value as `window.lastSavedSnapshot` in browser developer tools.
+
 ## Deploying into another page
 
 `npm run build` produces a site. `npm run deploy` produces assets for somebody
@@ -130,11 +156,13 @@ npm run deploy
 ```
 
 ```
-dist/embed/c-visualizer.js          the one <script src>
-dist/embed/CPP14.<hash>.js          the interpreter, fetched when a program is first run
-dist/embed/<worker>.<hash>.js       the interpreter's Worker
-dist/embed/preprocessed.<hash>.js   the preprocessor dialog, fetched when it is first opened
-dist/embed/licenses.html            what the footer links to
+dist/embed/c-visualizer.js           the small loader and the one <script src>
+dist/embed/c-visualizer.app.js       the visualizer, loaded after CodeMirror is available
+dist/embed/codemirror-fallback.js    CodeMirror modules for hosts that do not provide them
+dist/embed/CPP14.<hash>.js           the interpreter, fetched when a program is first run
+dist/embed/<worker>.<hash>.js        the interpreter's Worker
+dist/embed/preprocessed.<hash>.js    the preprocessor dialog, fetched when it is first opened
+dist/embed/licenses.html             what the footer links to
 ```
 
 Copy the directory into the host's assets and include the one script. The
@@ -150,23 +178,35 @@ element for c-visualizer to mount into:
 `#root` is still mounted into where `#c-visualizer` is absent, so pages written
 against the standalone page keep working.
 
-Only the entry has a fixed name; the chunks carry a content hash and are
-addressed by the bundle itself. It finds them from the address the script was
-served from, so the assets may live anywhere under the host - `_static`, a CDN
-path, a subdirectory - without the build being told where. The script may go in
-the head, as Sphinx's `add_js_file` writes it: it waits for the elements.
+The loader checks `window.CodeMirror` first. A host may provide compatible
+`autocomplete`, `commands`, `language`, `state`, and `view` module namespaces;
+PLIVET then constructs its own editor from those modules and does not download
+`codemirror-fallback.js`. It does not expect the host to construct an editor.
+Where those namespaces are absent, the loader fetches the bundled fallback.
+
+The loader, application, and fallback have fixed names because the loader
+addresses them directly. Lazy chunks carry a content hash and are addressed by
+the application. Every asset is found relative to `c-visualizer.js`, so the
+directory may live under `_static`, a CDN path, or a subdirectory without a
+build-time public path. The script may go in the head, as Sphinx's
+`add_js_file` writes it: mounting waits for the document.
 
 A page with more than one visualization on it cannot say so with an id. The
-bundle publishes the class as `window.CVisualizer`, so the host builds the rest
-itself:
+loader publishes `window.CVisualizerReady`; it resolves to the class after all
+required scripts are loaded, so the host builds the instances from there:
 
 ```html
 <div class="c-visualizer-block"></div>
 <div class="c-visualizer-block"></div>
-<script src="_static/c-visualizer/c-visualizer.js"></script>
+<script
+  data-c-visualizer-auto-mount="false"
+  src="_static/c-visualizer/c-visualizer.js"
+></script>
 <script>
-  document.querySelectorAll('.c-visualizer-block').forEach((element) => {
-    new CVisualizer(element, { theme: 'light' });
+  CVisualizerReady.then((CVisualizer) => {
+    document.querySelectorAll('.c-visualizer-block').forEach((element) => {
+      new CVisualizer(element, { theme: 'light' });
+    });
   });
 </script>
 ```
@@ -175,6 +215,10 @@ itself:
 page wrote no element for it; `CVisualizer.mount(document, options)`,
 `CVisualizer.parseConfig(text)` and `CVisualizer.readConfig(document)` are the
 same functions the entry itself uses.
+
+`data-c-visualizer-auto-mount="false"` tells the loader that a managing script
+will construct every instance itself. This avoids an empty automatic instance
+while the host waits for `CVisualizerReady` and supplies callback options.
 
 ## Embedding API
 
@@ -213,16 +257,17 @@ builds anything:
 An element with no `config` attribute is read for its own text instead, so the
 JSON may be written as the element's content where that is easier.
 
-| Field             | What it says                                                                                                                                                                                        |
-| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `theme`           | `"light"` or `"dark"`. The switch in the control bar still changes it afterwards.                                                                                                                   |
-| `sourceCode`      | The program the editor opens with.                                                                                                                                                                  |
-| `files`           | `{ "path", "text" }` objects, drawn as tabs over the editor.                                                                                                                                        |
-| `entry`           | Which of `files` is the translation unit that runs. Defaults to the first.                                                                                                                          |
-| `editableRegions` | `{ "from", "to" }` offsets the reader may type in. Everything outside them is fixed.                                                                                                                |
-| `features`        | `preprocessor` - the button showing the preprocessed source; `loadFile` - the upload panel of data files a program can `fopen`.                                                                     |
-| `licenses`        | Where the footer's third-party licence report is. The deployed bundle points at its own copy; a host that publishes one elsewhere names it here.                                                    |
-| `views`           | Which canvas sections open drawn: `statement`, `callStack`, `expression`, `memory`, `mutations`, and `regions` per memory region (`text`, `readOnly`, `data`, `bss`, `heap`, `stack`, `registers`). |
+| Field             | What it says                                                                                                                                                                                                               |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `theme`           | `"light"` or `"dark"`. The switch in the control bar still changes it afterwards.                                                                                                                                          |
+| `sourceCode`      | The program the editor opens with.                                                                                                                                                                                         |
+| `files`           | `{ "path", "text" }` objects, drawn as tabs over the editor.                                                                                                                                                               |
+| `entry`           | Which source file is placed first in the interpreter's combined input. Defaults to the first.                                                                                                                              |
+| `editableRegions` | `{ "from", "to" }` offsets the reader may type in. Everything outside them is fixed.                                                                                                                                       |
+| `features`        | `preprocessor` - the button showing the preprocessed source; `loadFile` - the upload panel of data files a program can `fopen`.                                                                                            |
+| `support-build`   | Whether to construct the host-backed Build button. A programmatic host must also provide at least one `diagnosticProviders` callback; JSON cannot contain callbacks.                                                       |
+| `licenses`        | Where the footer's third-party licence report is. The deployed bundle points at its own copy; a host that publishes one elsewhere names it here.                                                                           |
+| `views`           | Which canvas sections start visible: `statement`, `callStack`, `expression`, `memory`, `mutations`, and `regions` for each implementation-memory region (`text`, `readOnly`, `data`, `bss`, `heap`, `stack`, `registers`). |
 
 Everything is optional, and a feature or a view left out is on. The View panel
 over the canvas still holds every switch, so `views` says where a reader
@@ -230,3 +275,69 @@ starts rather than what they are held to. A field written wrongly - a
 misspelled theme, a string where a boolean belongs - is dropped with a console
 warning and the rest of the configuration still applies, so one typo in a
 course page cannot leave a reader with a blank pane.
+
+### Host-managed build, diagnostics, and saving
+
+Build is opt-in because c-visualizer has no compiler service. The managing
+script supplies a registry of named callbacks. Each callback receives all
+current files plus the entry file and revision, performs its A+ grader request,
+and returns normalized diagnostics. PLIVET owns the CodeMirror view and paints
+the findings on the matching source tabs:
+
+```html
+<div class="c-visualizer-managed"></div>
+<button id="save-code">Save in host</button>
+<script
+  data-c-visualizer-auto-mount="false"
+  src="_static/c-visualizer/c-visualizer.js"
+></script>
+<script>
+  CVisualizerReady.then((CVisualizer) => {
+    const visualizer = new CVisualizer(
+      document.querySelector('.c-visualizer-managed'),
+      {
+        files: [{ path: 'main.c', text: 'int main(void) { return 0; }' }],
+        entry: 'main.c',
+        supportBuild: true,
+        diagnosticProviders: {
+          aplus: async (snapshot) => {
+            const response = await fetch('/grader/compile', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify(snapshot),
+            });
+            return response.json();
+          },
+        },
+      }
+    );
+
+    document.querySelector('#save-code').addEventListener('click', () => {
+      const snapshot = visualizer.sourceSnapshot();
+      // Save snapshot.files, snapshot.entry, and snapshot.revision in the host.
+    });
+  });
+</script>
+```
+
+Diagnostic positions are zero-based and their `to` position is exclusive. A
+diagnostic has `{ path, severity, message, code?, from, to }`, where `path`
+matches one submitted file. Results from an older revision are discarded
+automatically. Providers may also be added later with
+`registerDiagnosticProvider(name, callback)` and invoked through
+`requestDiagnostics(name)`.
+
+For host-side Save/Update controls, `sourceSnapshot()` returns every modified
+file, `onSourcesChanged(callback)` subscribes to changes, and
+`updateFiles(files, entry)` replaces the editor's complete source set. The
+callbacks and provider registry belong to each visualizer instance, so two
+blocks on one page remain independent.
+
+During browser execution, all named source files are concatenated into one
+interpreter input, with `entry` first; unicoen parses the resulting source as a
+single translation unit. Step and step-back
+locations are mapped to file-local lines, and the matching editor tab opens
+automatically. This supports ordinary teaching examples whose functions are
+split across files. It does not translate the files as separate translation
+units or link object files, so separate-translation-unit
+features such as duplicate file-local `static` names are not isolated.

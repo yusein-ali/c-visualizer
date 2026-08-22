@@ -12,7 +12,13 @@ import type { EditableRegion, SessionJSON } from '../ui/editor';
 import type { SourceFile, ViewSelection } from '../core';
 import type { StatementExplanation } from '../ui/records';
 import { isSession } from '../ui/editor';
-import { ControlBar, ZOOM_COMMAND } from '../ui/controls';
+import {
+  ControlBar,
+  ZOOM_COMMAND,
+  enablementFor,
+  runCommand,
+  stepCommand,
+} from '../ui/controls';
 import { PlivetConsole } from '../ui/console';
 import { PlivetGraph } from '../ui/graph';
 import { FilePanel, download } from '../ui/files';
@@ -22,6 +28,13 @@ import strings from '../strings';
 import { EditorController } from './EditorController';
 import { Bus } from './emitter';
 import { Theme, isDark } from './theme';
+import type {
+  DiagnosticOptions,
+  DiagnosticProvider,
+  ExternalDiagnostic,
+  SourceSnapshot,
+  Unsubscribe,
+} from './host';
 
 /**
  * The parts of PLIVET a page may switch off before it opens.
@@ -94,6 +107,14 @@ export interface PlivetOptions {
    * build writes.
    */
   licenses?: string;
+  /** Called after any file text, file set or entry-file change. */
+  onSourceChange?: (snapshot: SourceSnapshot) => void;
+  /** Called when the visible source tab changes. */
+  onActiveFileChange?: (path: string) => void;
+  /** Add the host-backed Build button. Requires `diagnosticProviders`. */
+  supportBuild?: boolean;
+  /** Compiler callbacks supplied by the host, keyed by diagnostic source. */
+  diagnosticProviders?: Record<string, DiagnosticProvider>;
 }
 
 /**
@@ -126,12 +147,24 @@ export class Plivet {
    * preprocessor did never downloads the answer.
    */
   private preprocessed: PreprocessedDialog | null = null;
+  private readonly diagnosticProviders = new Map<string, DiagnosticProvider>();
+  private debugState: DEBUG_STATE = 'Stop';
   private theme: Theme;
 
   constructor(parent: HTMLElement, options: PlivetOptions = {}) {
     this.theme = options.theme ?? 'light';
     const features = options.features ?? {};
     const { bus, client } = this;
+    for (const [source, provider] of Object.entries(
+      options.diagnosticProviders ?? {}
+    )) {
+      this.registerDiagnosticProvider(source, provider);
+    }
+    if (options.supportBuild === true && this.diagnosticProviders.size === 0) {
+      throw new Error(
+        'support-build requires at least one diagnostic provider from the host'
+      );
+    }
 
     this.shell = new PlivetShell(parent, {
       version: packageJson.version,
@@ -142,6 +175,7 @@ export class Plivet {
     });
 
     this.controls = new ControlBar(this.shell.controls, {
+      statusParent: this.shell.status,
       onDebug: (command) => bus.signal('debug', command),
       onZoom: (command: ZOOM_COMMAND) => bus.signal('zoom', command),
       onTheme: (dark) => bus.signal('changeTheme', dark ? 'dark' : 'light'),
@@ -149,8 +183,17 @@ export class Plivet {
       onPreprocessed: () => void this.showPreprocessed(),
       onOpenFile: (file: File) => void this.openFile(file),
       onSaveCode: () => this.saveCode(),
+      onBuild:
+        options.supportBuild === true
+          ? () => {
+              void this.requestDiagnostics().catch((error: unknown) =>
+                console.error(error)
+              );
+            }
+          : undefined,
       dark: isDark(this.theme),
       preprocessor: features.preprocessor !== false,
+      build: options.supportBuild === true,
     });
 
     this.editor = new EditorController(this.shell.editor, {
@@ -161,6 +204,8 @@ export class Plivet {
       files: options.files,
       entry: options.entry,
       editableRegions: options.editableRegions,
+      onSourceChange: options.onSourceChange,
+      onActiveFileChange: options.onActiveFileChange,
     });
 
     this.console = new PlivetConsole(this.shell.console, {
@@ -179,6 +224,7 @@ export class Plivet {
       views: options.views,
       onFocus: (object: string | null) =>
         bus.signal('focusObject', object, 'graph'),
+      onNavigate: (target) => bus.signal('navigateMemory', target),
     });
 
     // The panel and the box it mounts into go together: with the feature off
@@ -195,9 +241,10 @@ export class Plivet {
     this.help = new HowToDialog(this.shell.root);
 
     bus.slot('changeTheme', (theme: Theme) => this.setTheme(theme));
-    bus.slot('changeState', (debugState: DEBUG_STATE, step: number) =>
-      this.controls.setDebugState(debugState, step)
-    );
+    bus.slot('changeState', (debugState: DEBUG_STATE, step: number) => {
+      this.debugState = debugState;
+      this.controls.setDebugState(debugState, step);
+    });
     bus.slot('changeOutput', (output: string) =>
       this.console.setOutput(output)
     );
@@ -218,6 +265,7 @@ export class Plivet {
         }
       }
     );
+    this.shell.root.addEventListener('keydown', this.debugShortcut);
   }
 
   /**
@@ -267,6 +315,96 @@ export class Plivet {
     return this.editor.session();
   }
 
+  /** Every source file exactly as it stands now, for saving or submission. */
+  sourceSnapshot(): SourceSnapshot {
+    return this.editor.sourceSnapshot();
+  }
+
+  onSourcesChanged(listener: (snapshot: SourceSnapshot) => void): Unsubscribe {
+    return this.editor.onSourcesChanged(listener);
+  }
+
+  onActiveFileChanged(listener: (path: string) => void): Unsubscribe {
+    return this.editor.onActiveFileChanged(listener);
+  }
+
+  /** Replace the complete program after a host-side load or update. */
+  updateFiles(files: SourceFile[], entry?: string): boolean {
+    return this.editor.updateFiles(files, entry);
+  }
+
+  /** Supply already-normalized findings without registering a provider. */
+  setDiagnostics(
+    source: string,
+    diagnostics: ExternalDiagnostic[],
+    options: DiagnosticOptions = {}
+  ): boolean {
+    return this.editor.setExternalDiagnostics(
+      source.trim(),
+      diagnostics,
+      options
+    );
+  }
+
+  clearDiagnostics(source: string): void {
+    this.editor.clearExternalDiagnostics(source);
+  }
+
+  /**
+   * Register the host callback that submits source to one compiler service.
+   * The returned function unregisters only this exact provider.
+   */
+  registerDiagnosticProvider(
+    source: string,
+    provider: DiagnosticProvider
+  ): Unsubscribe {
+    const name = source.trim();
+    if (name === '') {
+      throw new Error('A diagnostic provider needs a non-empty source name');
+    }
+    this.diagnosticProviders.set(name, provider);
+    return () => {
+      if (this.diagnosticProviders.get(name) === provider) {
+        this.diagnosticProviders.delete(name);
+        this.clearDiagnostics(name);
+      }
+    };
+  }
+
+  /**
+   * Ask one registered provider, or all of them, to compile the current files.
+   * False means no provider existed or every returned answer had gone stale.
+   */
+  async requestDiagnostics(source?: string): Promise<boolean> {
+    let providers = Array.from(this.diagnosticProviders.entries());
+    if (typeof source !== 'undefined') {
+      const provider = this.diagnosticProviders.get(source);
+      providers =
+        typeof provider === 'undefined' ? [] : [[source, provider] as const];
+    }
+    if (providers.length === 0) {
+      return false;
+    }
+    const snapshot = this.sourceSnapshot();
+    const results = await Promise.all(
+      providers.map(async ([name, provider]) => {
+        const diagnostics = await provider(snapshot);
+        // A provider replaced while this answer was in flight no longer owns
+        // the diagnostic source, even if the program itself did not change.
+        if (this.diagnosticProviders.get(name) !== provider) {
+          return false;
+        }
+        if (!Array.isArray(diagnostics)) {
+          throw new TypeError('A diagnostic provider must return an array');
+        }
+        return this.setDiagnostics(name, diagnostics, {
+          revision: snapshot.revision,
+        });
+      })
+    );
+    return results.some(Boolean);
+  }
+
   /**
    * Puts a saved session back. What arrives from outside is checked rather
    * than trusted - it may be another version's, another tool's, or half of
@@ -308,6 +446,8 @@ export class Plivet {
     // The interpreter first: its Worker is the one thing that goes on running
     // after the widgets it reports to have gone.
     this.client.destroy();
+    this.shell.root.removeEventListener('keydown', this.debugShortcut);
+    this.diagnosticProviders.clear();
     this.bus.destroy();
     this.help.destroy();
     this.preprocessed?.destroy();
@@ -328,6 +468,53 @@ export class Plivet {
     this.graph.setDark(isDark(theme));
     this.preprocessed?.setDark(isDark(theme));
   }
+
+  /** Debugger function keys, scoped to the PLIVET instance that has focus. */
+  private debugShortcut = (event: KeyboardEvent): void => {
+    if (
+      event.defaultPrevented ||
+      event.altKey ||
+      event.ctrlKey ||
+      event.metaKey ||
+      event.shiftKey
+    ) {
+      return;
+    }
+    const enabled = enablementFor(this.debugState);
+    let handled = true;
+    switch (event.key) {
+      case 'F5':
+        if (enabled.StepAll) {
+          this.bus.signal('debug', runCommand(this.debugState));
+        } else {
+          handled = false;
+        }
+        break;
+      case 'F6':
+        if (enabled.Step) {
+          this.bus.signal('debug', stepCommand(this.debugState));
+        } else {
+          handled = false;
+        }
+        break;
+      case 'F7':
+        if (enabled.StepOver) {
+          this.bus.signal('debug', 'StepOver');
+        } else {
+          handled = false;
+        }
+        break;
+      case 'F9':
+        this.editor.toggleBreakpoint();
+        break;
+      default:
+        handled = false;
+    }
+    if (handled) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  };
 
   private async upload(files: FileList): Promise<void> {
     try {

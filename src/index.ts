@@ -32,3 +32,11 @@ export type { ViewSelection } from './core';
 export type { Theme } from './app/theme';
 export type { EditableRegion, SessionJSON } from './ui/editor';
 export type { SourceFile } from './core';
+export type {
+  DiagnosticOptions,
+  DiagnosticProvider,
+  ExternalDiagnostic,
+  SourcePosition,
+  SourceSnapshot,
+  Unsubscribe,
+} from './app/host';

@@ -60,6 +60,8 @@ export interface RuntimeStringLiteral {
 export interface RuntimeFunctionLocation {
   name: string;
   address: number;
+  /** Illustrative code size used by the teaching memory map. */
+  size: number;
 }
 
 interface ExecStateWithTypeInfo extends ExecState {
@@ -81,6 +83,7 @@ export function annotateRuntimeFunctions(
   (state as ExecStateWithTypeInfo).plivetFunctions = functions.map((item) => ({
     name: item.name,
     address: item.address,
+    size: item.size,
   }));
   return state;
 }

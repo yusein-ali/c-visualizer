@@ -1,7 +1,7 @@
 /*
- * The debug controls: three button groups - files, the run, the text size -
- * with the step counter, the theme switch and the button that opens the
- * instructions.
+ * The debug controls: groups for files, the run (including the optional host
+ * build), and text size, with the step counter, theme switch and instructions
+ * button.
  *
  * This replaces `src/css/ctrlbuttons.css` and the Bootstrap `ButtonToolbar`,
  * `ButtonGroup` and `Button` around it. The three icon colours are the ones
@@ -10,6 +10,7 @@
  */
 
 .plivet-controls {
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -27,10 +28,78 @@
 }
 
 /*
- * What separates a kind of control from the next kind. The run controls are
- * the only ones that change the program's state, so they are the ones fenced
- * off: a reader who means to save a file should not be able to stop a session
- * by missing.
+ * The execution group follows VS Code's floating debug toolbar: a compact
+ * raised surface over the editor, flat icon buttons, and a dotted grip that
+ * moves it without turning a debugging gesture into an editor gesture.
+ * Its opening position is centred over the editor column. JavaScript only
+ * changes the two translations, so reset can hand that position back to CSS.
+ */
+.plivet-controls__group--debug {
+  position: absolute;
+  z-index: 4;
+  top: calc(100% + 0.35rem);
+  left: 50%;
+  gap: 0;
+  padding: 0.2rem 0.25rem 0.2rem 0.15rem;
+  border: 1px solid var(--plivet-debug-border, rgb(0 0 0 / 14%));
+  border-radius: 0.25rem;
+  background: var(--plivet-debug-bg, #f3f3f3);
+  box-shadow: 0 2px 8px var(--plivet-debug-shadow, rgb(0 0 0 / 28%));
+  color: var(--plivet-debug-color, #333333);
+  transform: translate(
+    calc(-50% + var(--plivet-debug-x, 0px)),
+    var(--plivet-debug-y, 0px)
+  );
+  white-space: nowrap;
+}
+
+.plivet-controls__drag {
+  position: relative;
+  width: 1rem;
+  min-width: 1rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--plivet-debug-grip, #777777);
+  cursor: grab;
+  touch-action: none;
+}
+
+/* Six small dots, like the grab handle on VS Code's debug toolbar. */
+.plivet-controls__drag::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2px;
+  height: 2px;
+  border-radius: 50%;
+  background: currentcolor;
+  box-shadow:
+    0 -5px currentcolor,
+    0 5px currentcolor,
+    4px -5px currentcolor,
+    4px 0 currentcolor,
+    4px 5px currentcolor;
+  transform: translate(-3px, -1px);
+}
+
+.plivet-controls__drag:hover,
+.plivet-controls__drag:focus-visible {
+  color: var(--plivet-debug-color, #333333);
+}
+
+.plivet-controls__drag:focus-visible {
+  outline: 1px solid var(--plivet-debug-focus, #007fd4);
+  outline-offset: -1px;
+}
+
+.plivet-controls__group--debug-dragging .plivet-controls__drag {
+  cursor: grabbing;
+}
+
+/*
+ * What separates one kind of control from the next.
  */
 .plivet-controls__divider {
   align-self: stretch;
@@ -38,6 +107,14 @@
   min-height: 2rem;
   background: var(--plivet-line, #333333);
   opacity: 0.35;
+}
+
+/* Build is a host/compiler action, not an execution command. When it is
+   present on the floating toolbar, a compact rule keeps that boundary clear. */
+.plivet-controls__divider--debug {
+  min-height: auto;
+  margin: 0.2rem 0.25rem;
+  background: currentcolor;
 }
 
 .plivet-controls__button {
@@ -54,6 +131,26 @@
   cursor: pointer;
 }
 
+.plivet-controls__group--debug .plivet-controls__button {
+  min-width: 2rem;
+  min-height: 1.85rem;
+  padding: 0.3rem 0.5rem;
+  border: 0;
+  border-radius: 0.2rem;
+  background: transparent;
+  color: inherit;
+}
+
+.plivet-controls__group--debug .plivet-controls__button:hover:not(:disabled),
+.plivet-controls__group--debug .plivet-controls__button:focus-visible {
+  background: var(--plivet-debug-hover-bg, rgb(0 0 0 / 8%));
+}
+
+.plivet-controls__group--debug .plivet-controls__button:focus-visible {
+  outline: 1px solid var(--plivet-debug-focus, #007fd4);
+  outline-offset: -1px;
+}
+
 .plivet-controls__button:hover:not(:disabled),
 .plivet-controls__button:focus-visible {
   background: var(--plivet-button-hover-bg, #e7edf4);
@@ -62,6 +159,11 @@
 .plivet-controls__button:disabled {
   color: #949494;
   cursor: default;
+}
+
+.plivet-controls__group--debug .plivet-controls__button:disabled {
+  color: inherit;
+  opacity: 0.4;
 }
 
 /* Enabled, a control says what it does to the run. */
@@ -77,15 +179,10 @@
   color: rgb(0 90 255);
 }
 
-.plivet-controls__help {
-  min-height: 2rem;
-  padding: 0.25rem 0.75rem;
-  border: 1px solid var(--plivet-line, #333333);
-  border-radius: 0.25rem;
-  background: var(--plivet-button-bg, #f6f6f6);
-  color: var(--plivet-button-color, #333333);
-  font: inherit;
-  cursor: pointer;
+/* Step actions are neutral in VS Code; only start/restart and stop carry a
+   semantic colour. This more specific rule applies only to the floating bar. */
+.plivet-controls__group--debug .plivet-controls__button--move:not(:disabled) {
+  color: inherit;
 }
 
 .plivet-controls__theme {
@@ -104,6 +201,13 @@
 .plivet-controls__status {
   margin-left: auto;
   color: inherit;
+}
+
+.plivet-controls__status--detached {
+  display: block;
+  margin: 0;
+  padding: 0.2rem 0.25rem;
+  font-size: 0.875rem;
 }
 
 /* The picker behind the Open button: reachable, and never drawn. */

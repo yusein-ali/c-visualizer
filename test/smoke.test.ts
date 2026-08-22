@@ -105,8 +105,8 @@ int main(void) {
  */
 const RESTART = 0;
 const STOP = 1;
-const STEP = 4;
-const RUN = 5;
+const STEP = 5;
+const RUN = 6;
 
 const buttonsOf = (parent: HTMLElement) =>
   Array.from(
@@ -179,10 +179,49 @@ afterEach(() => {
 });
 
 describe('a PLIVET on a page', () => {
+  it('supports the debugger function-key shortcuts inside its own shell', async () => {
+    const shell = parent.querySelector('.plivet') as HTMLElement;
+
+    shell.dispatchEvent(
+      new KeyboardEvent('keydown', { bubbles: true, key: 'F9' })
+    );
+    expect(plivet.session().breakpoints).toEqual([0]);
+
+    shell.dispatchEvent(
+      new KeyboardEvent('keydown', { bubbles: true, key: 'F6' })
+    );
+    await until(
+      'F6 to start the session',
+      () => statusOf(parent) === 'DebugStatus: First'
+    );
+
+    shell.dispatchEvent(
+      new KeyboardEvent('keydown', { bubbles: true, key: 'F7' })
+    );
+    await until(
+      'F7 to step over',
+      () => statusOf(parent) === 'DebugStatus: Step 1'
+    );
+  });
+
+  it('runs or continues with F5', async () => {
+    const shell = parent.querySelector('.plivet') as HTMLElement;
+    shell.dispatchEvent(
+      new KeyboardEvent('keydown', { bubbles: true, key: 'F5' })
+    );
+
+    await until(
+      'F5 to run to EOF',
+      () => statusOf(parent) === 'DebugStatus: EOF'
+    );
+    expect(outputOf(parent)).toContain('counted 42');
+  });
+
   it('opens stopped, offering the two buttons that begin a session', () => {
     const buttons = buttonsOf(parent);
     expect(statusOf(parent)).toBe('DebugStatus: Stop');
     expect(buttons.map((button) => button.disabled)).toEqual([
+      true,
       true,
       true,
       true,
@@ -217,11 +256,11 @@ describe('a PLIVET on a page', () => {
     const buttons = buttonsOf(parent);
     buttons[STEP].click();
     await until(
-      'the variable declaration',
+      'the object declaration',
       () => statusOf(parent) === 'DebugStatus: First'
     );
     expect(explained[explained.length - 1].statement!.title).toBe(
-      'variable declaration'
+      'object declaration'
     );
 
     buttons[STEP].click();
@@ -230,7 +269,7 @@ describe('a PLIVET on a page', () => {
       () => statusOf(parent) === 'DebugStatus: Step 1'
     );
     expect(explained[explained.length - 1].statement!.title).toBe(
-      'assignment statement'
+      'assignment expression'
     );
 
     buttons[STEP].click();

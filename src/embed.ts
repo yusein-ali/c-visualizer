@@ -10,14 +10,19 @@ import {
 } from './app/mount';
 import { CONFIG_ELEMENT_ID, parseConfig, readConfig } from './app/config';
 
+const autoMount =
+  !(document.currentScript instanceof HTMLScriptElement) ||
+  document.currentScript.dataset.cVisualizerAutoMount !== 'false';
+
 /**
- * The entry `npm run deploy` builds: c-visualizer as one script tag.
+ * The application entry behind the deployed `c-visualizer.js` loader.
  *
  * `main.ts` is the standalone page's own caller, and is bound up with
  * `index.html`, which webpack generates for it. A host page generates its own
  * markup instead - a Sphinx `interactive-code` directive writes the divs and
  * `add_js_file` writes the script tag - so what it needs is a bundle that
- * mounts itself into what it finds and asks the page for nothing else:
+ * mounts itself into what it finds. The loader first makes compatible
+ * CodeMirror module namespaces available, from the host or the fallback:
  *
  *     <div id="c-visualizer-config" config='{"theme": "dark"}'></div>
  *     <div id="c-visualizer"></div>
@@ -69,17 +74,19 @@ const api: CVisualizerGlobal = Object.assign(Plivet, {
 
 (window as unknown as { CVisualizer: CVisualizerGlobal }).CVisualizer = api;
 
-whenReady(() => {
-  api.instance = api.mount();
-  if (api.instance === null && findMount() === null) {
-    // Not thrown: a page that included the bundle and wrote no element for it
-    // shows its author nothing at all, and they have no stack trace to read.
-    // Say which markup is missing instead.
-    console.warn(
-      `c-visualizer: no element to mount into. Add ` +
-        `<div id="${MOUNT_ELEMENT_ID}"></div> (or #${LEGACY_MOUNT_ELEMENT_ID}) ` +
-        `to the page, and configure it with ` +
-        `<div id="${CONFIG_ELEMENT_ID}" config='{...}'></div>.`
-    );
-  }
-});
+if (autoMount) {
+  whenReady(() => {
+    api.instance = api.mount();
+    if (api.instance === null && findMount() === null) {
+      // Not thrown: a page that included the bundle and wrote no element for it
+      // shows its author nothing at all, and they have no stack trace to read.
+      // Say which markup is missing instead.
+      console.warn(
+        `c-visualizer: no element to mount into. Add ` +
+          `<div id="${MOUNT_ELEMENT_ID}"></div> (or #${LEGACY_MOUNT_ELEMENT_ID}) ` +
+          `to the page, and configure it with ` +
+          `<div id="${CONFIG_ELEMENT_ID}" config='{...}'></div>.`
+      );
+    }
+  });
+}

@@ -133,12 +133,12 @@ describe('the file buttons', () => {
 
     expect(buttons).toHaveLength(2);
     expect(buttons.map((button) => button.getAttribute('aria-label'))).toEqual([
-      strings.openCode,
       strings.saveCode,
+      strings.openCode,
     ]);
     // The tooltip is the sentence, for a reader the picture did not reach.
-    expect(buttons[0].title).toContain(strings.openCodeHint);
-    expect(buttons[1].title).toContain(strings.saveCodeHint);
+    expect(buttons[0].title).toContain(strings.saveCodeHint);
+    expect(buttons[1].title).toContain(strings.openCodeHint);
     // Nothing is spelled out: the label would be back to taking the room.
     expect(buttons.map((button) => button.textContent)).toEqual(['', '']);
     for (const button of buttons) {

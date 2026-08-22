@@ -7,6 +7,8 @@ import { Construct } from '../interpreter/Construct';
 import { Expansion } from '../interpreter/Expansion';
 import { RuntimeDiagnostic } from '../interpreter/RuntimeDiagnostic';
 import { LintDiagnostic } from '../interpreter/TeachingLint';
+import { ExecutionSource } from './executionSource';
+import type { SourceLocation } from './executionSource';
 
 export type CONTROL_EVENT =
   | 'Exec'
@@ -15,6 +17,7 @@ export type CONTROL_EVENT =
   | 'BackAll'
   | 'StepBack'
   | 'Step'
+  | 'StepOver'
   | 'StepAll'
   | 'SyntaxCheck';
 export type DEBUG_STATE =
@@ -39,9 +42,8 @@ export interface SourceFile {
 export interface Request {
   controlEvent: CONTROL_EVENT;
   /**
-   * The translation unit to compile. It is the text of the entry file, and it
-   * stays in the protocol as its own field because everything downstream -
-   * the response, the history, the breakpoint rows - is about this one text.
+   * The entry file text, retained as the fallback for older callers that do
+   * not send `files`. A multi-file request composes its named sources below.
    */
   sourcecode: string;
   stdinText?: string;
@@ -49,17 +51,15 @@ export interface Request {
   /**
    * Every file the reader has open, and which of them is the one that runs.
    *
-   * C compiles one translation unit at a time and PLIVET's preprocessor
-   * discards `#include`, so only the entry is compiled today. The list still
-   * crosses the boundary, because the directive PLIVET is meant to embed in
-   * is multi-file by design - the parts of a block are editor tabs, exactly
-   * one of them is the main file, and every part is submitted together - and
-   * widening a string afterwards would touch every `controlEvent` branch, the
-   * line mapping and the message shapes at once.
+   * unicoen has no linker, so PLIVET composes these into one interpreter input
+   * with the entry first. Step locations are mapped back to the named file,
+   * which lets the editor follow a call into another tab.
    */
   files?: SourceFile[];
   /** The `path` of the file in `files` that is the translation unit. */
   entry?: string;
+  /** The file whose editor diagnostics a SyntaxCheck should return. */
+  active?: string;
 }
 
 /**
@@ -73,12 +73,22 @@ export interface SyntaxErrorModel {
   msg: string;
 }
 
+/** Syntax errors belonging to one named file in a start/run preflight. */
+export interface FileSyntaxErrors {
+  path: string;
+  errors: SyntaxErrorModel[];
+}
+
 export interface Response {
   output: string;
   sourcecode: string;
   debugState: DEBUG_STATE;
   step: number;
   errors: SyntaxErrorModel[];
+  /** Every file that prevents Start/Exec, with file-local coordinates. */
+  fileErrors?: FileSyntaxErrors[];
+  /** The first failing file the editor should bring into view. */
+  diagnosticPath?: string;
   /**
    * The step as the interface reads it. Always present: a state the
    * interpreter has none for - a stopped session, a syntax check - is an empty
@@ -86,6 +96,8 @@ export interface Response {
    * draws it.
    */
   model: StepModel;
+  /** The current interpreter range mapped back to one visible source tab. */
+  location?: SourceLocation;
   /** Preprocessor replacements, for the editor to mark. Syntax checks only. */
   expansions?: Expansion[];
   /** Parsed statements, for the editor and canvas to explain. Checks/Start. */
@@ -108,11 +120,7 @@ export interface Response {
   runtime?: RuntimeDiagnostic[];
 }
 
-/**
- * The text to compile: the entry file where the request names one, and the
- * `sourcecode` field otherwise. The two agree today - the caller fills both -
- * and this is what decides when they ever do not.
- */
+/** The entry text for syntax checks and callers that send no named file set. */
 const entryTextOf = (request: Request): string => {
   const { files, entry, sourcecode } = request;
   if (typeof files === 'undefined' || typeof entry === 'undefined') {
@@ -121,6 +129,35 @@ const entryTextOf = (request: Request): string => {
   const found = files.find((file) => file.path === entry);
   return typeof found === 'undefined' ? sourcecode : found.text;
 };
+
+/** The open tab a syntax check belongs to; old callers check the entry. */
+const activePathOf = (request: Request): string => {
+  const { files, active, entry } = request;
+  if (
+    typeof files !== 'undefined' &&
+    typeof active !== 'undefined' &&
+    files.some((file) => file.path === active)
+  ) {
+    return active;
+  }
+  return entry ?? '';
+};
+
+const activeTextOf = (request: Request): string => {
+  const path = activePathOf(request);
+  return (
+    request.files?.find((file) => file.path === path)?.text ??
+    entryTextOf(request)
+  );
+};
+
+/** The composed source used for execution; syntax checks remain entry-only. */
+const executionSourceOf = (request: Request): ExecutionSource =>
+  new ExecutionSource(
+    request.files ?? [],
+    request.entry ?? '',
+    entryTextOf(request)
+  );
 
 /** How many times the run has reached one line. Lines are 1-based. */
 export interface LineCount {
@@ -133,7 +170,7 @@ export interface LineCount {
  * end of the program, at a read, or at a breakpoint. `StepAll` returns as soon
  * as the run starts, so what stopped it has to be reported separately.
  */
-export type RUN_EVENT = 'EOF' | 'stdin' | 'Breakpoint';
+export type RUN_EVENT = 'EOF' | 'stdin' | 'Breakpoint' | 'StepOver';
 
 /**
  * Where a step of the session left it, before it is spelled out for the
@@ -148,6 +185,12 @@ interface StepResult {
   step: number;
 }
 
+/** The source coordinates exposed by unicoen's next expression. */
+interface InterpreterRange {
+  begin: { x: number; y: number };
+  end: { x: number; y: number };
+}
+
 interface StartResult {
   step: StepResult;
   constructs: Construct[];
@@ -157,7 +200,9 @@ interface StartResult {
 interface ExpansionSource {
   getExpansions(code: string): Expansion[];
   getConstructs(code: string): Construct[];
-  getLints(code: string): LintDiagnostic[];
+  getLints(code: string, linkedCode?: string): LintDiagnostic[];
+  getTeachingLints(code: string): LintDiagnostic[];
+  getLinkerLints(code: string): LintDiagnostic[];
   getRuntimeDiagnostics(): RuntimeDiagnostic[];
 }
 
@@ -169,6 +214,8 @@ function reportsExpansions(
     typeof source.getExpansions === 'function' &&
     typeof source.getConstructs === 'function' &&
     typeof source.getLints === 'function' &&
+    typeof source.getTeachingLints === 'function' &&
+    typeof source.getLinkerLints === 'function' &&
     typeof source.getRuntimeDiagnostics === 'function'
   );
 }
@@ -202,6 +249,12 @@ export class Server {
    */
   private readonly coverage = new Map<number, number>();
   private interpreter: Interpreter | null = null;
+  /**
+   * The source map armed by Start. Follow-up commands intentionally do not
+   * have to repeat their source text, so their ranges must use the same map
+   * rather than constructing an empty translation unit from the command.
+   */
+  private execution: ExecutionSource | null = null;
   private readonly history: StepHistory;
 
   /**
@@ -254,40 +307,75 @@ export class Server {
 
   public async send(request: Request): Promise<Response> {
     const { controlEvent, stdinText, lineNumOfBreakpoint } = request;
-    const sourcecode = entryTextOf(request);
+    const requestedExecution = executionSourceOf(request);
 
     switch (controlEvent) {
       case 'Start': {
-        const started = await this.Start(sourcecode);
-        return this.respond(started.step, sourcecode, started.constructs);
+        const refused = await this.preflight(request);
+        if (refused !== null) {
+          return refused;
+        }
+        this.execution = requestedExecution;
+        const started = await this.Start(requestedExecution.code);
+        return this.respond(
+          started.step,
+          requestedExecution,
+          started.constructs
+        );
       }
       case 'Stop': {
-        return this.respond(this.Stop(), sourcecode);
+        return this.respond(this.Stop(), this.execution ?? requestedExecution);
       }
       case 'BackAll': {
-        return this.respond(this.BackAll(), sourcecode);
+        return this.respond(
+          this.BackAll(),
+          this.execution ?? requestedExecution
+        );
       }
       case 'StepBack': {
-        return this.respond(this.StepBack(), sourcecode);
+        return this.respond(
+          this.StepBack(),
+          this.execution ?? requestedExecution
+        );
       }
       case 'Step': {
-        return this.respond(this.Step(stdinText), sourcecode);
+        return this.respond(
+          this.Step(stdinText),
+          this.execution ?? requestedExecution
+        );
+      }
+      case 'StepOver': {
+        const execution = this.execution ?? requestedExecution;
+        return this.respond(
+          this.StepOver(execution, lineNumOfBreakpoint, stdinText),
+          execution
+        );
       }
       case 'StepAll': {
+        const execution = this.execution ?? requestedExecution;
         return this.respond(
-          this.StepAll(sourcecode, lineNumOfBreakpoint, stdinText),
-          sourcecode
+          this.StepAll(execution, lineNumOfBreakpoint, stdinText),
+          execution
         );
       }
       case 'Exec': {
-        await this.Start(sourcecode);
+        const refused = await this.preflight(request);
+        if (refused !== null) {
+          return refused;
+        }
+        this.execution = requestedExecution;
+        await this.Start(requestedExecution.code);
         return this.respond(
-          this.StepAll(sourcecode, lineNumOfBreakpoint),
-          sourcecode
+          this.StepAll(requestedExecution, lineNumOfBreakpoint),
+          requestedExecution
         );
       }
       case 'SyntaxCheck': {
-        return this.SyntaxCheck(sourcecode);
+        return this.SyntaxCheck(
+          activeTextOf(request),
+          activePathOf(request),
+          requestedExecution
+        );
       }
     }
   }
@@ -299,19 +387,23 @@ export class Server {
    */
   private respond(
     result: StepResult,
-    sourcecode: string,
+    execution: ExecutionSource,
     constructs?: Construct[]
   ): Response {
+    const model = extractModel(result.execState);
+    const location = execution.locate(model.codeRange);
     return {
-      model: extractModel(result.execState),
+      model,
       output: result.output,
-      sourcecode,
+      sourcecode: execution.code,
       debugState: result.debugState,
       step: result.step,
       errors: [],
       runtime: this.runtimeDiagnostics(),
-      coverage: this.lineCounts(),
+      coverage:
+        location === null ? [] : this.lineCounts(execution, location.path),
       constructs,
+      ...(location === null ? {} : { location }),
     };
   }
 
@@ -448,14 +540,96 @@ export class Server {
    * it happens.
    */
   private StepAll(
-    sourcecode: string,
+    execution: ExecutionSource,
     lineNumOfBreakpoint?: number[],
     stdinText?: string
   ): StepResult {
     const executing = this.held(this.count, 'Executing');
     this.runToken += 1;
-    void this.run(this.runToken, sourcecode, lineNumOfBreakpoint, stdinText);
+    void this.run(this.runToken, execution, lineNumOfBreakpoint, stdinText);
     return executing;
+  }
+
+  /**
+   * Run the statement under the marker without stopping in a function it
+   * calls. Like Continue, this returns an Executing response first and does
+   * the work asynchronously so Stop can still retire a long-running call.
+   */
+  private StepOver(
+    execution: ExecutionSource,
+    lineNumOfBreakpoint?: number[],
+    stdinText?: string
+  ): StepResult {
+    const executing = this.held(this.count, 'Executing');
+    this.runToken += 1;
+    void this.runOver(this.runToken, execution, lineNumOfBreakpoint, stdinText);
+    return executing;
+  }
+
+  private async runOver(
+    token: number,
+    execution: ExecutionSource,
+    lineNumOfBreakpoint?: number[],
+    stdinText?: string
+  ): Promise<void> {
+    await pause();
+    const initial = this.history.stateAt(this.count);
+    const initialDepth = initial?.getStacks().length ?? 0;
+    const initialRange = initial?.getNextExpr()?.codeRange;
+    let pendingStdin = stdinText;
+    let taken = 0;
+
+    while (this.runToken === token) {
+      const result = this.Step(pendingStdin);
+      pendingStdin = undefined;
+      if (result.debugState === 'EOF' || result.debugState === 'stdin') {
+        this.report(result.debugState, result, execution);
+        return;
+      }
+      if (
+        typeof lineNumOfBreakpoint !== 'undefined' &&
+        this.stoppedAtBreakpoint(result, lineNumOfBreakpoint)
+      ) {
+        this.report('Breakpoint', result, execution);
+        return;
+      }
+      if (this.steppedOver(initialDepth, initialRange, result.execState)) {
+        this.report('StepOver', result, execution);
+        return;
+      }
+      taken += 1;
+      if (taken % RUN_SLICE === 0) {
+        await pause();
+      }
+    }
+  }
+
+  /** The next expression is back in the frame and past the source we left. */
+  private steppedOver(
+    initialDepth: number,
+    initialRange: InterpreterRange | undefined,
+    state?: ExecState
+  ): boolean {
+    // The first state may precede the entry frame. There is no caller to stay
+    // in yet, so Step Over has the same meaning as one ordinary step.
+    if (initialDepth <= 1 || typeof state === 'undefined') {
+      return true;
+    }
+    const depth = state.getStacks().length;
+    if (initialDepth < depth) {
+      return false;
+    }
+    if (depth < initialDepth || typeof initialRange === 'undefined') {
+      return true;
+    }
+    const range = state.getNextExpr()?.codeRange;
+    return (
+      typeof range === 'undefined' ||
+      range.begin.x !== initialRange.begin.x ||
+      range.begin.y !== initialRange.begin.y ||
+      range.end.x !== initialRange.end.x ||
+      range.end.y !== initialRange.end.y
+    );
   }
 
   /**
@@ -466,7 +640,7 @@ export class Server {
    */
   private async run(
     token: number,
-    sourcecode: string,
+    execution: ExecutionSource,
     lineNumOfBreakpoint?: number[],
     stdinText?: string
   ): Promise<void> {
@@ -481,14 +655,14 @@ export class Server {
       const result = this.Step(pendingStdin);
       pendingStdin = undefined;
       if (result.debugState === 'EOF' || result.debugState === 'stdin') {
-        this.report(result.debugState, result, sourcecode);
+        this.report(result.debugState, result, execution);
         return;
       }
       if (
         typeof lineNumOfBreakpoint !== 'undefined' &&
         this.stoppedAtBreakpoint(result, lineNumOfBreakpoint)
       ) {
-        this.report('Breakpoint', result, sourcecode);
+        this.report('Breakpoint', result, execution);
         return;
       }
       taken += 1;
@@ -511,13 +685,24 @@ export class Server {
     if (typeof result.execState === 'undefined') {
       return false;
     }
-    const { codeRange } = result.execState.getNextExpr();
+    // A step can stop with no next expression at all - a `switch` entering its
+    // `default` is the one that happens in practice - and a breakpoint cannot
+    // be on a line the step does not have, so this is read rather than
+    // destructured.
+    const next = result.execState.getNextExpr();
+    const codeRange = next === null ? null : next.codeRange;
     return (
-      Boolean(codeRange) && lineNumOfBreakpoint.includes(codeRange.begin.y - 1)
+      codeRange !== null &&
+      typeof codeRange !== 'undefined' &&
+      lineNumOfBreakpoint.includes(codeRange.begin.y - 1)
     );
   }
 
-  private async SyntaxCheck(code: string): Promise<Response> {
+  private async SyntaxCheck(
+    code: string,
+    path: string,
+    execution: ExecutionSource
+  ): Promise<Response> {
     // Deliberately a throwaway interpreter, never `this.interpreter`.
     const interpreter = await this.createInterpreter();
     const errors: SyntaxErrorModel[] = interpreter
@@ -527,6 +712,31 @@ export class Server {
         charPositionInLine,
         msg: getMsg(),
       }));
+    const lints =
+      reportsExpansions(interpreter) && errors.length === 0
+        ? interpreter.getTeachingLints(code).concat(
+            interpreter.getLinkerLints(execution.code).flatMap((diagnostic) => {
+              const location = execution.locate({
+                begin: { x: diagnostic.column, y: diagnostic.line },
+                end: {
+                  x: diagnostic.endColumn,
+                  y: diagnostic.endLine,
+                },
+              });
+              return location?.path === path
+                ? [
+                    {
+                      ...diagnostic,
+                      line: location.range.begin.y,
+                      column: location.range.begin.x,
+                      endLine: location.range.end.y,
+                      endColumn: location.range.end.x,
+                    },
+                  ]
+                : [];
+            })
+          )
+        : [];
     return {
       errors,
       expansions: reportsExpansions(interpreter)
@@ -537,15 +747,63 @@ export class Server {
         : [],
       // A program that does not parse has syntax errors to fix first, and a
       // teaching rule reading a broken tree would only add noise to them.
-      lints:
-        reportsExpansions(interpreter) && errors.length === 0
-          ? interpreter.getLints(code)
-          : [],
+      lints,
       sourcecode: code,
+      diagnosticPath: path,
       model: emptyStepModel(),
       debugState: 'Stop',
       output: '',
       step: this.count,
+    };
+  }
+
+  /**
+   * Parse every source before a new session is armed. unicoen recovers from
+   * parser errors aggressively enough to execute malformed input, which is
+   * useful while editing but wrong for Start/Run: a debugger must not pretend
+   * that a program the compiler rejects is executable.
+   */
+  private async preflight(request: Request): Promise<Response | null> {
+    const sources =
+      typeof request.files === 'undefined' || request.files.length === 0
+        ? [{ path: request.entry ?? '', text: entryTextOf(request) }]
+        : [
+            ...request.files.filter((file) => file.path === request.entry),
+            ...request.files.filter((file) => file.path !== request.entry),
+          ];
+    const interpreter = await this.createInterpreter();
+    const fileErrors: FileSyntaxErrors[] = [];
+    for (const file of sources) {
+      const errors = interpreter
+        .checkSyntaxError(file.text)
+        .map(({ line, charPositionInLine, getMsg }) => ({
+          line,
+          charPositionInLine,
+          msg: getMsg(),
+        }));
+      if (errors.length !== 0) {
+        fileErrors.push({ path: file.path, errors });
+      }
+    }
+    if (fileErrors.length === 0) {
+      return null;
+    }
+    const stopped = this.Stop();
+    const first = fileErrors[0];
+    const sourcecode =
+      sources.find((file) => file.path === first.path)?.text ?? '';
+    return {
+      output: '',
+      sourcecode,
+      debugState: 'Stop',
+      step: stopped.step,
+      errors: first.errors,
+      fileErrors,
+      diagnosticPath: first.path,
+      model: emptyStepModel(),
+      constructs: [],
+      expansions: [],
+      lints: [],
     };
   }
 
@@ -569,16 +827,25 @@ export class Server {
     this.coverage.set(line, (this.coverage.get(line) ?? 0) + 1);
   }
 
-  private lineCounts(): LineCount[] {
-    return [...this.coverage.entries()].map(([line, count]) => ({
-      line,
-      count,
-    }));
+  private lineCounts(execution: ExecutionSource, path: string): LineCount[] {
+    return [...this.coverage.entries()].flatMap(([line, count]) => {
+      const location = execution.locate({
+        begin: { x: 0, y: line },
+        end: { x: 0, y: line },
+      });
+      return location?.path === path
+        ? [{ line: location.range.begin.y, count }]
+        : [];
+    });
   }
 
-  private report(event: RUN_EVENT, result: StepResult, sourcecode: string) {
+  private report(
+    event: RUN_EVENT,
+    result: StepResult,
+    execution: ExecutionSource
+  ) {
     if (this.onRunEvent !== null) {
-      this.onRunEvent(event, this.respond(result, sourcecode));
+      this.onRunEvent(event, this.respond(result, execution));
     }
   }
 }
