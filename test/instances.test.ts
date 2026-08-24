@@ -89,6 +89,24 @@ describe('two instances on one page', () => {
     b.destroy();
   });
 
+  it('lists a gutter breakpoint in its own bottom dock', () => {
+    const parent = parentOf();
+    const plivet = new Plivet(parent, {
+      sourceCode: 'int main(void) { return 0; }',
+    });
+    const root = parent.querySelector('.plivet') as HTMLElement;
+
+    root.dispatchEvent(new KeyboardEvent('keydown', { key: 'F9' }));
+
+    expect(
+      parent.querySelector('tbody .plivet-breakpoints__location')?.textContent
+    ).toBe('@ program.c: 1');
+    expect(
+      (parent.querySelector('[data-panel="breakpoints"]') as HTMLElement).hidden
+    ).toBe(false);
+    plivet.destroy();
+  });
+
   /** The bus is the instance's own, so a theme chosen in one stays in one. */
   it('do not re-theme each other', () => {
     const first = parentOf();

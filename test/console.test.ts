@@ -31,15 +31,16 @@ describe('output', () => {
 
   it('starts collapsed and can be toggled from its summary', () => {
     const { console, parent } = mount();
+    const disclosure = console.root as HTMLDetailsElement;
 
-    expect(console.root.open).toBe(false);
+    expect(disclosure.open).toBe(false);
     expect(parent.querySelector('summary')?.textContent).toBe(
       'Standard streams'
     );
-    console.root.open = true;
-    expect(console.root.open).toBe(true);
-    console.root.open = false;
-    expect(console.root.open).toBe(false);
+    disclosure.open = true;
+    expect(disclosure.open).toBe(true);
+    disclosure.open = false;
+    expect(disclosure.open).toBe(false);
   });
 
   it('shows what the program printed, as text', () => {
@@ -47,7 +48,27 @@ describe('output', () => {
     console.setOutput('<not markup>\n');
     expect(output.textContent).toBe('<not markup>\n');
     expect(output.querySelector('*')).toBeNull();
-    expect(console.root.open).toBe(true);
+    expect((console.root as HTMLDetailsElement).open).toBe(true);
+  });
+
+  it('lets a tabbed dock provide the heading and reveal new output', () => {
+    const parent = document.createElement('div');
+    const reveal = jest.fn();
+    const console = new PlivetConsole(parent, {
+      heading: false,
+      onReveal: reveal,
+    });
+
+    expect(parent.querySelector('summary')).toBeNull();
+    expect(console.root.tagName).toBe('SECTION');
+    expect(console.root.textContent).not.toContain('Details');
+    console.setOutput('printed');
+    expect(reveal).toHaveBeenCalledTimes(1);
+    console.setOutput('');
+    expect(reveal).toHaveBeenCalledTimes(1);
+    console.setAccepting(true);
+    expect(reveal).toHaveBeenCalledTimes(2);
+    console.destroy();
   });
 });
 
@@ -57,7 +78,7 @@ describe('input', () => {
     expect(field.disabled).toBe(true);
     console.setAccepting(true);
     expect(field.disabled).toBe(false);
-    expect(console.root.open).toBe(true);
+    expect((console.root as HTMLDetailsElement).open).toBe(true);
     console.setAccepting(false);
     expect(field.disabled).toBe(true);
   });

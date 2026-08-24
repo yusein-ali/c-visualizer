@@ -21,6 +21,9 @@ import {
   stepCommand,
 } from '../ui/controls';
 import { PlivetConsole } from '../ui/console';
+import { DebuggerDock } from '../ui/debugger';
+import { BreakpointTable } from '../ui/breakpoints';
+import type { BreakpointEntry } from '../ui/breakpoints';
 import { PlivetGraph } from '../ui/graph';
 import type {
   DiagnosticActivity,
@@ -153,6 +156,8 @@ export class Plivet {
   private readonly shell: PlivetShell;
   private readonly controls: ControlBar;
   private readonly editor: EditorController;
+  private readonly debugger: DebuggerDock;
+  private readonly breakpointTable: BreakpointTable;
   private readonly console: PlivetConsole;
   private readonly graph: PlivetGraph;
   /** Null where the page has switched the upload panel off. */
@@ -171,6 +176,7 @@ export class Plivet {
   private debugState: DEBUG_STATE = 'Stop';
   private stdinCommand: CONTROL_EVENT = 'StepAll';
   private theme: Theme;
+  private breakpointCount = 0;
 
   constructor(parent: HTMLElement, options: PlivetOptions = {}) {
     this.theme = options.theme ?? 'light';
@@ -233,8 +239,18 @@ export class Plivet {
     });
     this.controls.setDebugToolbarTabs(this.editor.tabBarElement);
 
-    this.console = new PlivetConsole(this.shell.console, {
+    this.debugger = new DebuggerDock(this.shell.debugger);
+    this.breakpointTable = new BreakpointTable(this.debugger.breakpoints, {
+      onEnabled: (path, line, enabled) =>
+        this.editor.setBreakpointEnabled(path, line, enabled),
+      onRemove: (path, line) => this.editor.removeBreakpoint(path, line),
+      onNavigate: (path, line) => this.editor.navigateToBreakpoint(path, line),
+      onAllEnabled: (enabled) => this.editor.setAllBreakpointsEnabled(enabled),
+    });
+    this.console = new PlivetConsole(this.debugger.console, {
       dark: isDark(this.theme),
+      heading: false,
+      onReveal: () => this.debugger.showConsole(),
       inputHint: strings.consoleInputHint,
       inputLabel: strings.consoleInputLabel,
       // Resume rather than single-step: the run stops at the next read, at a
@@ -282,6 +298,15 @@ export class Plivet {
     bus.slot('runStatus', (status: RunStatus) =>
       this.graph.setRunStatus(status)
     );
+    bus.slot('breakpoints', (entries: BreakpointEntry[]) => {
+      const reveal = this.breakpointCount === 0 && entries.length !== 0;
+      this.breakpointCount = entries.length;
+      this.debugger.setBreakpointCount(entries.length);
+      this.breakpointTable.setBreakpoints(entries);
+      if (reveal) {
+        this.debugger.showBreakpoints();
+      }
+    });
     bus.slot('changeOutput', (output: string) =>
       this.console.setOutput(output)
     );
@@ -303,6 +328,10 @@ export class Plivet {
       }
     );
     this.shell.root.addEventListener('keydown', this.debugShortcut);
+    const initialBreakpoints = this.editor.breakpointEntries();
+    this.breakpointCount = initialBreakpoints.length;
+    this.debugger.setBreakpointCount(initialBreakpoints.length);
+    this.breakpointTable.setBreakpoints(initialBreakpoints);
     if (typeof this.onWindowClose !== 'undefined') {
       // Unlike `unload`, `pagehide` also works when the page enters the
       // back-forward cache. The callback must remain synchronous: browsers do
@@ -514,6 +543,8 @@ export class Plivet {
     this.files?.destroy();
     this.graph.destroy();
     this.console.destroy();
+    this.breakpointTable.destroy();
+    this.debugger.destroy();
     this.editor.destroy();
     this.controls.destroy();
     this.shell.destroy();

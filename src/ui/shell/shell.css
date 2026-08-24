@@ -134,6 +134,10 @@
 	min-width: 0;
 }
 
+.plivet__debugger {
+	min-width: 0;
+}
+
 /*
  * The handles between the boxes.
  *

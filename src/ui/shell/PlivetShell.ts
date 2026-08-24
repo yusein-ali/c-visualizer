@@ -79,10 +79,11 @@ export class PlivetShell {
   readonly editor: HTMLDivElement;
   /** The debug state and step count, immediately below the editor. */
   readonly status: HTMLDivElement;
-  readonly console: HTMLDivElement;
   readonly files: HTMLDivElement;
   /** The right-hand column: the visualization. */
   readonly main: HTMLDivElement;
+  /** The Console/Breakpoints dock below the editor. */
+  readonly debugger: HTMLDivElement;
   private readonly side: HTMLDivElement;
   private readonly splitters: Splitter[];
   private readonly observer: ResizeObserver | null;
@@ -102,8 +103,8 @@ export class PlivetShell {
     this.editor.className = 'plivet__editor';
     this.status = document.createElement('div');
     this.status.className = 'plivet__status';
-    this.console = document.createElement('div');
-    this.console.className = 'plivet__console';
+    this.debugger = document.createElement('div');
+    this.debugger.className = 'plivet__debugger';
     this.files = document.createElement('div');
     this.files.className = 'plivet__files';
 
@@ -119,7 +120,7 @@ export class PlivetShell {
       this.editor,
       this.status,
       editorSplit.element,
-      this.console,
+      this.debugger,
       ...(options.files === false ? [] : [this.files])
     );
 

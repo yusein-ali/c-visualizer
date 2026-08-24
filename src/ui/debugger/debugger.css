@@ -1,0 +1,62 @@
+.plivet-debugger {
+	box-sizing: border-box;
+	margin: 1px;
+	border: 1px solid var(--plivet-line, var(--bs-border-color, #999));
+	background: var(--plivet-surface, var(--bs-body-bg, #fff));
+	color: var(--plivet-ink, var(--bs-body-color, #222));
+	font-family: var(--plivet-font, system-ui, sans-serif);
+}
+
+.plivet-debugger *,
+.plivet-debugger *::before,
+.plivet-debugger *::after {
+	box-sizing: inherit;
+}
+
+.plivet-debugger__tabs {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	min-height: 34px;
+	padding: 2px 5px;
+	border-bottom: 1px solid var(--plivet-line, var(--bs-border-color, #999));
+}
+
+.plivet-debugger--collapsed .plivet-debugger__tabs {
+	border-bottom: 0;
+}
+
+.plivet-debugger__tab {
+	min-height: 28px;
+	padding: 3px 8px;
+	border: 0;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	cursor: pointer;
+}
+
+.plivet-debugger__tab:hover {
+	background: var(--plivet-button-hover-bg, #e7edf4);
+}
+
+.plivet-debugger__tab[aria-selected='true'] {
+	box-shadow: inset 0 -2px 0 var(--plivet-breakpoint-accent, #1769aa);
+	font-weight: 700;
+}
+
+.plivet-debugger__count {
+	display: inline-grid;
+	place-items: center;
+	min-width: 19px;
+	min-height: 19px;
+	margin-left: 5px;
+	padding: 0 5px;
+	border-radius: 10px;
+	background: var(--plivet-button-hover-bg, #e7edf4);
+	font-size: 0.8em;
+}
+
+.plivet-debugger__panel[hidden] {
+	display: none;
+}

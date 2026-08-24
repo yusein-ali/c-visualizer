@@ -8,6 +8,7 @@ import type {
 } from '../ui/graph';
 import type { Theme } from './theme';
 import type { ZOOM_COMMAND } from '../ui/controls';
+import type { BreakpointEntry } from '../ui/breakpoints';
 
 export type event =
   | 'debug'
@@ -20,7 +21,8 @@ export type event =
   | 'navigateMemory'
   | 'diagnostics'
   | 'diagnosticActivity'
-  | 'runStatus';
+  | 'runStatus'
+  | 'breakpoints';
 
 /**
  * What each event carries. The signatures were `any[]` while React components
@@ -58,6 +60,8 @@ export interface EventPayloads {
   diagnosticActivity: [activity: DiagnosticActivity];
   /** Why the latest run failed to proceed, or null after it is reset. */
   runStatus: [status: RunStatus];
+  /** The complete table whenever a mark, source line or hit count changes. */
+  breakpoints: [entries: BreakpointEntry[]];
 }
 
 type Listener = (...args: any[]) => void;

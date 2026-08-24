@@ -61,6 +61,53 @@ const FILES = [
   { path: 'notes.c', text: 'int unused = 1;' },
 ];
 
+describe('a breakpoint in a tab that is not in front', () => {
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('is sent with the file it was marked in', () => {
+    const { host, controller, sent } = mounted(FILES);
+
+    // Mark the first line of notes.c, then go back to main.c and run. The
+    // mark is now in a session rather than in the visible document, which is
+    // where it used to be dropped.
+    tabButtons(host)[1].click();
+    expect(controller.active()).toBe('notes.c');
+    controller.toggleBreakpoint();
+    tabButtons(host)[0].click();
+    expect(controller.active()).toBe('main.c');
+
+    sent.length = 0;
+    controller.send('Exec');
+
+    expect(sent[sent.length - 1].breakpoints).toEqual([
+      { path: 'notes.c', rows: [0] },
+    ]);
+    controller.destroy();
+    host.remove();
+  });
+
+  it('is sent beside the marks in the tab that is', () => {
+    const { host, controller, sent } = mounted(FILES);
+
+    tabButtons(host)[1].click();
+    controller.toggleBreakpoint();
+    tabButtons(host)[0].click();
+    controller.toggleBreakpoint();
+
+    sent.length = 0;
+    controller.send('Exec');
+
+    expect(sent[sent.length - 1].breakpoints).toEqual([
+      { path: 'main.c', rows: [0] },
+      { path: 'notes.c', rows: [0] },
+    ]);
+    controller.destroy();
+    host.remove();
+  });
+});
+
 describe('the editor with several files', () => {
   it('does not activate the parser until the editor is approached', () => {
     const { host, controller, sent } = mounted(FILES);
@@ -93,6 +140,61 @@ describe('the editor with several files', () => {
     ]);
     expect(controller.code()).toContain('scanf("%d", &entered)');
     expect(controller.code()).toContain('fopen("c-visualizer.txt", "w")');
+
+    controller.destroy();
+    host.remove();
+  });
+
+  it('collects breakpoints from every file and navigates back to their lines', () => {
+    const { host, controller } = mounted(FILES, 'main.c');
+    controller.toggleBreakpoint();
+    tabButtons(host)[1].click();
+    controller.toggleBreakpoint();
+
+    expect(controller.breakpointEntries()).toEqual([
+      {
+        path: 'main.c',
+        line: 1,
+        enabled: true,
+        statement: 'int main(void) {',
+        hits: 0,
+      },
+      {
+        path: 'notes.c',
+        line: 1,
+        enabled: true,
+        statement: 'int unused = 1;',
+        hits: 0,
+      },
+    ]);
+
+    controller.recieve({
+      output: '',
+      sourcecode: FILES.map((file) => file.text).join('\n'),
+      debugState: 'Debugging',
+      step: 4,
+      errors: [],
+      model: emptyStepModel(),
+      location: {
+        path: 'notes.c',
+        range: {
+          begin: { x: 0, y: 1 },
+          end: { x: 14, y: 1 },
+        },
+      },
+      coverage: [{ line: 1, count: 4 }],
+    });
+    expect(controller.breakpointEntries()[1].hits).toBe(4);
+
+    controller.setBreakpointEnabled('main.c', 1, false);
+    expect(controller.breakpointEntries()[0].enabled).toBe(false);
+
+    controller.navigateToBreakpoint('main.c', 1);
+    expect(controller.active()).toBe('main.c');
+    const editor = (controller as any).editor;
+    expect(
+      editor.view.state.doc.lineAt(editor.view.state.selection.main.head).number
+    ).toBe(1);
 
     controller.destroy();
     host.remove();

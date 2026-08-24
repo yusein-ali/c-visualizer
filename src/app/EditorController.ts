@@ -11,6 +11,7 @@ import {
   ExecutionSource,
   ExpressionModel,
   ExpressionNodeModel,
+  FileBreakpoints,
   FileLints,
   FileSyntaxErrors,
   StepModel,
@@ -34,7 +35,9 @@ import {
   rangeOf,
   rowRange,
   TeachingDiagnostic,
+  BreakpointState,
 } from '../ui/editor';
+import type { BreakpointEntry } from '../ui/breakpoints';
 import {
   declarationFor,
   functionDefinitionFor,
@@ -337,6 +340,8 @@ export class EditorController {
     (snapshot: SourceSnapshot) => void
   >();
   private readonly activeFileListeners = new Set<(path: string) => void>();
+  /** Latest interpreter arrival counts, by source file and one-based line. */
+  private readonly breakpointHits = new Map<string, Map<number, number>>();
   private revision = 0;
   /** Prevent tab restoration and other internal document swaps becoming edits. */
   private suppressEditorChange = false;
@@ -412,6 +417,7 @@ export class EditorController {
       onHoverObject: (object: string | null) =>
         this.bus.signal('focusObject', object, 'editor'),
       onWatchesChanged: () => this.showWatches(),
+      onBreakpointsChanged: () => this.signalBreakpointsChanged(),
       declarationAt: (request: DeclarationRequest) =>
         this.declarationRange(request),
       completions: this.completions.source,
@@ -615,9 +621,10 @@ export class EditorController {
     this.entryPath = entryPathFor(this.files, entry);
     this.activePath = this.entryPath;
     this.sourcecode = this.fileAt(this.activePath).text;
-    this.withSuppressedEditorChange(() =>
-      this.editor.replaceCode(this.sourcecode)
-    );
+    this.withSuppressedEditorChange(() => {
+      this.editor.replaceCode(this.sourcecode);
+      this.editor.debug.setBreakpointStates(this.editor.view, []);
+    });
     this.clearLocalDiagnostics();
     this.showTabs();
     this.sourceChanged();
@@ -708,9 +715,10 @@ export class EditorController {
     const arriving = this.fileAt(path);
     this.activePath = path;
     if (arriving.session === null) {
-      this.withSuppressedEditorChange(() =>
-        this.editor.replaceCode(arriving.text)
-      );
+      this.withSuppressedEditorChange(() => {
+        this.editor.replaceCode(arriving.text);
+        this.editor.debug.setBreakpointStates(this.editor.view, []);
+      });
     } else {
       this.withSuppressedEditorChange(() =>
         this.editor.debug.restore(this.editor.view, arriving.session!)
@@ -728,6 +736,7 @@ export class EditorController {
     this.showTabs();
     this.showDiagnostics();
     this.signalActiveFileChanged();
+    this.signalBreakpointsChanged();
     // A file that is not the one that runs has no marks of its own to show:
     // the parser is answering about the translation unit, and drawing its
     // findings over another file would be pointing at the wrong lines.
@@ -855,6 +864,7 @@ export class EditorController {
     this.localFindings.delete(changed);
     this.programFindings.delete(changed);
     this.runtimeLints = [];
+    this.breakpointHits.clear();
     this.preflightErrors.clear();
     this.externalLints.clear();
     this.bus.signal('runStatus', null);
@@ -863,6 +873,7 @@ export class EditorController {
     for (const listener of this.sourceListeners) {
       listener(snapshot);
     }
+    this.signalBreakpointsChanged();
   }
 
   private signalActiveFileChanged(): void {
@@ -904,6 +915,7 @@ export class EditorController {
       controlEvent,
       stdinText,
       lineNumOfBreakpoint: this.breakpoints(),
+      breakpoints: this.markedRows(),
       files,
       entry: this.entryPath,
       active: checkedPath,
@@ -1018,9 +1030,146 @@ export class EditorController {
     this.editor.debug.toggleBreakpoint(this.editor.view);
   }
 
+  /** Every breakpoint in every tab, ready for the debugger table. */
+  breakpointEntries(): BreakpointEntry[] {
+    return this.files.flatMap((file) => {
+      const states = this.breakpointStatesFor(file);
+      const lines = (
+        file.path === this.activePath ? this.sourcecode : file.text
+      ).split('\n');
+      const hits = this.breakpointHits.get(file.path);
+      return states.map((breakpoint) => ({
+        path: file.path,
+        line: breakpoint.row + 1,
+        enabled: breakpoint.enabled,
+        statement: lines[breakpoint.row]?.trim() ?? '',
+        hits: hits?.get(breakpoint.row + 1) ?? 0,
+      }));
+    });
+  }
+
+  setBreakpointEnabled(path: string, line: number, enabled: boolean): void {
+    this.changeBreakpoint(path, line, (breakpoints, row) =>
+      breakpoints.map((breakpoint) =>
+        breakpoint.row === row ? { ...breakpoint, enabled } : breakpoint
+      )
+    );
+  }
+
+  removeBreakpoint(path: string, line: number): void {
+    this.changeBreakpoint(path, line, (breakpoints, row) =>
+      breakpoints.filter((breakpoint) => breakpoint.row !== row)
+    );
+  }
+
+  setAllBreakpointsEnabled(enabled: boolean): void {
+    for (const file of this.files) {
+      const states = this.breakpointStatesFor(file).map((breakpoint) => ({
+        ...breakpoint,
+        enabled,
+      }));
+      this.storeBreakpointStates(file, states);
+    }
+    this.signalBreakpointsChanged();
+  }
+
+  /** Open a breakpoint's tab and place the editor selection on its line. */
+  navigateToBreakpoint(path: string, line: number): void {
+    if (!this.files.some((file) => file.path === path)) {
+      return;
+    }
+    this.activate(path, false, false);
+    const row = Math.max(Math.trunc(line) - 1, 0);
+    goTo(this.editor.view, rowRange(this.editor.view.state.doc, row));
+    this.editor.view.focus();
+  }
+
   /** Breakpoints as the interpreter counts them: zero-based rows. */
   private breakpoints(): number[] {
     return this.editor.debug.rows(this.editor.view.state);
+  }
+
+  private breakpointStatesFor(file: OpenFile): BreakpointState[] {
+    if (file.path === this.activePath) {
+      return this.editor.debug.breakpoints(this.editor.view.state);
+    }
+    return [
+      ...(file.session?.breakpoints ?? []).map((row) => ({
+        row,
+        enabled: true,
+      })),
+      ...(file.session?.disabledBreakpoints ?? []).map((row) => ({
+        row,
+        enabled: false,
+      })),
+    ].sort((left, right) => left.row - right.row);
+  }
+
+  private changeBreakpoint(
+    path: string,
+    line: number,
+    change: (states: BreakpointState[], row: number) => BreakpointState[]
+  ): void {
+    const file = this.files.find((candidate) => candidate.path === path);
+    const row = Math.trunc(line) - 1;
+    if (typeof file === 'undefined' || row < 0) {
+      return;
+    }
+    const states = this.breakpointStatesFor(file);
+    if (!states.some((breakpoint) => breakpoint.row === row)) {
+      return;
+    }
+    this.storeBreakpointStates(file, change(states, row));
+    if (file.path !== this.activePath) {
+      this.signalBreakpointsChanged();
+    }
+  }
+
+  private storeBreakpointStates(
+    file: OpenFile,
+    states: BreakpointState[]
+  ): void {
+    if (file.path === this.activePath) {
+      this.editor.debug.setBreakpointStates(this.editor.view, states);
+      return;
+    }
+    if (file.session === null) {
+      return;
+    }
+    file.session = {
+      ...file.session,
+      breakpoints: states
+        .filter((breakpoint) => breakpoint.enabled)
+        .map((breakpoint) => breakpoint.row),
+      disabledBreakpoints: states
+        .filter((breakpoint) => !breakpoint.enabled)
+        .map((breakpoint) => breakpoint.row),
+    };
+  }
+
+  private signalBreakpointsChanged(): void {
+    this.bus.signal('breakpoints', this.breakpointEntries());
+  }
+
+  /**
+   * Every marked row the reader has set, in every tab.
+   *
+   * A breakpoint belongs to the file it is in, and only the visible tab's
+   * document holds live marks: the rest are in the session each tab was left
+   * with. Sending the visible rows alone is what made a breakpoint in a
+   * helper do nothing - it was never in the request, so the run had nothing
+   * to stop for.
+   */
+  private markedRows(): FileBreakpoints[] {
+    return this.files
+      .map((file) => ({
+        path: file.path,
+        rows:
+          file.path === this.activePath
+            ? this.breakpoints()
+            : (file.session?.breakpoints ?? []),
+      }))
+      .filter((file) => file.rows.length > 0);
   }
 
   recieve(response: Response) {
@@ -1054,6 +1203,17 @@ export class EditorController {
         this.preflightErrors.clear();
       }
       this.setDebugging(debugState !== 'Stop');
+      if (debugState === 'Stop') {
+        this.breakpointHits.clear();
+      } else if (
+        typeof location !== 'undefined' &&
+        typeof coverage !== 'undefined'
+      ) {
+        this.breakpointHits.set(
+          location.path,
+          new Map(coverage.map((entry) => [entry.line, entry.count]))
+        );
+      }
       this.showSourceLocation(location, debugState);
       if (typeof response.constructs !== 'undefined') {
         this.executionConstructs = response.constructs;
@@ -1074,6 +1234,7 @@ export class EditorController {
         this.editor.view,
         typeof coverage === 'undefined' ? [] : coverage
       );
+      this.signalBreakpointsChanged();
       // Running suspends redraw, not the controls: Stop and Restart must be
       // enabled while the Worker is advancing through a long call or run.
       this.bus.signal('changeState', debugState, step);

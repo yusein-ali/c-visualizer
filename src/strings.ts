@@ -28,6 +28,22 @@ const strings = {
     'Compare the written source with the preprocessing tokens left after macro replacement and conditional inclusion. This view is read-only.',
   debugStatus: 'DebugStatus',
   debugToolbar: 'Debug toolbar',
+  debuggerPanels: 'Debugger panels',
+  breakpointsTitle: 'Breakpoints',
+  breakpointsEnabled: 'On',
+  breakpointsLocation: 'Location',
+  breakpointsStatement: 'Statement',
+  breakpointsHits: 'Hits',
+  breakpointsActions: 'Actions',
+  breakpointsEmpty: 'No breakpoints are set.',
+  breakpointsBlankLine: '(blank line)',
+  breakpointsNavigateHint: 'Double-click a row to open its source location.',
+  breakpointsRemove: 'Remove breakpoint',
+  breakpointsEnable: 'Enable breakpoint',
+  breakpointsDisable: 'Disable breakpoint',
+  breakpointsEnableAll: 'Enable all',
+  breakpointsDisableAll: 'Disable all',
+  remove: 'Remove',
   moveDebugToolbar:
     'Move debug toolbar. Use arrow keys to move it and Enter to reset it.',
   step: 'Step',
@@ -97,8 +113,7 @@ const strings = {
     'a labelled statement cannot be stepped, so this program cannot use ' +
     "'goto'",
   gotoUnsupported: "'goto' cannot be stepped",
-  shiftAssignUnsupported:
-    "'>>=' cannot be stepped; write it as 'x = x >> n'",
+  shiftAssignUnsupported: "'>>=' cannot be stepped; write it as 'x = x >> n'",
   diagnosticsRunStoppedOnError: 'Run stopped because of a runtime error',
   diagnosticsRunStoppedAt: 'Execution stopped at',
   diagnosticsRunInvalidStatement: 'because the statement is not valid.',
@@ -192,7 +207,7 @@ const strings = {
     {
       title: 'Run and step through it',
       items: [
-        'Click the breakpoint gutter to set or remove a breakpoint. Continue stops at the next breakpoint, request to read from the standard input stream, or program termination.',
+        'Click the breakpoint gutter to set or remove a breakpoint. The Breakpoints panel lists every marked location as @ file: line; double-click a row to open that source line, or use the table to enable, disable, or remove breakpoints. Continue stops at the next enabled breakpoint, request to read from the standard input stream, or program termination.',
         'The seven execution buttons, from left to right, restart, stop, rewind to the first recorded step, step backward, step over function calls, step forward, and continue. Before a session starts, the two forward buttons start stepping or run to the first breakpoint.',
         'During a session the source is read-only. The editor highlights the current statement, shows relevant values beside it, shades lines by how often they ran, and the status displays the current step. Stop to edit the source again.',
         'Backward controls replay recorded history; they do not execute C in reverse. Restart begins again with the current source and breakpoints.',

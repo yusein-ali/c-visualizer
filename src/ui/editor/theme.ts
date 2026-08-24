@@ -222,11 +222,17 @@ export const debugTheme = EditorView.baseTheme({
     padding: '0 0.25em',
   },
   '.plivet-breakpoint': {
+    boxSizing: 'border-box',
     display: 'block',
     width: '0.7em',
     height: '0.7em',
     borderRadius: '50%',
     backgroundColor: 'var(--plivet-breakpoint-color, #d90000)',
+  },
+  '.plivet-breakpoint--disabled': {
+    border: '2px solid var(--plivet-breakpoint-color, #d90000)',
+    backgroundColor: 'transparent',
+    opacity: '0.65',
   },
   // Standalone, these are the rules interactive-code.css applies to a frozen
   // editor; embedded, its stylesheet says the same thing about the same

@@ -8,8 +8,11 @@ import { EditorView } from '@codemirror/view';
 import { Expansion } from '../../interpreter/Expansion';
 import {
   applyBreakpoints,
+  applyBreakpointStates,
   breakpointGutter,
   breakpointRows,
+  breakpointStates,
+  BreakpointState,
   toggleBreakpoint,
 } from './breakpoints';
 import { lintGutter } from '@codemirror/lint';
@@ -82,6 +85,8 @@ export interface DebugExtensionOptions {
    * application's to look up, so it is told to look again.
    */
   onWatchesChanged?: () => void;
+  /** The breakpoint set or one of its enabled states changed. */
+  onBreakpointsChanged?: () => void;
 }
 
 export class DebugExtensions {
@@ -112,6 +117,25 @@ export class DebugExtensions {
     if (typeof options.declarationAt !== 'undefined') {
       this.extensions.push(gotoDeclaration(options.declarationAt));
     }
+    if (typeof options.onBreakpointsChanged !== 'undefined') {
+      const changed = options.onBreakpointsChanged;
+      this.extensions.push(
+        EditorView.updateListener.of((update) => {
+          const before = breakpointStates(update.startState);
+          const after = breakpointStates(update.state);
+          if (
+            before.length !== after.length ||
+            before.some(
+              (breakpoint, index) =>
+                breakpoint.row !== after[index].row ||
+                breakpoint.enabled !== after[index].enabled
+            )
+          ) {
+            changed();
+          }
+        })
+      );
+    }
     // The gesture is only worth adding where somebody is listening for what
     // it changed: a pinned watch nobody fills in says a name and nothing.
     if (typeof options.onWatchesChanged !== 'undefined') {
@@ -135,6 +159,14 @@ export class DebugExtensions {
 
   setBreakpoints(view: EditorView, rows: number[]): void {
     applyBreakpoints(view, rows);
+  }
+
+  breakpoints(state: EditorState): BreakpointState[] {
+    return breakpointStates(state);
+  }
+
+  setBreakpointStates(view: EditorView, states: BreakpointState[]): void {
+    applyBreakpointStates(view, states);
   }
 
   /** Toggle the breakpoint on the line holding the primary cursor. */

@@ -53,6 +53,15 @@
 	overflow-y: auto;
 }
 
+.plivet-console--embedded {
+	margin: 0;
+	border: 0;
+	height: auto;
+	min-height: 9rem;
+	max-height: 32vh;
+	overflow-y: auto;
+}
+
 .plivet-console--dark {
 	--plivet-console-surface: var(
 		--plivet-console-bg,

@@ -1,7 +1,9 @@
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import {
+  breakpointStates,
   breakpointField,
+  setBreakpointStates,
   setBreakpoints,
   toggleBreakpoint,
 } from '../src/ui/editor/breakpoints';
@@ -71,6 +73,27 @@ describe('saving a session', () => {
     restoreSession(other, opened);
     expect(other.state.doc.toString()).toBe(doc);
     expect(breakpointRows(other.state)).toEqual([1]);
+    other.destroy();
+  });
+
+  it('keeps disabled breakpoints visible without enabling them', () => {
+    const view = viewWith();
+    view.dispatch({
+      effects: setBreakpointStates.of([
+        { row: 1, enabled: true },
+        { row: 2, enabled: false },
+      ]),
+    });
+    const written = JSON.parse(JSON.stringify(sessionOf(view.state)));
+    view.destroy();
+
+    const other = viewWith('int main() {}');
+    restoreSession(other, written);
+    expect(breakpointRows(other.state)).toEqual([1]);
+    expect(breakpointStates(other.state)).toEqual([
+      { row: 1, enabled: true },
+      { row: 2, enabled: false },
+    ]);
     other.destroy();
   });
 });

@@ -1026,6 +1026,97 @@ int main(void) {
     });
   });
 
+  /**
+   * A breakpoint in a file that is not the open tab.
+   *
+   * The rows used to be read as the active file's whatever file they were
+   * marked in, so a mark in a helper the reader had switched away from was
+   * either applied to the wrong file's line or lost with it.
+   */
+  it('stops in a file the reader is not looking at', async () => {
+    const server = new Server();
+    const files = [
+      {
+        path: 'main.c',
+        text: 'int twice(int value);\nint main(void) {\n  return twice(2);\n}\n',
+      },
+      {
+        path: 'helper.c',
+        text: 'int twice(int value) {\n  int doubled = value * 2;\n  return doubled;\n}\n',
+      },
+    ];
+    const stopped = new Promise<{ event: string; response: Response }>(
+      (resolve) => {
+        server.onRunEvent = (event, response) => resolve({ event, response });
+      }
+    );
+
+    await quiet(() =>
+      server.send({
+        controlEvent: 'Exec',
+        sourcecode: files[0].text,
+        files,
+        entry: 'main.c',
+        // The reader is in main.c; the mark is in helper.c.
+        active: 'main.c',
+        lineNumOfBreakpoint: [],
+        breakpoints: [{ path: 'helper.c', rows: [2] }],
+      })
+    );
+
+    const { event, response } = await stopped;
+    expect(event).toBe('Breakpoint');
+    expect(response.location).toMatchObject({
+      path: 'helper.c',
+      range: { begin: { y: 3 } },
+    });
+  });
+
+  it('marks every file that carries one, in one run', async () => {
+    const server = new Server();
+    const files = [
+      {
+        path: 'main.c',
+        text: 'int twice(int value);\nint main(void) {\n  int a = 1;\n  return twice(a);\n}\n',
+      },
+      {
+        path: 'helper.c',
+        text: 'int twice(int value) {\n  int doubled = value * 2;\n  return doubled;\n}\n',
+      },
+    ];
+    const events: string[] = [];
+    const request = (controlEvent: 'Exec' | 'StepAll') => ({
+      controlEvent,
+      sourcecode: files[0].text,
+      files,
+      entry: 'main.c',
+      active: 'main.c',
+      breakpoints: [
+        { path: 'main.c', rows: [3] },
+        { path: 'helper.c', rows: [2] },
+      ],
+    });
+    const nextEvent = () =>
+      new Promise<Response>((resolve) => {
+        server.onRunEvent = (event, response) => {
+          events.push(
+            `${event}@${response.location?.path}:${response.location?.range.begin.y}`
+          );
+          resolve(response);
+        };
+      });
+
+    let stopped = nextEvent();
+    await quiet(() => server.send(request('Exec')));
+    await stopped;
+    stopped = nextEvent();
+    await quiet(() => server.send(request('StepAll')));
+    await stopped;
+
+    // Both marks are honoured, in the order the run reaches them.
+    expect(events).toEqual(['Breakpoint@main.c:4', 'Breakpoint@helper.c:3']);
+  });
+
   it('puts only referenced stdio routines in text memory', async () => {
     const response = await quiet(() =>
       new Server().send({

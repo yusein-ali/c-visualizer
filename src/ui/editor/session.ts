@@ -1,6 +1,10 @@
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
-import { applyBreakpoints, breakpointRows } from './breakpoints';
+import {
+  applyBreakpointStates,
+  breakpointRows,
+  breakpointStates,
+} from './breakpoints';
 import { unprotected } from './protected';
 import { toggleWatch, watchField } from './watches';
 
@@ -30,6 +34,8 @@ export interface SessionJSON {
   editor: unknown;
   /** Zero-based rows, as everything that talks to the interpreter is. */
   breakpoints: number[];
+  /** Disabled rows stay visible and can be enabled again from the table. */
+  disabledBreakpoints?: number[];
   /** The names the reader pinned, and where. */
   watches: { name: string; pos: number }[];
 }
@@ -38,6 +44,9 @@ export const sessionOf = (state: EditorState): SessionJSON => ({
   version: 1,
   editor: state.toJSON(),
   breakpoints: breakpointRows(state),
+  disabledBreakpoints: breakpointStates(state)
+    .filter((breakpoint) => !breakpoint.enabled)
+    .map((breakpoint) => breakpoint.row),
   watches: (state.field(watchField, false)?.pins ?? []).map((watch) => ({
     name: watch.name,
     pos: watch.pos,
@@ -59,6 +68,8 @@ export const isSession = (value: unknown): value is SessionJSON => {
     typeof candidate.editor === 'object' &&
     candidate.editor !== null &&
     Array.isArray(candidate.breakpoints) &&
+    (typeof candidate.disabledBreakpoints === 'undefined' ||
+      Array.isArray(candidate.disabledBreakpoints)) &&
     Array.isArray(candidate.watches)
   );
 };
@@ -85,7 +96,13 @@ export const restoreSession = (
   if (anchor !== null) {
     view.dispatch({ selection: { anchor } });
   }
-  applyBreakpoints(view, session.breakpoints);
+  applyBreakpointStates(view, [
+    ...session.breakpoints.map((row) => ({ row, enabled: true })),
+    ...(session.disabledBreakpoints ?? []).map((row) => ({
+      row,
+      enabled: false,
+    })),
+  ]);
   // Every pin is dropped before the saved ones go on, so restoring twice
   // leaves one set of watches rather than none.
   for (const name of (

@@ -24,6 +24,8 @@ export interface PlivetConsoleOptions {
   output?: string;
   /** Collapsible heading above input and output. */
   title?: string;
+  /** Draw the collapsible title when the console is not inside a tabbed dock. */
+  heading?: boolean;
   /**
    * A line the user submitted, without its terminating newline. Empty is a
    * legitimate submission: it is how a program is told to read nothing.
@@ -35,6 +37,8 @@ export interface PlivetConsoleOptions {
   inputLabel?: string;
   dark?: boolean;
   fontSize?: number;
+  /** Ask the containing layout to reveal the console for new output/input. */
+  onReveal?: () => void;
 }
 
 const defaults = {
@@ -44,24 +48,31 @@ const defaults = {
   inputLabel: 'standard input',
   dark: false,
   fontSize: 14,
+  heading: true,
 };
 
 export class PlivetConsole {
-  readonly root: HTMLDetailsElement;
+  readonly root: HTMLElement;
 
+  private readonly disclosure?: HTMLDetailsElement;
   private readonly transcript: HTMLPreElement;
   private readonly field: HTMLTextAreaElement;
   private readonly onInput?: (text: string) => void;
+  private readonly onReveal?: () => void;
   private readonly inputHint: string;
   private accepting = false;
 
   constructor(parent: HTMLElement, options: PlivetConsoleOptions = {}) {
     const config = { ...defaults, ...options };
     this.onInput = options.onInput;
+    this.onReveal = options.onReveal;
     this.inputHint = config.inputHint;
 
-    this.root = document.createElement('details');
+    this.root = document.createElement(config.heading ? 'details' : 'section');
+    this.disclosure =
+      this.root instanceof HTMLDetailsElement ? this.root : undefined;
     this.root.className = 'plivet-console';
+    this.root.classList.toggle('plivet-console--embedded', !config.heading);
     this.root.setAttribute('role', 'region');
     this.root.setAttribute('aria-label', config.title);
 
@@ -88,12 +99,18 @@ export class PlivetConsole {
     this.field.addEventListener('keydown', this.keydown);
     this.field.addEventListener('input', this.fitField);
 
-    this.root.append(title, this.transcript, this.field);
+    this.root.append(
+      ...(config.heading ? [title] : []),
+      this.transcript,
+      this.field
+    );
     parent.appendChild(this.root);
 
     // Output supplied at construction represents program I/O already in
     // progress, so it follows the same expansion rule as later stdout.
-    this.root.open = config.output !== '';
+    if (config.output !== '') {
+      this.expand();
+    }
 
     this.setDark(config.dark);
     this.setFontSize(config.fontSize);
@@ -106,7 +123,10 @@ export class PlivetConsole {
       return;
     }
     this.transcript.textContent = output;
-    this.root.open = true;
+    this.expand();
+    if (output !== '') {
+      this.onReveal?.();
+    }
     this.scrollToEnd();
   }
 
@@ -124,7 +144,8 @@ export class PlivetConsole {
       this.fitField();
       return;
     }
-    this.root.open = true;
+    this.expand();
+    this.onReveal?.();
     // The program is waiting, and the editor is read-only for the duration of
     // the session, so there is nothing else the keyboard could usefully do.
     this.field.focus();
@@ -179,5 +200,11 @@ export class PlivetConsole {
 
   private scrollToEnd(): void {
     this.root.scrollTop = this.root.scrollHeight;
+  }
+
+  private expand(): void {
+    if (typeof this.disclosure !== 'undefined') {
+      this.disclosure.open = true;
+    }
   }
 }

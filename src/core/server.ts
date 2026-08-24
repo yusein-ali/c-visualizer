@@ -50,7 +50,20 @@ export interface Request {
    */
   sourcecode: string;
   stdinText?: string;
+  /**
+   * The active file's marked rows, zero-based. The single-file form, kept for
+   * callers that send one source; `breakpoints` is what a tabbed editor sends.
+   */
   lineNumOfBreakpoint?: number[];
+  /**
+   * Every marked row the reader has set, named by the file it is in.
+   *
+   * A breakpoint belongs to a file, not to the tab that happens to be in
+   * front: marking a line in a helper and then running from the entry file
+   * used to send the entry's rows alone, so the mark in the helper was never
+   * in the request and the run went straight past it.
+   */
+  breakpoints?: FileBreakpoints[];
   /**
    * Every file the reader has open, and which of them is the one that runs.
    *
@@ -130,6 +143,12 @@ const refusals = (analysis: SourceAnalysis): LintDiagnostic[] =>
   analysis.linkerLints.filter((diagnostic) =>
     REFUSING_RULES.has(diagnostic.rule)
   );
+
+/** The rows one file is marked on, zero-based as the editor counts them. */
+export interface FileBreakpoints {
+  path: string;
+  rows: number[];
+}
 
 /** Syntax errors belonging to one named file in a start/run preflight. */
 export interface FileSyntaxErrors {
@@ -313,6 +332,22 @@ const activePathOf = (request: Request): string => {
     return active;
   }
   return entry ?? '';
+};
+
+/**
+ * Every marked row in the request, by file.
+ *
+ * `breakpoints` is what a tabbed editor sends and names its own files. The
+ * older `lineNumOfBreakpoint` names none, so its rows are read as the active
+ * file's - which is what they were, when one file was all there was.
+ */
+const markedRows = (request: Request): FileBreakpoints[] => {
+  if (typeof request.breakpoints !== 'undefined') {
+    return request.breakpoints;
+  }
+  return typeof request.lineNumOfBreakpoint === 'undefined'
+    ? []
+    : [{ path: activePathOf(request), rows: request.lineNumOfBreakpoint }];
 };
 
 const activeTextOf = (request: Request): string => {
@@ -515,21 +550,20 @@ export class Server {
   }
 
   public async send(request: Request): Promise<Response> {
-    const { controlEvent, stdinText, lineNumOfBreakpoint } = request;
+    const { controlEvent, stdinText } = request;
     const requestedExecution = executionSourceOf(request);
-    // Breakpoints come from the active editor as zero-based, file-local rows.
-    // The interpreter executes the composed source and reports one-based
-    // global lines, so translate them once before any run command consumes
-    // them. Single-file requests keep the same values after this conversion.
-    const globalBreakpoints = lineNumOfBreakpoint?.flatMap((row) => {
-      const line = requestedExecution.globalLine(
-        activePathOf(request),
-        row + 1
-      );
-      // Keep the run-loop contract in zero-based rows; only the source-map
-      // lookup itself uses one-based interpreter lines.
-      return line === null ? [] : [line - 1];
-    });
+    // Breakpoints arrive as zero-based, file-local rows. The interpreter
+    // executes the composed source and reports one-based global lines, so
+    // translate them once before any run command consumes them. Single-file
+    // requests keep the same values after this conversion.
+    const globalBreakpoints = markedRows(request).flatMap((file) =>
+      file.rows.flatMap((row) => {
+        const line = requestedExecution.globalLine(file.path, row + 1);
+        // Keep the run-loop contract in zero-based rows; only the source-map
+        // lookup itself uses one-based interpreter lines.
+        return line === null ? [] : [line - 1];
+      })
+    );
 
     switch (controlEvent) {
       case 'Start': {

@@ -61,7 +61,7 @@ describe('the shell', () => {
       shell.controls,
       shell.editor,
       shell.status,
-      shell.console,
+      shell.debugger,
       shell.files,
       shell.main,
     ]) {
