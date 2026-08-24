@@ -931,6 +931,101 @@ int main(void) {
     });
   });
 
+  /**
+   * A breakpoint on the statement the program starts at.
+   *
+   * The run loop reads the statement each step arrives at, and no step
+   * arrives at the first one: the session is already sitting on it when the
+   * run begins. It went unnoticed while the composed source map was a line
+   * out, because the breakpoint was armed on the line below the marked one.
+   */
+  it('stops on the first statement, and continues past it', async () => {
+    const server = new Server();
+    const files = [
+      {
+        path: 'main.c',
+        text: `int main(void) {
+  int a = 1;
+  int b = a + 1;
+  return b;
+}
+`,
+      },
+    ];
+    const request = (controlEvent: 'Exec' | 'StepAll') => ({
+      controlEvent,
+      sourcecode: files[0].text,
+      files,
+      entry: 'main.c',
+      active: 'main.c',
+      // `int a = 1;`, in the editor's zero-based rows.
+      lineNumOfBreakpoint: [1],
+    });
+    const nextEvent = () =>
+      new Promise<{ event: string; response: Response }>((resolve) => {
+        server.onRunEvent = (event, response) => resolve({ event, response });
+      });
+
+    const stopped = nextEvent();
+    await quiet(() => server.send(request('Exec')));
+    const first = await stopped;
+    expect(first.event).toBe('Breakpoint');
+    expect(first.response.location).toMatchObject({
+      path: 'main.c',
+      range: { begin: { y: 2 } },
+    });
+
+    // And Continue moves: a run that has taken no step yet is sitting on the
+    // breakpoint it just reported, and announcing it again would pin the
+    // reader to the line they asked to leave.
+    const resumed = nextEvent();
+    await quiet(() => server.send(request('StepAll')));
+    expect((await resumed).event).toBe('EOF');
+  });
+
+  /**
+   * The same, for a file that is neither the entry nor the first in the
+   * composed unit: the case the segment map used to be a line out for.
+   */
+  it('stops on the marked line of a file behind a header', async () => {
+    const server = new Server();
+    const files = [
+      { path: 'tour.h', text: 'int twice(int value);\n' },
+      {
+        path: 'main.c',
+        text: '#include "tour.h"\n\nint main(void) {\n  return twice(2);\n}\n',
+      },
+      {
+        path: 'helper.c',
+        text: '#include "tour.h"\n\nint twice(int value) {\n  int doubled = value * 2;\n  return doubled;\n}\n',
+      },
+    ];
+    const stopped = new Promise<{ event: string; response: Response }>(
+      (resolve) => {
+        server.onRunEvent = (event, response) => resolve({ event, response });
+      }
+    );
+
+    await quiet(() =>
+      server.send({
+        controlEvent: 'Exec',
+        sourcecode: files[1].text,
+        files,
+        entry: 'main.c',
+        active: 'helper.c',
+        // `return doubled;`, in the editor's zero-based rows.
+        lineNumOfBreakpoint: [4],
+      })
+    );
+
+    const { event, response } = await stopped;
+    expect(event).toBe('Breakpoint');
+    expect(response.location).toMatchObject({
+      path: 'helper.c',
+      range: { begin: { y: 5 } },
+    });
+  });
+
   it('puts only referenced stdio routines in text memory', async () => {
     const response = await quiet(() =>
       new Server().send({

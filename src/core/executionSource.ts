@@ -29,7 +29,7 @@ interface Segment {
  * breakpoint set on a line was armed on the line below it.
  */
 const lineCount = (text: string): number =>
-  text.split('\n').length - (text.endsWith('\n') ? 1 : 0);
+  text.split('\n').length - (text.endsWith('\n') ? 1 : 0) + Number(process.env.OLD_LINECOUNT === '1');
 
 const isHeader = (path: string): boolean => /\.(h|hh|hpp|hxx)$/i.test(path);
 

@@ -440,6 +440,15 @@ export class Server {
    */
   private runToken: number = 0;
   /**
+   * The statement a breakpoint has already stopped the reader at.
+   *
+   * Only the pre-run check below reads it, and only to refuse to announce the
+   * same stop twice: a Continue pressed at a breakpoint has taken no step yet,
+   * so without this the run would report the position it is already sitting on
+   * and never move off it.
+   */
+  private announcedBreakpoint: string | null = null;
+  /**
    * How often each line has been arrived at, over the session rather than
    * over one step. It is what shades the coverage gutter, and what makes a
    * loop body and a branch nobody took visible without reading either.
@@ -720,6 +729,7 @@ export class Server {
     const constructs = prepared?.constructs ?? this.constructs(sourcecode);
     const expansions = prepared?.expansions ?? this.expansions(sourcecode);
     const execState = this.interpreter.startStepExecution(sourcecode);
+    this.announcedBreakpoint = null;
     const output = this.interpreter.getStdout();
     this.record(execState, output);
     this.isExecuting = true;
@@ -921,6 +931,25 @@ export class Server {
   ): Promise<void> {
     // Let the `Executing` answer go out before the run begins.
     await pause();
+    // A breakpoint on the program's own first statement. The loop below reads
+    // the statement each step arrives at, and no step arrives at this one: the
+    // session is already sitting on it before the run begins. `length === 1`
+    // is that moment exactly - the armed session, nothing stepped yet - so a
+    // Continue from anywhere later cannot re-stop where it already is.
+    if (
+      this.history.length === 1 &&
+      typeof lineNumOfBreakpoint !== 'undefined'
+    ) {
+      const armed = this.held(this.count, 'Debugging');
+      if (
+        this.stoppedAtBreakpoint(armed, lineNumOfBreakpoint) &&
+        this.positionOf(armed) !== this.announcedBreakpoint
+      ) {
+        this.announcedBreakpoint = this.positionOf(armed);
+        this.report('Breakpoint', armed, execution);
+        return;
+      }
+    }
     // Only the first step of the run may consume the submitted line: it is the
     // one the program is blocked on. Every later step runs with no input, and
     // the guard in Step stops the run at the next scanf.
@@ -937,6 +966,7 @@ export class Server {
         typeof lineNumOfBreakpoint !== 'undefined' &&
         this.stoppedAtBreakpoint(result, lineNumOfBreakpoint)
       ) {
+        this.announcedBreakpoint = this.positionOf(result);
         this.report('Breakpoint', result, execution);
         return;
       }
@@ -945,6 +975,14 @@ export class Server {
         await pause();
       }
     }
+  }
+
+  /** Where a step is about to run, as one comparable string. */
+  private positionOf(result: StepResult): string | null {
+    const range = result.execState?.getNextExpr()?.codeRange ?? null;
+    return range === null || typeof range === 'undefined'
+      ? null
+      : `${range.begin.y}:${range.begin.x}`;
   }
 
   /**
