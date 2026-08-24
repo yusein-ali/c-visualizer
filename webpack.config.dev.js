@@ -3,7 +3,7 @@ const HtmlWebpackPlugin = require('html-webpack-plugin');
 const baseConfig = require('./webpack.config.js');
 
 /*
- * Phase 10's check, and the only thing this config adds to the build: a second
+ * The multi-instance check, and the only thing this config adds: a second
  * page holding two instances side by side. It is here rather than in
  * `webpack.config.js` so that `npm run build` ships one page, not two.
  */

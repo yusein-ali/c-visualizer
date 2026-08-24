@@ -9,8 +9,8 @@ import { foldPathOf } from './model';
  * stepping once closed it again - and that a click on the canvas had to reach
  * back into the model and then ask the application to redraw. It belongs to
  * the view: it is a property of what this user is looking at, not of what the
- * program is doing, and in Phase 6 it stays on the main thread while the model
- * arrives from the Worker.
+ * program is doing, and it stays on the main thread while the model arrives
+ * from the Worker.
  *
  * Nothing here holds an opinion of its own about how something should start.
  * Every one of the three asks its caller for the answer to give where the user

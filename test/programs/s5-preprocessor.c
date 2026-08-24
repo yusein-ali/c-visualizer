@@ -2,8 +2,8 @@
  * Preprocessor features PLIVET supports, and the ones it does not.
  *
  * unicoen.ts has no preprocessor; PLIVET runs its own pass in
- * src/interpreter/preprocess.ts before the parser sees the code.
- * baseline/scripts/probe-preprocessor.js measures both, feature by feature.
+ * src/interpreter/preprocess.ts before the parser sees the code, and
+ * test/preprocess.test.ts checks it feature by feature.
  *
  * Supported: object-like and function-like macros, nested expansion, #undef,
  * #ifdef / #ifndef / #if / #elif / #else / #endif with arithmetic and

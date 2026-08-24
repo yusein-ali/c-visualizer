@@ -9,8 +9,7 @@ in-page editor, then steps forward/backward through execution while the runtime 
 editor.
 
 - The only supported language is **C/C++**. The unfinished Java and Python
-  interpreters, and the machinery for choosing between languages, were removed
-  in Phase 1 of `UPGRADE_PLAN.md`.
+  interpreters, and the machinery for choosing between languages, were removed.
 - The interface is **English only**. There is no locale layer: every string the
   UI shows lives in [src/strings.ts](src/strings.ts).
 - **There is no backend.** Everything — parsing, interpretation, stepping — runs in the
@@ -22,16 +21,14 @@ editor.
 
 ## Direction (read before proposing dependency work)
 
-The stack below describes the code as it stands, not where it is going.
-`UPGRADE_PLAN.md` is the active plan: PLIVET is being rebuilt as a
-framework-free, browser-only widget — CodeMirror 6 instead of Ace, JointJS
-instead of react-konva, the interpreter in a Web Worker, and no React at all —
-so that it can later be embedded in an A+ Sphinx extension alongside the
-`interactive-code` extension in the `ai-enabled-wearable-technology` course repo.
-Phases 1–10 are done: the interface is plain TypeScript and the DOM, and a page
-holds as many instances as it likes. Scope has narrowed to C only. Do not
-reintroduce React, react-bootstrap, Bootstrap, jQuery, Enzyme, Java, Python,
-Ace, Konva or a second interface language.
+PLIVET has been rebuilt as a framework-free, browser-only widget — CodeMirror 6
+instead of Ace, JointJS instead of react-konva, the interpreter in a Web Worker,
+and no React at all — so that it can be embedded in an A+ Sphinx extension
+alongside the `interactive-code` extension in the `ai-enabled-wearable-technology`
+course repo. The interface is plain TypeScript and the DOM, a page holds as many
+instances as it likes, and scope has narrowed to C only. Do not reintroduce
+React, react-bootstrap, Bootstrap, jQuery, Enzyme, Java, Python, Ace, Konva or a
+second interface language.
 
 ## Tech stack
 
@@ -54,7 +51,7 @@ Ace, Konva or a second interface language.
 - `.tool-versions`: **nodejs 24.15.0**. `package.json` enforces `>=24 <25` and
   pins `packageManager: npm@11.12.1`.
 - Package manager is **npm** (`package-lock.json` is committed; CI uses `npm ci`).
-  `yarn.lock` was removed in Phase 2 of `UPGRADE_PLAN.md`. Do not reintroduce
+  `yarn.lock` was removed with the move to npm. Do not reintroduce
   yarn or pnpm.
 - There is intentionally no `.npmrc`: the `legacy-peer-deps` workaround was
   removed with react-konva. Do not restore it to hide dependency conflicts.
@@ -121,8 +118,8 @@ The payload of each event is declared in `EventPayloads`, so a `signal` is check
 against the `slot` that answers it.
 
 **One bus per instance**, constructed by `Plivet` and passed down — never
-imported. Phase 10 made it a class for exactly that reason, and the Node
-`EventEmitter` behind it (and the `events` polyfill) went at the same time.
+imported. It is a class for exactly that reason, and the Node `EventEmitter`
+behind it (and the `events` polyfill) went at the same time.
 
 Subscriptions are made **in constructors** and never removed one at a time;
 `Bus.destroy()` drops all of them. Follow that existing pattern rather than mixing
@@ -209,7 +206,7 @@ total on purpose; the comment in that file says what went wrong when it was not.
 - **Nothing is module-level state.** The bus and the interpreter client are
   constructed by a `Plivet` and passed to what needs them. A new `export const`
   holding a session, a cache or a registry breaks the second instance on a page,
-  which is what Phase 10 was spent removing.
+  which is what per-instance state was introduced to prevent.
 - Every widget carries its own appearance: a colocated stylesheet whose rules
   all sit under one `plivet-` class, or a CodeMirror theme. There is no shared
   stylesheet to register alongside a module lifted into another page. Colours are
@@ -237,7 +234,7 @@ holds two instances for checking that they stay out of each other's way.
 - **A misspelled name is load-bearing.** `EditorController.recieve()` is the
   actual identifier. Don't rename it incidentally — do it only as a deliberate,
   complete rename. (`src/components/menus/controle_buttons/` was the other one;
-  it went with React in Phase 9.)
+  it went with React.)
 - **JointJS does not run under jsdom.** It turns its vectorizer off when
   `window.SVGAngle` is missing, and `V.prototype` ends up empty, so constructing
   a `dia.Paper` throws. A test that mounts something containing `PlivetGraph`

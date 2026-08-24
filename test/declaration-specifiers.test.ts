@@ -456,13 +456,7 @@ int main(){ int first = 1; int second = 2; const IntPointer pointer = &first;
 
 describe('qualified aggregate teaching fixture', () => {
   const code = fs.readFileSync(
-    path.join(
-      __dirname,
-      '..',
-      'baseline',
-      'programs',
-      's7-qualified-aggregates.c'
-    ),
+    path.join(__dirname, 'programs', 's7-qualified-aggregates.c'),
     'utf8'
   );
   const fixture = execute(code);

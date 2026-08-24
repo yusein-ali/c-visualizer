@@ -4,7 +4,7 @@ const tseslint = require('typescript-eslint');
 const prettier = require('eslint-config-prettier');
 
 /**
- * TSLint is gone; this replaces it (UPGRADE_PLAN Phase 4).
+ * TSLint is gone; this replaces it.
  *
  * Two things it deliberately does not do. It does not format: Prettier owns
  * that, `eslint-config-prettier` switches off every rule that would argue with
@@ -14,7 +14,7 @@ const prettier = require('eslint-config-prettier');
  */
 module.exports = tseslint.config(
   {
-    ignores: ['dist/**', 'baseline/**', 'node_modules/**', 'coverage/**'],
+    ignores: ['dist/**', 'node_modules/**', 'coverage/**'],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
@@ -36,9 +36,9 @@ module.exports = tseslint.config(
     },
   },
   {
-    // Phase 5's boundary, enforced rather than remembered: `src/core` runs the
+    // The core boundary, enforced rather than remembered: `src/core` runs the
     // program and describes it, and knows nothing about the interface. Break
-    // this and the Worker in Phase 6 stops being a move and becomes a rewrite.
+    // this and moving the interpreter into the Worker becomes a rewrite.
     files: ['src/core/**'],
     rules: {
       'no-restricted-imports': [
@@ -56,7 +56,7 @@ module.exports = tseslint.config(
     },
   },
   {
-    // Phase 9's boundary. `src/ui` holds widgets that take a mount element and
+    // The widget boundary. `src/ui` holds widgets that take a mount element and
     // an options object and report through callbacks; the bus, the interpreter
     // client and the application state live in `src/app`. A widget that
     // imported one of them could not be lifted into the Sphinx extension,

@@ -16,7 +16,7 @@ import strings from '../../strings';
  *
  * The class knows nothing about the interpreter or the event bus: it reports a
  * submitted line through `onInput` and is told what to show. That is what lets
- * it move out of the React shell in Phase 9 without changing.
+ * it move out of the React shell without changing.
  */
 
 export interface PlivetConsoleOptions {

@@ -20,8 +20,7 @@ import { TypeQualifier } from './DeclarationSpecifiers';
  *
  *   - a `union` maps to the same `UniClassDec` a `struct` does, so by the time
  *     the engine lays it out there is nothing left to say the members share
- *     storage. `baseline/scripts/probe-aggregates.js` records what that costs:
- *     `u.i = 65; u.c` reads 0.
+ *     storage, which costs the union its aliasing: `u.i = 65; u.c` reads 0.
  *   - `typedef struct { int x; } P;` maps to a `UniClassDec` whose `className`
  *     is undefined, so the layout is filed under no name at all and `P p;`
  *     fails with "variable P is not defined".

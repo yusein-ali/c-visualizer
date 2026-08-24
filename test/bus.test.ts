@@ -25,7 +25,7 @@ describe('the bus', () => {
     ).not.toThrow();
   });
 
-  /** Phase 10's point: one page, two buses, and no path between them. */
+  /** The point of a bus per instance: two buses, no path between them. */
   it('does not reach another instance', () => {
     const one = new Bus();
     const other = new Bus();

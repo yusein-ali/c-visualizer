@@ -6,9 +6,9 @@ import {
 import { originalRange } from '../src/interpreter/Expansion';
 
 /**
- * The cases mirror `baseline/scripts/probe-preprocessor.js`, which records what
- * the stock unicoen.ts pass does. Everything asserted here is something that
- * pass got wrong, plus the behaviour that has to keep working.
+ * The cases record what the stock unicoen.ts pass does. Everything asserted
+ * here is something that pass got wrong, plus the behaviour that has to keep
+ * working.
  */
 
 const lines = (code: string) => preprocess(code).split('\n');

@@ -3,9 +3,9 @@
  * DOM, no React and no renderer anywhere in it.
  *
  * Nothing under this directory may import from `src/app/` or `src/ui/`.
- * That is the whole point of it: the interpreter side moves into a Worker in
- * Phase 6 and the layout survives the canvas being rewritten in Phase 8, and
- * neither move can drag the interface along with it.
+ * That is the whole point of it: the interpreter side moved into a Worker and
+ * the layout survived the canvas being rewritten, and neither move could drag
+ * the interface along with it.
  */
 export { InterpreterClient } from './client';
 export { Server } from './server';

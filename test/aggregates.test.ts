@@ -8,10 +8,10 @@ import { StructTable } from '../src/interpreter/StructTable';
 import { UnionTable } from '../src/interpreter/UnionTable';
 
 /**
- * The cases mirror `baseline/scripts/probe-aggregates.js`, which records what
- * the stock unicoen.ts pipeline does with `enum`, `struct` and `union`.
- * Everything asserted here is either something that pipeline got wrong or
- * behaviour that has to keep working once these tables are wired in.
+ * The cases record what the stock unicoen.ts pipeline does with `enum`,
+ * `struct` and `union`. Everything asserted here is either something that
+ * pipeline got wrong or behaviour that has to keep working once these tables
+ * are wired in.
  *
  * Unit checks keep the source readers honest; the final group verifies that
  * their answers reach the parser and runtime used by PLIVET.
@@ -401,13 +401,7 @@ describe('struct and union together', () => {
 describe('aggregate interpreter integration', () => {
   it('runs the aggregate-types teaching fixture', () => {
     const code = fs.readFileSync(
-      path.join(
-        __dirname,
-        '..',
-        'baseline',
-        'programs',
-        's6-aggregate-types.cpp'
-      ),
+      path.join(__dirname, 'programs', 's6-aggregate-types.cpp'),
       'utf8'
     );
     const result = execute(code);

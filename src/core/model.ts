@@ -3,8 +3,8 @@
  * left behind: text, keys and numbers, and nothing else.
  *
  * This is the seam the rest of the port is built on. `extractModel` produces a
- * `StepModel` from an `ExecState`, `layout` turns one into geometry, and in
- * Phase 6 the model is what crosses the Worker boundary - so everything here
+ * `StepModel` from an `ExecState`, `layout` turns one into geometry, and the
+ * model is what crosses the Worker boundary - so everything here
  * has to survive `structuredClone`. No class instances and no functions.
  */
 

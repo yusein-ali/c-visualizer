@@ -70,7 +70,7 @@ type Listener = (...args: any[]) => void;
  * One PLIVET's event bus, and the registry of what it may carry.
  *
  * It was a module-level Node `EventEmitter` - one bus for the page, which is
- * what Phase 10 changes. An instance constructs its own and passes it to the
+ * what this changes. An instance constructs its own and passes it to the
  * pieces it wires together, so two PLIVETs on one page cannot step, redraw or
  * re-theme each other. That also retires `setMaxListeners(20)`: the count was
  * only ever over the default because every instance's subscriptions landed on

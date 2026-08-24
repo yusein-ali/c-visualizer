@@ -88,7 +88,7 @@ const entryPathFor = (
  *
  * The editing itself belongs to `PlivetEditor` under `src/ui/editor`, which
  * knows nothing about React and nothing about the interpreter. This was
- * `Editor.tsx`, and it is the wiring between the two; what Phase 9 deleted was
+ * `Editor.tsx`, and it is the wiring between the two; what went with React was
  * the component around it, which by then was a `div` and a ref.
  *
  * The bus and the interpreter client are handed in rather than imported: they

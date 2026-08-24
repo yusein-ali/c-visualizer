@@ -5,9 +5,9 @@ import { constructAt } from '../src/interpreter/Construct';
 
 /**
  * End-to-end checks for the two overrides in PlivetCPP14Interpreter: the
- * preprocessor pass and the printf that can format a string literal. The
- * probe matrix in baseline/scripts/probe-preprocessor.js covers the full
- * feature list; these are the cases worth having in CI.
+ * preprocessor pass and the printf that can format a string literal.
+ * `test/preprocess.test.ts` covers the full feature list; these are the cases
+ * worth having end to end.
  */
 const run = (code: string): string => {
   const interpreter = new PlivetCPP14Interpreter();

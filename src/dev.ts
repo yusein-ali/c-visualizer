@@ -1,7 +1,7 @@
 import { Plivet } from './index';
 
 /**
- * The development page for Phase 10: two PLIVETs, side by side, on one page.
+ * The development page: two PLIVETs, side by side, on one page.
  *
  * Nothing here is shipped - `dev.html` is added by `webpack.config.dev.js`
  * only, so `npm run build` produces the single-instance `index.html` and

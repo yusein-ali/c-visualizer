@@ -4,8 +4,7 @@
  * unicoen.ts has no preprocessor. `CPP14Interpreter.preProcess` scans the text
  * for define directives, takes the second token as a key and the rest of the
  * line as a value, and runs `text.split(key).join(value)` over the whole
- * source. That has three consequences, all of them measured in
- * `baseline/scripts/probe-preprocessor.js`:
+ * source. That has three consequences:
  *
  *   - a directive with fewer than three tokens - a valueless flag, or the word
  *     written in a comment with nothing after it - makes the scan loop forever

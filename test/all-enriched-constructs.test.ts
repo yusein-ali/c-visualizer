@@ -3,7 +3,7 @@ import { join } from 'path';
 import { PlivetCPP14Interpreter } from '../src/interpreter/CPP14';
 
 const source = readFileSync(
-  join(__dirname, '..', 'baseline', 'programs', 's9-all-enriched-constructs.c'),
+  join(__dirname, 'programs', 's9-all-enriched-constructs.c'),
   'utf8'
 );
 

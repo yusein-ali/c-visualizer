@@ -95,8 +95,8 @@ module.exports = {
     }),
     new webpack.ProvidePlugin({
       // See resolve.fallback above: these are globals in Node, not modules.
-      // `$` and `jQuery` were here too, for Bootstrap 3's plugins; Phase 9
-      // removed Bootstrap along with react-bootstrap.
+      // `$` and `jQuery` were here too, for Bootstrap 3's plugins; Bootstrap
+      // went with react-bootstrap.
       Buffer: ['buffer', 'Buffer'],
       process: 'process/browser',
     }),

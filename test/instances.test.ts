@@ -32,7 +32,7 @@ jest.mock('../src/ui/graph', () => ({
 }));
 
 /**
- * Phase 10's exit criterion, as far as jsdom can carry it: two instances on
+ * The exit criterion for instances, as far as jsdom can carry it: two on
  * one page that do not touch each other. What needs a Worker - stepping one
  * program while the other runs - is checked in a browser against `dev.html`;
  * what is checked here is that the wiring above the Worker is per instance.

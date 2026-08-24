@@ -16,7 +16,7 @@ import { tags } from '@lezer/highlight';
  * without either side knowing about the other.
  *
  * Only the literal at the end of each chain differs between light and dark.
- * The dark set is what Phase 9's theme switch needed: the two themes were
+ * The dark set is what the theme switch needed: the two themes were
  * built from one palette, so `dark: true` changed which highlight style
  * CodeMirror thought it was under and nothing else - the editor stayed white
  * behind it. Nobody had seen that, because the button that would have chosen a

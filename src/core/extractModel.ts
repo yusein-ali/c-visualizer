@@ -60,8 +60,8 @@ import {
  * and it now knows about nothing else: it walks stacks and variables, spells
  * each one the way the visualization shows it, and resolves every pointer to
  * the key of the cell it points at. Where those cells end up on screen is the
- * layout's problem, and in Phase 6 this runs in the Worker while the layout
- * stays on the main thread.
+ * layout's problem, and this runs in the Worker while the layout stays on the
+ * main thread.
  */
 
 /**

@@ -98,7 +98,7 @@ export function statementSummary(model: StepModel): string {
 }
 
 /**
- * Presents the process memory through the renderer-neutral Phase 5 layouts.
+ * Presents the process memory through the renderer-neutral core layouts.
  * Keeping these adapters pure makes the JointJS surface testable without SVG.
  *
  * The core carries no display text - a segment is called `bss` there - so the

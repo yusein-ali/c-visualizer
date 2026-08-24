@@ -7,8 +7,8 @@ import { PlivetCPP14Interpreter } from '../src/interpreter/CPP14';
 import { FunctionPointerTable } from '../src/interpreter/FunctionPointerTable';
 
 /**
- * The cases mirror `baseline/scripts/probe-function-pointers.js`, which records
- * what the stock unicoen.ts pipeline does with a function pointer: nothing.
+ * The cases record what the stock unicoen.ts pipeline does with a function
+ * pointer: nothing.
  * `int (*op)(int, int) = add;` collapses into a bare `"int"` in the block body
  * and the run stops after one step with no output and no syntax error.
  *

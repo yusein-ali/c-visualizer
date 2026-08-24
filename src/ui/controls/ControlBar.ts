@@ -29,7 +29,8 @@ export type ZOOM_COMMAND = 'In' | 'Out' | 'Reset';
 export interface ControlBarOptions {
   /** A debug command the user asked for. */
   onDebug?: (command: CONTROL_EVENT) => void;
-  /** The editor's text size, which is what `zoom` has meant since Phase 8. */
+  /** The editor's text size, which is what `zoom` has meant since the
+   * canvas was rewritten. */
   onZoom?: (command: ZOOM_COMMAND) => void;
   onTheme?: (dark: boolean) => void;
   onHelp?: () => void;

@@ -75,7 +75,7 @@ export interface PlivetFeatures {
  * what came out here is the wiring rather than a rewrite.
  *
  * Nothing it uses is the page's any more. The bus and the interpreter client
- * are constructed here and passed down, which is what Phase 10 was for: two of
+ * are constructed here and passed down, which is the point of it: two of
  * these on one page own two Workers and two buses, so stepping one does not
  * move the other. This is the only public entry - `new Plivet(element)` builds
  * everything below it, and `destroy()` takes it all back down again.

@@ -99,9 +99,6 @@ The fork modernizes PLIVET and reshapes it into an embeddable teaching widget:
   and clearer execution-state controls. These make the visualizer easier to use
   in a wider range of learning settings.
 
-The detailed implementation history and architectural rationale are recorded
-in [UPGRADE_PLAN.md](UPGRADE_PLAN.md).
-
 ## Run locally
 
 The application supports current Chrome, Firefox, Edge, and Safari releases,

@@ -36,7 +36,7 @@
       ]
     },
     {
-      "description": "Tests. Jest and ts-jest are a compatible set - Phase 11 of UPGRADE_PLAN.md is what happens when they are not - so they are updated as one.",
+      "description": "Tests. Jest and ts-jest are a compatible set - the suite stops running when they are not - so they are updated as one.",
       "groupName": "test tooling",
       "matchPackageNames": [
         "jest",

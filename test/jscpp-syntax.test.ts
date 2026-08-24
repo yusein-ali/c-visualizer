@@ -500,16 +500,16 @@ describe('the whole pipeline', () => {
   /**
    * The grammar reads what `prepare()` produced, not what the reader typed:
    * the rewrite passes turn designated initializers, enums and function
-   * pointers into forms the grammar has a rule for. Checking the baseline
+   * pointers into forms the grammar has a rule for. Checking the teaching
    * programs end to end is what proves those two halves still agree.
    */
-  const dir = path.join(__dirname, '..', 'baseline', 'programs');
+  const dir = path.join(__dirname, 'programs');
   const programs = fs
     .readdirSync(dir)
     .filter((name) => name.endsWith('.c'))
     .map((name): [string, string] => [name, path.join(dir, name)]);
 
-  it.each(programs)('accepts baseline/programs/%s', (_name, file) => {
+  it.each(programs)('accepts test/programs/%s', (_name, file) => {
     expect(preflight(fs.readFileSync(file, 'utf8'))).toEqual([]);
   });
 

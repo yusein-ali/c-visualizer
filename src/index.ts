@@ -5,7 +5,7 @@
  * through an instance, so an embedding page imports this and nothing deeper.
  * The legacy names remain aliases so existing PLIVET integrations keep working.
  * `src/main.ts` is the standalone page's own use of it, and is what
- * `index.html` loads; the Sphinx extension of Phase 13 will construct its own
+ * `index.html` loads; the Sphinx extension will construct its own
  * instances the same way, one per directive on the page.
  */
 export { Plivet, Plivet as CVisualizer } from './app/Plivet';

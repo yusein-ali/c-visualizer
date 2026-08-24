@@ -3,8 +3,7 @@
  * links to.
  *
  * Replaces `license-list-html`, which shelled out to `yarn licenses
- * generate-disclaimer` and stopped working when the project moved to npm
- * (Phase 2 of UPGRADE_PLAN.md).
+ * generate-disclaimer` and stopped working when the project moved to npm.
  */
 const fs = require('fs');
 const path = require('path');

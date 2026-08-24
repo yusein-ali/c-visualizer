@@ -8,9 +8,8 @@ import type { Request, Response } from '../src/core';
  * Worker under Jest - `spawnWorker` is a stub that throws - so this replaces
  * it with one that records what it was posted and answers when told to.
  *
- * What is being checked is Phase 10's second item: one client per instance,
- * so two PLIVETs on one page do not share an interpreter, a history or a set
- * of uploaded files.
+ * What is being checked is one client per instance, so two PLIVETs on one
+ * page do not share an interpreter, a history or a set of uploaded files.
  */
 
 class FakeWorker {

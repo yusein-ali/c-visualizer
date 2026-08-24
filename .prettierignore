@@ -3,10 +3,5 @@ dist/
 node_modules/
 package-lock.json
 
-# Recorded baseline output: these are measurements, not source.
-baseline/results/
-baseline/screenshots/
-baseline/programs/
-
 # Generated from src/interpreter/jscpp/ast.pegjs by scripts/generate-parser.js.
 src/interpreter/jscpp/ast.generated.js

@@ -29,7 +29,7 @@ const isDebug = process.env.DEBUG_DEPLOY === '1';
  * Nothing here inlines them. `output.publicPath` is webpack's default `auto`,
  * which resolves at run time from the script element the bundle was loaded by,
  * so the chunks and the Worker are fetched from beside the script wherever the
- * host mounted its assets - which is the Phase 13 note in UPGRADE_PLAN.md, and
+ * host mounted its assets - which is what the Sphinx extension needs, and
  * the reason the interpreter can stay out of the first download.
  *
  * Three compilers keep the loader independent of CodeMirror: it first uses
