@@ -82,6 +82,15 @@ export class ControlBar {
   /** Translation from the toolbar's centred opening position. */
   private x = 0;
   private y = 0;
+  /**
+   * While a session has the toolbar fixed, where its undragged position sits
+   * inside the visualizer, so that every placement can be measured from the
+   * visualizer's corner rather than from the window's. Null when the toolbar
+   * is laid out in the bar as usual.
+   */
+  private debugHome: { x: number; y: number } | null = null;
+  /** The frame a scroll has already asked for a placement in. */
+  private placement: number | null = null;
 
   constructor(parent: HTMLElement, options: ControlBarOptions = {}) {
     this.options = options;
@@ -165,13 +174,17 @@ export class ControlBar {
   }
 
   /**
-   * Keep execution controls in the viewport for the lifetime of a session.
+   * Keep execution controls reachable for the lifetime of a session, without
+   * letting them leave the visualizer.
    *
    * A sticky ancestor works in the standalone page, but an embedding may put
    * the visualizer below an element with `overflow`, which makes that element
    * the sticky container even when it never scrolls. Fixing the toolbar once
-   * a run starts avoids that trap. Its normal in-visualizer position returns
-   * when the session stops.
+   * a run starts avoids that trap, at the price of a position the window,
+   * rather than the visualizer, would otherwise hold still. `placeDebugToolbar`
+   * pays that price back: it puts the toolbar where the visualizer is now,
+   * every time the page or a container around it scrolls. Its normal
+   * in-visualizer position returns when the session stops.
    */
   private keepDebugToolbarVisible(active: boolean): void {
     const className = 'plivet-controls__group--debug-active';
@@ -180,21 +193,126 @@ export class ControlBar {
     }
     if (!active) {
       this.debugToolbar.classList.remove(className);
+      this.debugHome = null;
       this.debugToolbar.style.removeProperty('--plivet-debug-fixed-left');
       this.debugToolbar.style.removeProperty('--plivet-debug-fixed-top');
+      window.removeEventListener('scroll', this.schedulePlacement, true);
+      window.removeEventListener('resize', this.schedulePlacement);
+      if (this.placement !== null) {
+        cancelAnimationFrame(this.placement);
+        this.placement = null;
+      }
       return;
     }
 
+    // Where the toolbar sits inside the visualizer at this moment, with any
+    // drag taken back out: fixing it must not move it, and every later
+    // placement is measured from that corner of the visualizer.
+    const owner = this.boundary().getBoundingClientRect();
     const bounds = this.debugToolbar.getBoundingClientRect();
+    this.debugHome = {
+      x: bounds.left - owner.left - this.x,
+      y: bounds.top - owner.top - this.y,
+    };
+    this.debugToolbar.classList.add(className);
+    this.placeDebugToolbar();
+    // Capture, because the scroller may be a container of the host page's
+    // making and scrolling it does not reach the window any other way.
+    window.addEventListener('scroll', this.schedulePlacement, true);
+    window.addEventListener('resize', this.schedulePlacement);
+  }
+
+  /**
+   * One placement per frame, however many scroll events ask for it. Placing
+   * the toolbar reads the layout and then writes to it, which is the pair a
+   * scroll handler must not repeat at the rate the events arrive.
+   */
+  private readonly schedulePlacement = (): void => {
+    if (this.placement !== null) {
+      return;
+    }
+    this.placement = requestAnimationFrame(() => {
+      this.placement = null;
+      this.placeDebugToolbar();
+    });
+  };
+
+  /**
+   * Put the fixed toolbar back over the visualizer.
+   *
+   * A fixed element is placed in window coordinates, so scrolling moves the
+   * visualizer out from under a toolbar that stays where it was. The corner
+   * recorded when the session started is re-read against the visualizer's
+   * current position, and the result is held inside it.
+   */
+  private readonly placeDebugToolbar = (): void => {
+    const home = this.debugHome;
+    if (home === null) {
+      return;
+    }
+    const owner = this.boundary().getBoundingClientRect();
+    const toolbar = this.debugToolbar.getBoundingClientRect();
+    const room = this.roomFor(owner, toolbar);
+    const left = owner.left + home.x;
+    const top = owner.top + home.y;
+
+    // It is the drag that a boundary limits, not the placement: a drag that
+    // would take the toolbar out of the visualizer stops at the edge and stays
+    // there while the reader keeps pulling. jsdom and a detached widget have no
+    // layout, and an axis the owner reports no room on is left alone.
+    if (owner.width > 0) {
+      this.x = this.clamp(left + this.x, room.left, room.right) - left;
+    }
+    if (owner.height > 0) {
+      this.y = this.clamp(top + this.y, room.top, room.bottom) - top;
+    }
     this.debugToolbar.style.setProperty(
       '--plivet-debug-fixed-left',
-      `${bounds.left - this.x}px`
+      `${left + this.x}px`
     );
     this.debugToolbar.style.setProperty(
       '--plivet-debug-fixed-top',
-      `${bounds.top - this.y}px`
+      `${top + this.y}px`
     );
-    this.debugToolbar.classList.add(className);
+  };
+
+  /**
+   * Where the fixed toolbar's top-left corner may go: inside the visualizer,
+   * and inside the window as well for as long as those two agree. The
+   * visualizer is the boundary. Once the page has scrolled it out of sight the
+   * toolbar leaves with it rather than staying behind over the chapter, which
+   * is the one thing a window-bound toolbar cannot do.
+   */
+  private roomFor(
+    owner: DOMRect,
+    toolbar: DOMRect
+  ): { left: number; right: number; top: number; bottom: number } {
+    const span = (
+      start: number,
+      end: number,
+      size: number,
+      viewport: number
+    ): [number, number] => {
+      const inOwner: [number, number] = [start, end - size];
+      const seen: [number, number] = [
+        Math.max(inOwner[0], 0),
+        Math.min(inOwner[1], viewport - size),
+      ];
+      return seen[1] >= seen[0] ? seen : inOwner;
+    };
+    const [left, right] = span(
+      owner.left,
+      owner.right,
+      toolbar.width,
+      window.innerWidth
+    );
+    const [top, bottom] = span(
+      owner.top,
+      owner.bottom,
+      toolbar.height,
+      window.innerHeight
+    );
+    return { left, right, top, bottom };
   }
 
   setDark(dark: boolean): void {
@@ -214,6 +332,7 @@ export class ControlBar {
   }
 
   destroy(): void {
+    this.keepDebugToolbarVisible(false);
     this.toolbarTabsObserver?.disconnect();
     this.fileInput.removeEventListener('change', this.chosen);
     this.root.remove();
@@ -406,31 +525,44 @@ export class ControlBar {
     }
   };
 
-  /** Keep the floating controls inside the application that owns them. */
-  private moveToolbar(x: number, y: number): void {
-    const boundary =
+  /** The visualizer the floating controls belong to and stay inside. */
+  private boundary(): HTMLElement {
+    return (
       this.root.closest<HTMLElement>('.plivet') ??
       this.root.parentElement ??
-      this.root;
-    const bounds = boundary.getBoundingClientRect();
-    const toolbar = this.debugToolbar.getBoundingClientRect();
-    const base = {
-      left: toolbar.left - this.x,
-      right: toolbar.right - this.x,
-      top: toolbar.top - this.y,
-      bottom: toolbar.bottom - this.y,
-    };
+      this.root
+    );
+  }
 
-    // jsdom and a detached widget have no layout. In a browser, clamp only on
-    // an axis for which the owner has a measurable amount of room.
-    this.x =
-      bounds.width > 0
-        ? this.clamp(x, bounds.left - base.left, bounds.right - base.right)
-        : x;
-    this.y =
-      bounds.height > 0
-        ? this.clamp(y, bounds.top - base.top, bounds.bottom - base.bottom)
-        : y;
+  /** Keep the floating controls inside the application that owns them. */
+  private moveToolbar(x: number, y: number): void {
+    if (this.debugHome !== null) {
+      // Fixed for the session: one placement holds the toolbar to the
+      // visualizer, and a drag is an offset it clamps like any other.
+      this.x = x;
+      this.y = y;
+      this.placeDebugToolbar();
+    } else {
+      const bounds = this.boundary().getBoundingClientRect();
+      const toolbar = this.debugToolbar.getBoundingClientRect();
+      const base = {
+        left: toolbar.left - this.x,
+        right: toolbar.right - this.x,
+        top: toolbar.top - this.y,
+        bottom: toolbar.bottom - this.y,
+      };
+
+      // jsdom and a detached widget have no layout. In a browser, clamp only on
+      // an axis for which the owner has a measurable amount of room.
+      this.x =
+        bounds.width > 0
+          ? this.clamp(x, bounds.left - base.left, bounds.right - base.right)
+          : x;
+      this.y =
+        bounds.height > 0
+          ? this.clamp(y, bounds.top - base.top, bounds.bottom - base.bottom)
+          : y;
+    }
     this.debugToolbar.style.setProperty('--plivet-debug-x', `${this.x}px`);
     this.debugToolbar.style.setProperty('--plivet-debug-y', `${this.y}px`);
   }
@@ -447,6 +579,7 @@ export class ControlBar {
     this.y = 0;
     this.debugToolbar.style.removeProperty('--plivet-debug-x');
     this.debugToolbar.style.removeProperty('--plivet-debug-y');
+    this.placeDebugToolbar();
   };
 
   private debugButton(

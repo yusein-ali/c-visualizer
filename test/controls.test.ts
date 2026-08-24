@@ -44,6 +44,10 @@ const mount = () => {
   };
 };
 
+/** A scroll is answered on the next frame, not on the event. */
+const nextFrame = () =>
+  new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
 afterEach(() => {
   document.body.innerHTML = '';
 });
@@ -158,7 +162,7 @@ describe('the debug controls', () => {
     ]);
   });
 
-  it('keeps the toolbar in the viewport for the debug session', () => {
+  it('fixes the toolbar over the visualizer for the debug session', () => {
     const { bar, toolbar } = mount();
     toolbar.getBoundingClientRect = () =>
       ({ left: 180, top: 60, width: 240, height: 36 }) as DOMRect;
@@ -186,6 +190,55 @@ describe('the debug controls', () => {
     expect(toolbar.style.getPropertyValue('--plivet-debug-fixed-left')).toBe(
       ''
     );
+  });
+
+  it('follows the visualizer when the page around it scrolls', async () => {
+    const { bar, toolbar, parent } = mount();
+    const rect = (top: number, bottom: number) =>
+      ({
+        left: 0,
+        right: 600,
+        top,
+        bottom,
+        width: 600,
+        height: bottom - top,
+      }) as DOMRect;
+    let owner = rect(100, 500);
+    parent.getBoundingClientRect = () => owner;
+    toolbar.getBoundingClientRect = () =>
+      ({
+        left: 180,
+        right: 420,
+        top: 160,
+        bottom: 196,
+        width: 240,
+        height: 36,
+      }) as DOMRect;
+
+    bar.setDebugState('Debugging');
+    expect(toolbar.style.getPropertyValue('--plivet-debug-fixed-top')).toBe(
+      '160px'
+    );
+
+    // Scrolled far enough that the toolbar's own place is above the window:
+    // it stops at the window's edge, which is still over the visualizer.
+    owner = rect(-300, 100);
+    window.dispatchEvent(new Event('scroll'));
+    await nextFrame();
+    expect(toolbar.style.getPropertyValue('--plivet-debug-fixed-top')).toBe(
+      '0px'
+    );
+
+    // Scrolled past the visualizer altogether: the toolbar leaves with it
+    // rather than staying behind over the chapter.
+    owner = rect(-800, -400);
+    window.dispatchEvent(new Event('scroll'));
+    await nextFrame();
+    const top = parseFloat(
+      toolbar.style.getPropertyValue('--plivet-debug-fixed-top')
+    );
+    expect(top).toBeLessThanOrEqual(-400 - 36);
+    expect(top).toBeGreaterThanOrEqual(-800);
   });
 
   it('sends the command the state binds the forward buttons to', () => {

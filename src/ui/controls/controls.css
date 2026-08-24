@@ -55,13 +55,18 @@
 	white-space: nowrap;
 }
 
-/* During a session the toolbar belongs to the viewport, not to whichever
-   overflow container the host page placed around the visualizer. */
+/*
+ * During a session the toolbar is taken out of the flow, so that no overflow
+ * container the host page placed around the visualizer can clip it or scroll
+ * it away. What it is fixed to is still the visualizer: `ControlBar` writes
+ * both coordinates - the drag included, which is why nothing is translated
+ * here - and rewrites them whenever the page moves the visualizer.
+ */
 .plivet-controls__group--debug-active {
 	position: fixed;
 	top: var(--plivet-debug-fixed-top, 0);
 	left: var(--plivet-debug-fixed-left, 50%);
-	transform: translate(var(--plivet-debug-x, 0px), var(--plivet-debug-y, 0px));
+	transform: none;
 }
 
 .plivet-controls__drag {
