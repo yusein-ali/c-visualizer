@@ -63,8 +63,12 @@ export const stepHighlightField = StateField.define<DecorationSet>({
 });
 
 /**
- * Shows the step and brings it into view. The scroll is part of the same
- * transaction so the editor never paints the new highlight off-screen first.
+ * Shows the step and brings it into view vertically.
+ *
+ * `EditorView.scrollIntoView` also reveals the statement horizontally. A
+ * deeply indented expression would therefore move the reader's horizontal
+ * viewport at every step. Centre the line with `scrollTop` instead, leaving
+ * `scrollLeft` exactly where the reader put it.
  */
 export const showStep = (
   view: EditorView,
@@ -72,13 +76,29 @@ export const showStep = (
   scroll: boolean = true
 ): void => {
   const effects: StateEffect<unknown>[] = [setStepHighlight.of(mark)];
-  if (mark !== null && scroll) {
-    effects.push(EditorView.scrollIntoView(mark.range.from, { y: 'center' }));
-  }
   if (mark !== null) {
     effects.push(EditorView.announce.of(announcement(view, mark)));
   }
   view.dispatch({ effects });
+  if (mark !== null && scroll) {
+    const position = mark.range.from;
+    view.requestMeasure({
+      read: (measured) => {
+        const line = measured.lineBlockAt(position);
+        return {
+          top: line.top,
+          height: line.height,
+          viewport: measured.scrollDOM.clientHeight,
+        };
+      },
+      write: ({ top, height, viewport }, measured) => {
+        measured.scrollDOM.scrollTop = Math.max(
+          0,
+          top - (viewport - height) / 2
+        );
+      },
+    });
+  }
 };
 
 /**

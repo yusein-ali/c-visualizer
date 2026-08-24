@@ -150,6 +150,7 @@ export class ControlBar {
    * function of the debug state alone; the canvas presents that state.
    */
   setDebugState(debugState: DEBUG_STATE): void {
+    this.keepDebugToolbarVisible(debugState !== 'Stop');
     const enabled = enablementFor(debugState);
     for (const button of this.buttons) {
       if (button.slot === 'Step') {
@@ -161,6 +162,39 @@ export class ControlBar {
       button.element.title = stringFor(`debug${button.command}`);
       button.element.setAttribute('aria-label', button.element.title);
     }
+  }
+
+  /**
+   * Keep execution controls in the viewport for the lifetime of a session.
+   *
+   * A sticky ancestor works in the standalone page, but an embedding may put
+   * the visualizer below an element with `overflow`, which makes that element
+   * the sticky container even when it never scrolls. Fixing the toolbar once
+   * a run starts avoids that trap. Its normal in-visualizer position returns
+   * when the session stops.
+   */
+  private keepDebugToolbarVisible(active: boolean): void {
+    const className = 'plivet-controls__group--debug-active';
+    if (active === this.debugToolbar.classList.contains(className)) {
+      return;
+    }
+    if (!active) {
+      this.debugToolbar.classList.remove(className);
+      this.debugToolbar.style.removeProperty('--plivet-debug-fixed-left');
+      this.debugToolbar.style.removeProperty('--plivet-debug-fixed-top');
+      return;
+    }
+
+    const bounds = this.debugToolbar.getBoundingClientRect();
+    this.debugToolbar.style.setProperty(
+      '--plivet-debug-fixed-left',
+      `${bounds.left - this.x}px`
+    );
+    this.debugToolbar.style.setProperty(
+      '--plivet-debug-fixed-top',
+      `${bounds.top - this.y}px`
+    );
+    this.debugToolbar.classList.add(className);
   }
 
   setDark(dark: boolean): void {

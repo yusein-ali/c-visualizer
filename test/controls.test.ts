@@ -158,6 +158,36 @@ describe('the debug controls', () => {
     ]);
   });
 
+  it('keeps the toolbar in the viewport for the debug session', () => {
+    const { bar, toolbar } = mount();
+    toolbar.getBoundingClientRect = () =>
+      ({ left: 180, top: 60, width: 240, height: 36 }) as DOMRect;
+
+    bar.setDebugState('Debugging');
+    expect(
+      toolbar.classList.contains('plivet-controls__group--debug-active')
+    ).toBe(true);
+    expect(toolbar.style.getPropertyValue('--plivet-debug-fixed-left')).toBe(
+      '180px'
+    );
+    expect(toolbar.style.getPropertyValue('--plivet-debug-fixed-top')).toBe(
+      '60px'
+    );
+
+    bar.setDebugState('EOF');
+    expect(
+      toolbar.classList.contains('plivet-controls__group--debug-active')
+    ).toBe(true);
+
+    bar.setDebugState('Stop');
+    expect(
+      toolbar.classList.contains('plivet-controls__group--debug-active')
+    ).toBe(false);
+    expect(toolbar.style.getPropertyValue('--plivet-debug-fixed-left')).toBe(
+      ''
+    );
+  });
+
   it('sends the command the state binds the forward buttons to', () => {
     const { bar, debug, commands } = mount();
 

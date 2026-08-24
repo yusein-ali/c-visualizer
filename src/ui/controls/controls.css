@@ -55,6 +55,15 @@
 	white-space: nowrap;
 }
 
+/* During a session the toolbar belongs to the viewport, not to whichever
+   overflow container the host page placed around the visualizer. */
+.plivet-controls__group--debug-active {
+	position: fixed;
+	top: var(--plivet-debug-fixed-top, 0);
+	left: var(--plivet-debug-fixed-left, 50%);
+	transform: translate(var(--plivet-debug-x, 0px), var(--plivet-debug-y, 0px));
+}
+
 .plivet-controls__drag {
 	position: relative;
 	width: 1rem;

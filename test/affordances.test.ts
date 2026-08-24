@@ -167,4 +167,29 @@ describe('what a screen reader is told', () => {
     expect(said[0]).toBe('line 2: total = total + 1;. total 3');
     view.destroy();
   });
+
+  it('centres a debug step vertically without changing horizontal scroll', () => {
+    const view = new EditorView({
+      state: stateWith(
+        'int main() {\n                    return 0;\n}',
+        stepHighlightField
+      ),
+    });
+    const line = view.state.doc.line(2);
+    const requested: any[] = [];
+    view.requestMeasure = ((request: any) => requested.push(request)) as any;
+    view.scrollDOM.scrollLeft = 37;
+
+    showStep(view, {
+      range: { from: line.from + 20, to: line.to },
+      values: [],
+    });
+
+    const vertical = requested.find((request) => request?.write !== undefined);
+    expect(vertical).toBeDefined();
+    const measurement = vertical.read(view);
+    vertical.write(measurement, view);
+    expect(view.scrollDOM.scrollLeft).toBe(37);
+    view.destroy();
+  });
 });
