@@ -1,6 +1,8 @@
 import type { MemoryRegion, SourceFile, ViewSelection } from '../core';
 import type { EditableRegion } from '../ui/editor';
 import type { PlivetFeatures, PlivetOptions } from './Plivet';
+import type { CodeMirrorConfig } from './host';
+import { codeMirrorCount, codeMirrorFlag } from './host';
 import type { Theme } from './theme';
 
 /**
@@ -126,6 +128,7 @@ const viewsOf = (value: unknown): ViewSelection | undefined => {
   }
   const views: ViewSelection = {};
   for (const section of [
+    'diagnostics',
     'statement',
     'callStack',
     'expression',
@@ -157,6 +160,65 @@ const viewsOf = (value: unknown): ViewSelection | undefined => {
     }
   }
   return views;
+};
+
+/**
+ * The editor settings a page names, in either spelling, under the names the
+ * editor takes.
+ *
+ * The two tables are the fields this reads; a key that is in neither is left
+ * alone rather than warned about. A page hands over the configuration it built
+ * its own editors with, whole, and most of what is in one - the languages it
+ * has editors for, the code blocks it replaces - is about editors this window
+ * does not hold.
+ */
+const CODEMIRROR_COUNTS: Record<string, string> = {
+  indentUnit: 'indent_unit',
+  fontSize: 'font_size',
+};
+
+const CODEMIRROR_FLAGS: Record<string, string> = {
+  indentWithTabs: 'indent_with_tabs',
+  electricChars: 'electric_chars',
+  matchBrackets: 'match_brackets',
+  lineNumbers: 'line_numbers',
+  autocomplete: 'autocomplete',
+};
+
+const codeMirrorOf = (value: unknown): CodeMirrorConfig | undefined => {
+  if (typeof value === 'undefined') {
+    return undefined;
+  }
+  if (!isObject(value)) {
+    warn('codeMirror must be an object');
+    return undefined;
+  }
+  const config: CodeMirrorConfig = {};
+  for (const [name, written] of Object.entries(CODEMIRROR_COUNTS)) {
+    const setting = value[name] ?? value[written];
+    if (typeof setting === 'undefined') {
+      continue;
+    }
+    const count = codeMirrorCount(setting);
+    if (typeof count === 'undefined') {
+      warn(`codeMirror.${written} must be a whole number of one or more`);
+      continue;
+    }
+    config[name] = count;
+  }
+  for (const [name, written] of Object.entries(CODEMIRROR_FLAGS)) {
+    const setting = value[name] ?? value[written];
+    if (typeof setting === 'undefined') {
+      continue;
+    }
+    const flag = codeMirrorFlag(setting);
+    if (typeof flag === 'undefined') {
+      warn(`codeMirror.${written} must be true or false`);
+      continue;
+    }
+    config[name] = flag;
+  }
+  return config;
 };
 
 /**
@@ -236,6 +298,9 @@ export function parseConfig(text: string): PlivetOptions {
   const editableRegions = regionsOf(parsed.editableRegions);
   const features = featuresOf(parsed.features);
   const licenses = string(parsed.licenses, 'licenses');
+  const codeMirror = codeMirrorOf(
+    parsed.codeMirror ?? parsed.codemirror ?? parsed.codemirror_config
+  );
   const views = viewsOf(parsed.views);
   const supportBuild = boolean(
     parsed['support-build'] ?? parsed.supportBuild,
@@ -258,6 +323,9 @@ export function parseConfig(text: string): PlivetOptions {
   }
   if (typeof features !== 'undefined') {
     options.features = features;
+  }
+  if (typeof codeMirror !== 'undefined') {
+    options.codeMirror = codeMirror;
   }
   if (typeof views !== 'undefined') {
     options.views = views;

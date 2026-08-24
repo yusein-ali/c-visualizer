@@ -9,57 +9,57 @@
  */
 
 .plivet-files {
-  margin: 1px;
-  border: 1px solid var(--plivet-line, #dddddd);
-  border-radius: 0.25rem;
-  font-size: 14px;
+	margin: 1px;
+	border: 1px solid var(--plivet-line, #dddddd);
+	border-radius: 0.25rem;
+	font-size: 14px;
 }
 
 .plivet-files__summary {
-  padding: 0.5rem 0.75rem;
-  background: var(--plivet-button-bg, #f5f5f5);
-  color: var(--plivet-button-color, #333333);
-  cursor: pointer;
+	padding: 0.5rem 0.75rem;
+	background: var(--plivet-button-bg, #f5f5f5);
+	color: var(--plivet-button-color, #333333);
+	cursor: pointer;
 }
 
 .plivet-files__list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
+	margin: 0;
+	padding: 0;
+	list-style: none;
 }
 
 .plivet-files__item {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 0.75rem;
-  border-top: 1px solid var(--plivet-line, #dddddd);
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	padding: 0.5rem 0.75rem;
+	border-top: 1px solid var(--plivet-line, #dddddd);
 }
 
 .plivet-files__name {
-  overflow-wrap: anywhere;
+	overflow-wrap: anywhere;
 }
 
 .plivet-files__button {
-  min-width: 2.5rem;
-  min-height: 2rem;
-  border: 1px solid var(--plivet-line, #333333);
-  border-radius: 0.25rem;
-  background: var(--plivet-button-bg, #f6f6f6);
-  color: var(--plivet-button-color, #333333);
-  font: inherit;
-  cursor: pointer;
+	min-width: 2.5rem;
+	min-height: 2rem;
+	border: 1px solid var(--plivet-line, #333333);
+	border-radius: 0.25rem;
+	background: var(--plivet-button-bg, #f6f6f6);
+	color: var(--plivet-button-color, #333333);
+	font: inherit;
+	cursor: pointer;
 }
 
 .plivet-files__button:hover,
 .plivet-files__button:focus-visible {
-  background: var(--plivet-button-hover-bg, #e7edf4);
+	background: var(--plivet-button-hover-bg, #e7edf4);
 }
 
 .plivet-files__input {
-  display: block;
-  width: 100%;
-  padding: 0.5rem 0.75rem;
-  border-top: 1px solid var(--plivet-line, #dddddd);
-  color: inherit;
+	display: block;
+	width: 100%;
+	padding: 0.5rem 0.75rem;
+	border-top: 1px solid var(--plivet-line, #dddddd);
+	color: inherit;
 }

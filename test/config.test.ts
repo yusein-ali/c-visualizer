@@ -1,4 +1,11 @@
-import { Plivet, parseConfig, readConfig } from '../src/index';
+import {
+  Plivet,
+  codeMirrorSettings,
+  parseConfig,
+  readConfig,
+} from '../src/index';
+import { indentUnit } from '@codemirror/language';
+import { EditorView } from '@codemirror/view';
 import { ViewOptions } from '../src/core';
 import { ControlBar } from '../src/ui/controls';
 import strings from '../src/strings';
@@ -264,6 +271,151 @@ describe('what the configuration decides', () => {
     expect(
       (globalThis as unknown as { graphViews: unknown }).graphViews
     ).toEqual({ expression: false });
+
+    plivet.destroy();
+  });
+});
+
+/**
+ * The editor settings of a host page, which reach the window a reader opens
+ * from one of that page's own editors. The two spellings are the point: a
+ * course writes `indent_with_tabs` in `conf.py` and the editor takes
+ * `indentWithTabs`, and neither side translates for the other.
+ */
+describe('the CodeMirror configuration a host hands over', () => {
+  it('reads the settings a course wrote, under the names the editor takes', () => {
+    expect(
+      parseConfig(
+        JSON.stringify({
+          codeMirror: {
+            indent_unit: 4,
+            indent_with_tabs: true,
+            electric_chars: false,
+            match_brackets: true,
+            line_numbers: false,
+            autocomplete: false,
+            font_size: 16,
+          },
+        })
+      )
+    ).toEqual({
+      codeMirror: {
+        indentUnit: 4,
+        indentWithTabs: true,
+        electricChars: false,
+        matchBrackets: true,
+        lineNumbers: false,
+        autocomplete: false,
+        fontSize: 16,
+      },
+    });
+    expect(warnings).toEqual([]);
+  });
+
+  it('takes the page configuration under the key the page calls it', () => {
+    expect(parseConfig('{"codemirror_config": {"indent_unit": 8}}')).toEqual({
+      codeMirror: { indentUnit: 8 },
+    });
+    expect(parseConfig('{"codemirror": {"indentUnit": 8}}')).toEqual({
+      codeMirror: { indentUnit: 8 },
+    });
+  });
+
+  it('says nothing about the keys a page configuration carries for itself', () => {
+    expect(
+      parseConfig(
+        JSON.stringify({
+          codeMirror: {
+            indent_unit: 2,
+            language_configs: { python: { indent_with_tabs: false } },
+            replace_all_code_blocks: false,
+          },
+        })
+      )
+    ).toEqual({ codeMirror: { indentUnit: 2 } });
+    expect(warnings).toEqual([]);
+  });
+
+  it('drops a setting that is not what it claims and keeps the others', () => {
+    const options = parseConfig(
+      JSON.stringify({
+        codeMirror: {
+          indent_unit: 'four',
+          font_size: 0,
+          line_numbers: 'sometimes',
+          match_brackets: true,
+        },
+      })
+    );
+
+    expect(options).toEqual({ codeMirror: { matchBrackets: true } });
+    expect(warnings).toHaveLength(3);
+  });
+
+  it('refuses a configuration that is not an object', () => {
+    expect(parseConfig('{"codeMirror": "tabs"}')).toEqual({});
+    expect(warnings).toHaveLength(1);
+  });
+
+  it('reads a setting written as the text of what it says', () => {
+    // What the Sphinx extension fills a course's unwritten settings with,
+    // and how it arrives here: as the JSON of a page's own configuration.
+    expect(
+      codeMirrorSettings(
+        JSON.parse(
+          '{"indent_unit": "4", "indent_with_tabs": "false",' +
+            ' "line_numbers": "true"}'
+        )
+      )
+    ).toEqual({ indentUnit: 4, indentWithTabs: false, lineNumbers: true });
+  });
+
+  it('leaves out what a host did not name, or named as nothing it can be', () => {
+    expect(codeMirrorSettings()).toEqual({});
+    expect(
+      codeMirrorSettings(
+        JSON.parse('{"indent_unit": 2.5, "autocomplete": "yes"}')
+      )
+    ).toEqual({});
+  });
+
+  it('prefers the editor spelling where a host wrote both', () => {
+    expect(codeMirrorSettings({ indentUnit: 2, indent_unit: 8 })).toEqual({
+      indentUnit: 2,
+    });
+  });
+
+  it('indents the way the page it was opened from indents', () => {
+    const parent = parentOf();
+    const plivet = new Plivet(parent, {
+      codeMirror: { indent_unit: 4, indent_with_tabs: true },
+    });
+    const editor = parent.querySelector('.cm-editor');
+    const view =
+      editor === null ? null : EditorView.findFromDOM(editor as HTMLElement);
+
+    expect(view?.state.facet(indentUnit)).toBe('\t');
+    expect(view?.state.tabSize).toBe(4);
+
+    plivet.destroy();
+  });
+
+  it('builds the editor without the gutter a page switched off', () => {
+    const parent = parentOf();
+    const plivet = new Plivet(parent, {
+      codeMirror: { line_numbers: false },
+    });
+
+    expect(parent.querySelector('.cm-lineNumbers')).toBeNull();
+
+    plivet.destroy();
+  });
+
+  it('keeps the gutter where nothing said otherwise', () => {
+    const parent = parentOf();
+    const plivet = new Plivet(parent);
+
+    expect(parent.querySelector('.cm-lineNumbers')).not.toBeNull();
 
     plivet.destroy();
   });

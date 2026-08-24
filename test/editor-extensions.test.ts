@@ -379,7 +379,7 @@ describe('teaching diagnostics', () => {
     const [found] = teachingDiagnosticsFor(state.doc, [scanfLint]);
     expect(state.sliceDoc(found.from, found.to)).toBe('n');
     expect(found.severity).toBe('error');
-    expect(found.source).toBe('plivet/scanf-address');
+    expect(found.source).toBe('c-visualizer:local/scanf-address');
   });
 
   it('offers no action for a rule that has no fix', () => {

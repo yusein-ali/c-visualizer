@@ -1,6 +1,11 @@
 import type { CONTROL_EVENT, DEBUG_STATE, StepModel } from '../core';
 import type { StatementExplanation } from '../ui/records';
-import type { MemoryNavigationTarget } from '../ui/graph';
+import type {
+  DiagnosticActivity,
+  DiagnosticEntry,
+  MemoryNavigationTarget,
+  RunStatus,
+} from '../ui/graph';
 import type { Theme } from './theme';
 import type { ZOOM_COMMAND } from '../ui/controls';
 
@@ -12,7 +17,10 @@ export type event =
   | 'zoom'
   | 'draw'
   | 'focusObject'
-  | 'navigateMemory';
+  | 'navigateMemory'
+  | 'diagnostics'
+  | 'diagnosticActivity'
+  | 'runStatus';
 
 /**
  * What each event carries. The signatures were `any[]` while React components
@@ -40,6 +48,16 @@ export interface EventPayloads {
   focusObject: [object: string | null, origin: 'editor' | 'graph'];
   /** A memory row the editor should reveal in source. */
   navigateMemory: [target: MemoryNavigationTarget];
+  /**
+   * Every finding both checkers hold, whenever either of them changes. It is
+   * the whole set rather than what was added, because that is what the table
+   * over the canvas draws: a list of findings, replaced, never appended to.
+   */
+  diagnostics: [entries: DiagnosticEntry[]];
+  /** Which checker is working, for the status line over that table. */
+  diagnosticActivity: [activity: DiagnosticActivity];
+  /** Why the latest run failed to proceed, or null after it is reset. */
+  runStatus: [status: RunStatus];
 }
 
 type Listener = (...args: any[]) => void;

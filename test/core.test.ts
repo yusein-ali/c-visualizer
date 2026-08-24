@@ -746,6 +746,33 @@ int main(void) {
     );
   };
 
+  /**
+   * `int main(void) {}` is valid C, and a reader clearing a file down to it
+   * is a normal thing to do. The interpreter answers a body with nothing to
+   * run by returning no next expression at all - as `undefined`, where the
+   * type says `null` - so both readers of it threw before the first step
+   * finished, and the session died on a program that has nothing wrong with
+   * it.
+   */
+  it.each([
+    ['an empty body', 'int main(void) {}'],
+    ['a body holding only a comment', 'int main(void) {\n  // nothing\n}'],
+  ])('starts and ends a main with %s', async (_name, source) => {
+    const server = new Server();
+    const started = await quiet(() =>
+      server.send({ controlEvent: 'Start', sourcecode: source })
+    );
+
+    expect(started.errors).toEqual([]);
+    expect(started.debugState).toBe('First');
+
+    const stepped = await quiet(() =>
+      server.send({ controlEvent: 'Step', sourcecode: source })
+    );
+
+    expect(stepped.debugState).toBe('EOF');
+  });
+
   it('sends the parsed statement map with the first execution state', async () => {
     const started = await sendDefault(new Server(), 'Start');
 
@@ -822,6 +849,38 @@ int main(void) {
     ).toMatchObject({ path: 'main.c', range: { begin: { y: 10 } } });
   });
 
+  /**
+   * The line a file's own reader counts, for a file that is not the first one
+   * in the composed unit.
+   *
+   * A file ending in a newline has an empty string after the final one, and
+   * counting that as a line put every file after the entry one line further
+   * down the composed source than it really is. Both directions were wrong by
+   * the same one, so a breakpoint round trip hid it: the line the reader was
+   * sent to was the line above the statement that ran.
+   */
+  it('maps a line of a file that follows the entry', () => {
+    const files = [
+      {
+        path: 'main.c',
+        text: 'int add(int);\nint main(void) {\n  return add(1);\n}\n',
+      },
+      {
+        path: 'helper.c',
+        text: 'int add(int value) {\n  return value + 1;\n}\n',
+      },
+    ];
+    const source = new ExecutionSource(files, 'main.c', files[0].text);
+
+    // `return value + 1;` is the sixth line of the composed unit and the
+    // second of its own file, and has to be both.
+    expect(source.code.split('\n')[5]).toBe('  return value + 1;');
+    expect(source.globalLine('helper.c', 2)).toBe(6);
+    expect(
+      source.locate({ begin: { x: 2, y: 6 }, end: { x: 19, y: 6 } })
+    ).toMatchObject({ path: 'helper.c', range: { begin: { y: 2 } } });
+  });
+
   it('matches a breakpoint to a line in the active file', async () => {
     const server = new Server();
     const files = [
@@ -856,8 +915,11 @@ int main(void) {
         files,
         entry: 'main.c',
         active: 'helper.c',
-        // The first line in helper.c, in the editor's zero-based rows.
-        lineNumOfBreakpoint: [0],
+        // `return value + 1;`, in the editor's zero-based rows. The line
+        // above it opens the function and never runs: this map is exact
+        // rather than gdb's, which slides a breakpoint down past a prologue
+        // to the first statement that does.
+        lineNumOfBreakpoint: [1],
       })
     );
 
@@ -865,7 +927,7 @@ int main(void) {
     expect(runEvent).toBe('Breakpoint');
     expect(response.location).toMatchObject({
       path: 'helper.c',
-      range: { begin: { y: 1 } },
+      range: { begin: { y: 2 } },
     });
   });
 
@@ -893,6 +955,32 @@ int main(void) {
       'getchar',
       'fflush',
     ]);
+  });
+
+  it('steps past an empty declaration that is only a warning', async () => {
+    const source = `#include<stdio.h>
+int main(void) {
+  int register const volatile ;
+  auto int automatic = 1;
+  register int fast = 2;
+  printf("%d\\n", automatic + fast);
+  return 0;
+}`;
+    const server = new Server();
+    const request = (controlEvent: CONTROL_EVENT) =>
+      quiet(() => server.send({ controlEvent, sourcecode: source }));
+
+    let response = await request('Start');
+    for (
+      let attempt = 0;
+      attempt < 30 && response.debugState !== 'EOF';
+      attempt += 1
+    ) {
+      response = await request('Step');
+    }
+
+    expect(response.debugState).toBe('EOF');
+    expect(response.output).toBe('3\n');
   });
 
   it('estimates text size as 16 bytes per parsed expression', async () => {

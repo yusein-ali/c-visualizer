@@ -81,7 +81,13 @@ function qualifiedDisplayType(
   // make it a pointer to a function pointer.
   const trailing = /\s*(\*+)\s*$/.exec(displayType);
   const stars = trailing === null ? 0 : trailing[1].length;
-  const baseType = displayType.replace(/\s*\*+\s*$/, '').trim();
+  // `declaredType` is the type the reader wrote where the source pass had to
+  // reduce it for the mapper: the engine holds a `long` and the declaration
+  // said `long long`, and the canvas has no business repeating the
+  // compromise. Absent for every type that reached the mapper as written.
+  const baseType =
+    declaration.declaredType ??
+    displayType.replace(/\s*\*+\s*$/, '').trim();
   let baseQualifiers =
     declaration.baseQualifiers === undefined
       ? declaration.qualifiers
@@ -672,9 +678,11 @@ function inlineValuesFor(
 function codeRangeOf(execState: ExecState): CodeRangeModel | null {
   // A run that ends with nothing selected has no next expression at all - a
   // `switch` whose value matches no label and which declares no `default`
-  // leaves the statement without ever entering one - so this is read rather
-  // than destructured.
-  const next = execState.getNextExpr();
+  // leaves the statement without ever entering one, and a `main` with an
+  // empty body never selects one - so this is read rather than destructured,
+  // and coalesced: unicoen answers with `undefined` as well as the `null` its
+  // type promises.
+  const next = execState.getNextExpr() ?? null;
   const codeRange = next === null ? null : next.codeRange;
   if (!codeRange) {
     return null;

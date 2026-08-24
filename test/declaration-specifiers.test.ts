@@ -80,6 +80,202 @@ describe('declaration specifier source pass', () => {
     expect(rewritten.split('\n')).toHaveLength(source.split('\n').length);
     expect(rewritten).toBe('               int x = 1;\nregister int y = 2;');
   });
+
+  /**
+   * C's declaration specifiers are an unordered set, so `int register a;` is
+   * the same declaration as `register int a;`. ANTLR's C++14 grammar reads
+   * only the leading form: the trailing one produced a tree with no statement
+   * the interpreter could place, and the run ended on its first step with no
+   * output, no location and no diagnostic - the reader was told nothing at
+   * all about a line that had stopped their program.
+   */
+  it('blanks a storage class the type specifier has already passed', () => {
+    const source = 'int register a = 1;';
+    const rewritten = new DeclarationSpecifiers().rewrite(source);
+    expect(rewritten).toHaveLength(source.length);
+    expect(rewritten).toBe('int          a = 1;');
+  });
+
+  it('leaves a storage class that leads its declaration alone', () => {
+    // What the mapper already reads, and what every ordinary program writes.
+    expect(new DeclarationSpecifiers().rewrite('static int a = 1;')).toBe(
+      'static int a = 1;'
+    );
+  });
+
+  it('reads each declaration on its own', () => {
+    // The type specifier of one declaration must not blank the storage class
+    // leading the next: the scan resets at every boundary between them.
+    const source = 'int a = 1;\nstatic int b = 2;\nint static c = 3;';
+    expect(new DeclarationSpecifiers().rewrite(source)).toBe(
+      'int a = 1;\nstatic int b = 2;\nint        c = 3;'
+    );
+  });
+
+  it('blanks one in a parameter list, and not one that leads it', () => {
+    const source = 'void f(int register p, register int q) { (void)p; }';
+    expect(new DeclarationSpecifiers().rewrite(source)).toBe(
+      'void f(int          p, register int q) { (void)p; }'
+    );
+  });
+});
+
+describe('a type specifier of more than one word', () => {
+  /**
+   * unicoen's mapper reads one base type, optionally preceded by `unsigned`,
+   * and fails to map every other combination C allows. `long long a = 7;`
+   * came back as a bare `UniExpr` naming nothing: the object was never
+   * created, `printf` printed nothing, and the run reported success over a
+   * program that had not declared its variable. Reducing the sequence to the
+   * one word the mapper reads is what makes these programs run at all.
+   */
+  it.each([
+    ['long long', 'long long a = 1;', 'long      a = 1;'],
+    ['long long int', 'long long int a = 1;', 'long          a = 1;'],
+    ['short int', 'short int a = 1;', 'short     a = 1;'],
+    ['long int', 'long int a = 1;', 'long     a = 1;'],
+    ['signed int', 'signed int a = 1;', '       int a = 1;'],
+    ['signed char', 'signed char a = 1;', '       char a = 1;'],
+    ['long double', 'long double a = 1;', '     double a = 1;'],
+    [
+      'unsigned long long',
+      'unsigned long long a = 1;',
+      'unsigned long      a = 1;',
+    ],
+  ])('reduces %s without moving a source position', (_name, source, expected) => {
+    const rewritten = new DeclarationSpecifiers().rewrite(source);
+    expect(rewritten).toHaveLength(source.length);
+    expect(rewritten).toBe(expected);
+  });
+
+  it.each([
+    ['int', 'int a = 1;'],
+    ['unsigned int', 'unsigned int a = 1;'],
+    ['unsigned', 'unsigned a = 1;'],
+    ['signed', 'signed a = 1;'],
+    ['long', 'long a = 1;'],
+    ['double', 'double a = 1;'],
+    ['a struct tag', 'struct S s;'],
+    ['a typedef name', 'Num n = 1;'],
+  ])('leaves %s exactly as written', (_name, source) => {
+    expect(new DeclarationSpecifiers().rewrite(source)).toBe(source);
+  });
+
+  /**
+   * Every form C can spell a scalar with. The declaration is the whole test:
+   * before the reduction, more than half of these printed nothing at all.
+   */
+  const TYPES = [
+    'char',
+    'signed char',
+    'unsigned char',
+    'short',
+    'short int',
+    'signed short',
+    'unsigned short',
+    'int',
+    'signed',
+    'signed int',
+    'unsigned',
+    'unsigned int',
+    'long',
+    'long int',
+    'signed long',
+    'unsigned long',
+    'long long',
+    'long long int',
+    'unsigned long long',
+    'signed long long',
+    'float',
+    'double',
+    'long double',
+    '_Bool',
+  ];
+
+  /**
+   * The reduction is for the mapper, not for the reader: the engine holds a
+   * `long` and the declaration said `long long`, and the canvas has no
+   * business repeating that compromise. `unsigned int` is in here because the
+   * mapper joins it into `unsignedint`, which is nobody's spelling of a type.
+   */
+  it('spells the type on the canvas the way it was written', () => {
+    const canvas = execute(`#include<stdio.h>
+int main(){
+  long long wide = 1;
+  short int narrow = 2;
+  signed char tiny = 3;
+  unsigned int counted = 4;
+  const long long fixed = 5;
+  long long *pointed = &wide;
+  printf("%d\\n", (int)(wide + narrow + tiny + counted + fixed + *pointed));
+  return 0;
+}`);
+    const labels: string[] = [];
+    for (const state of canvas.states) {
+      for (const stack of extractModel(state).stacks) {
+        for (const row of stack.rows) {
+          labels.push(row[0].text);
+        }
+      }
+    }
+
+    expect(labels).toEqual(
+      expect.arrayContaining([
+        'long long',
+        'short int',
+        'signed char',
+        'unsigned int',
+        'const long long',
+        'long long *',
+      ])
+    );
+  });
+
+  it.each(TYPES.map((type): [string] => [type]))(
+    'declares and prints a %s',
+    (type) => {
+      expect(
+        execute(
+          `#include<stdio.h>\nint main(){ ${type} a = 7; printf("%d\\n", (int)a); return 0; }`
+        ).output
+      ).toBe('7\n');
+    }
+  );
+});
+
+describe('a storage class written after the type', () => {
+  /**
+   * The declaration the reader typed, run end to end. The pass above proves
+   * the word is blanked; this proves the program the reader gets back is the
+   * one they wrote - it steps, and the object is still in its own region.
+   */
+  const trailing = execute(`#include<stdio.h>
+int main(){
+  int register volatile const fast = 1;
+  int static visits = 2;
+  printf("%d\\n", fast + visits);
+  return 0;
+}`);
+
+  it('runs the program rather than ending on the first step', () => {
+    expect(trailing.output).toBe('3\n');
+  });
+
+  it('keeps the storage class the blanked word carried', () => {
+    expect(
+      declarationInfoOf(findVariable(trailing.states, 'fast'))
+    ).toMatchObject({
+      storageClasses: ['register'],
+      qualifiers: ['volatile', 'const'],
+      region: 'register',
+    });
+    expect(
+      declarationInfoOf(findVariable(trailing.states, 'visits'))
+    ).toMatchObject({
+      storageClasses: ['static'],
+      region: 'static',
+    });
+  });
 });
 
 describe('storage classes and type qualifiers', () => {

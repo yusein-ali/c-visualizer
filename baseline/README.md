@@ -154,13 +154,13 @@ values in `RESULTS.md`:
 6. **Wait until DebugStatus stops changing**, then read the step number — paste
    into the console:
 
-   ```js
-   document.body.innerText.match(/DebugStatus:.*/)[0];
-   ```
+    ```js
+    document.body.innerText.match(/DebugStatus:.*/)[0];
+    ```
 
-   Record it in `RESULTS.md`. This number matters as much as the image: the same
-   program and breakpoint must reach the same step after Phases 5–8, and a
-   divergence is a regression that no pixel comparison would catch.
+    Record it in `RESULTS.md`. This number matters as much as the image: the same
+    program and breakpoint must reach the same step after Phases 5–8, and a
+    divergence is a regression that no pixel comparison would catch.
 
 7. **Capture.** In DevTools press `Cmd+Shift+P`, type _screenshot_, choose
    **Capture full size screenshot**. It lands in `~/Downloads`; move it to

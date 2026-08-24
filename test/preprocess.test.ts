@@ -3,6 +3,7 @@ import {
   preprocessFiles,
   preprocessSource,
 } from '../src/interpreter/preprocess';
+import { originalRange } from '../src/interpreter/Expansion';
 
 /**
  * The cases mirror `baseline/scripts/probe-preprocessor.js`, which records what
@@ -462,6 +463,54 @@ describe('expansion records for the editor', () => {
   it('leaves the preprocessed text identical to preprocess()', () => {
     const code = '#define N 7\nint x = N;';
     expect(preprocessSource(code).code).toBe(preprocess(code));
+  });
+});
+
+describe('preprocessed range mapping', () => {
+  it('restores a short replacement to the complete macro name', () => {
+    const code =
+      '#define ITEM_COUNT 3\nfor (int i = 0; i < ITEM_COUNT; i += 1) {}';
+    const processed = preprocessSource(code);
+    const line = processed.code.split('\n')[1];
+    const begin = line.indexOf('i <');
+    const end = line.indexOf('3');
+
+    expect(
+      originalRange(
+        {
+          begin: { x: begin, y: 2 },
+          end: { x: end, y: 2 },
+        },
+        processed.expansions
+      )
+    ).toEqual({
+      begin: { x: begin, y: 2 },
+      end: {
+        x: code.split('\n')[1].indexOf('ITEM_COUNT') + 'ITEM_COUNT'.length - 1,
+        y: 2,
+      },
+    });
+  });
+
+  it('undoes the accumulated drift after several replacements', () => {
+    const code =
+      '#define FIRST 1\n#define SECOND 2\nint n = FIRST + SECOND + n;';
+    const processed = preprocessSource(code);
+    const written = code.split('\n')[2];
+    const replaced = processed.code.split('\n')[2];
+
+    expect(
+      originalRange(
+        {
+          begin: { x: replaced.indexOf('2'), y: 3 },
+          end: { x: replaced.lastIndexOf('n'), y: 3 },
+        },
+        processed.expansions
+      )
+    ).toEqual({
+      begin: { x: written.indexOf('SECOND'), y: 3 },
+      end: { x: written.lastIndexOf('n'), y: 3 },
+    });
   });
 });
 

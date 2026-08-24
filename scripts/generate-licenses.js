@@ -47,6 +47,33 @@ checker.init(
       a.toLowerCase().localeCompare(b.toLowerCase())
     );
 
+    /*
+     * Code that ships in the bundle without being an installed package.
+     * `license-checker` reads node_modules, and the C grammar the syntax check
+     * uses was vendored into src/ instead - so it would be missed here, and
+     * missing it is the one kind of omission this page exists to prevent.
+     */
+    const vendored = [
+      {
+        name: 'JSCPP (pegjs/ast.pegjs)',
+        licenses: 'MIT',
+        repository: 'https://github.com/felixhao28/JSCPP',
+        note:
+          'The C grammar in src/interpreter/jscpp/ast.pegjs, vendored and ' +
+          'modified. Only the grammar is used; the JSCPP interpreter is not ' +
+          'bundled.',
+      },
+    ];
+
+    const vendoredSections = vendored.map(
+      (item) => `<section>
+  <h2>${escapeHtml(item.name)}</h2>
+  <div class="license">${escapeHtml(item.licenses)}</div>
+  <div class="repo"><a href="${escapeHtml(item.repository)}">${escapeHtml(item.repository)}</a></div>
+  <p class="none">${escapeHtml(item.note)}</p>
+</section>`
+    );
+
     const sections = names.map((name) => {
       const info = packages[name];
       let text = '';
@@ -92,7 +119,9 @@ checker.init(
 <h1>Third-party licences</h1>
 <p>c-visualizer is developed by ${escapeHtml(AUTHOR)} and is a fork of
 <a href="${UPSTREAM}">PLIVET</a> by RYOSKATE. It is distributed under the MIT licence and bundles
-${names.length} packages listed below, each under its own licence.</p>
+${names.length} packages listed below, each under its own licence. It also
+carries the vendored source listed first.</p>
+${vendoredSections.join('\n')}
 ${sections.join('\n')}
 </body>
 </html>

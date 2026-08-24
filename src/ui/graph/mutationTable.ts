@@ -1,11 +1,11 @@
 import { dia, shapes } from '@joint/core';
-import { MutationModel } from '../../core';
+import { FoldState, MutationModel } from '../../core';
 import strings from '../../strings';
 
 /** The fixed columns used by the write-history table. */
-const COLUMN_WIDTHS = [220, 220, 220, 220, 104] as const;
-const ROW_HEIGHT = 34;
-const HEADER_HEIGHT = 28;
+const GROUP_HEIGHT = 30;
+const DETAIL_HEIGHT = 30;
+const DETAIL_GAP = 4;
 const FONT = 'system-ui, sans-serif';
 const CODE_FONT = "Consolas, 'Courier New', monospace";
 
@@ -50,74 +50,93 @@ const cell = (
   return element;
 };
 
-/** Draw the write history as the same JointJS table style as Variables. */
+const rootOf = (target: string): string =>
+  /^([A-Za-z_][A-Za-z0-9_]*)/.exec(target)?.[1] ?? target;
+
+/** Draw write history as vertical, collapsible object groups. */
 export function mutationTableCells(
   mutations: MutationModel[],
   originX: number,
   originY: number,
-  tableWidth: number = COLUMN_WIDTHS.reduce((sum, width) => sum + width, 0)
+  tableWidth: number,
+  folds: FoldState
 ): { cells: dia.Cell[]; height: number; width: number } {
-  const baseWidth = COLUMN_WIDTHS.reduce((sum, width) => sum + width, 0);
-  const widths = COLUMN_WIDTHS.map((width) => (width / baseWidth) * tableWidth);
-  const headings = [
-    strings.viewColumnFrame,
-    strings.viewColumnObject,
-    strings.viewColumnBefore,
-    strings.viewColumnAfter,
-    strings.viewColumnLine,
-  ];
   const cells: dia.Cell[] = [];
-  let x = originX;
-  headings.forEach((heading, index) => {
-    const width = widths[index];
-    cells.push(cell(heading, x, originY, width, HEADER_HEIGHT, true, false));
-    x += width;
-  });
-
-  const rows = mutations.slice().reverse();
-  if (rows.length === 0) {
+  const groups = new Map<string, MutationModel[]>();
+  for (const mutation of mutations.slice().reverse()) {
+    const root = rootOf(mutation.target);
+    const group = groups.get(root) ?? [];
+    group.push(mutation);
+    groups.set(root, group);
+  }
+  let y = originY;
+  if (groups.size === 0) {
     cells.push(
       cell(
         strings.viewNothingWritten,
         originX,
-        originY + HEADER_HEIGHT,
+        y,
         tableWidth,
-        ROW_HEIGHT,
+        DETAIL_HEIGHT,
         false,
         false
       )
     );
+    y += DETAIL_HEIGHT;
   } else {
-    rows.forEach((mutation, rowIndex) => {
-      const values = [
-        mutation.frame,
-        mutation.target,
-        mutation.before,
-        mutation.after,
-        String(mutation.line),
-      ];
-      let rowX = originX;
-      values.forEach((value, index) => {
-        const width = widths[index];
-        cells.push(
-          cell(
-            value,
-            rowX,
-            originY + HEADER_HEIGHT + rowIndex * ROW_HEIGHT,
-            width,
-            ROW_HEIGHT,
-            false,
-            index > 0
-          )
-        );
-        rowX += width;
+    for (const [root, entries] of groups) {
+      const key = `mutation-${root}`;
+      const folded = folds.isFolded(key);
+      const heading = cell(
+        `${folded ? '▶' : '▼'}  ${root}`,
+        originX,
+        y,
+        tableWidth,
+        GROUP_HEIGHT,
+        true,
+        false
+      );
+      heading.attr({
+        body: {
+          'data-fold-target': encodeURIComponent(key),
+          class: 'plivet-fold-cell',
+        },
+        label: {
+          'data-fold-target': encodeURIComponent(key),
+          class: 'plivet-fold-cell',
+        },
       });
-    });
+      cells.push(heading);
+      y += GROUP_HEIGHT;
+      if (folded) {
+        continue;
+      }
+      for (const mutation of entries) {
+        const detail = cell(
+          `${mutation.target}   ${mutation.before} → ${mutation.after}   ` +
+            `${mutation.frame} · line ${mutation.line}`,
+          originX + 18,
+          y,
+          tableWidth - 18,
+          DETAIL_HEIGHT,
+          false,
+          true
+        );
+        detail.attr({
+          body: {
+            'data-object-key': encodeURIComponent(root),
+            class: 'plivet-object-cell plivet-variable-cell plivet-identifier',
+          },
+        });
+        cells.push(detail);
+        y += DETAIL_HEIGHT + DETAIL_GAP;
+      }
+    }
   }
 
   return {
     cells,
-    height: HEADER_HEIGHT + Math.max(1, rows.length) * ROW_HEIGHT,
+    height: y - originY,
     width: tableWidth,
   };
 }

@@ -18,6 +18,10 @@ jest.mock('../src/ui/graph', () => ({
     }
     render(): void {}
     setScale(): void {}
+    setDiagnostics(): void {}
+    setDiagnosticActivity(): void {}
+    setRunStatus(): void {}
+    setDebugState(): void {}
     setDark(dark: boolean): void {
       this.container.classList.toggle('plivet-graph--dark', dark);
     }

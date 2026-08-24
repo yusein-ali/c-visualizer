@@ -108,6 +108,84 @@ describe('multi-file execution', () => {
     ).toEqual([]);
   });
 
+  /**
+   * What the check found in the file that is not open.
+   *
+   * The parse behind every background check reads the whole composed program;
+   * everything it found outside the tab being edited used to be dropped, so a
+   * reader was never told that the file they were not looking at was the one
+   * holding the mistake.
+   */
+  it('reports a finding from a file the check was not asked about', async () => {
+    const broken = files.map((file) =>
+      file.path === 'helper.c'
+        ? {
+            ...file,
+            text: file.text.replace('return doubled;', 'return total;'),
+          }
+        : file
+    );
+    const response = await quiet(() =>
+      new Server().send({
+        controlEvent: 'SyntaxCheck',
+        sourcecode: broken[0].text,
+        files: broken,
+        entry: 'main.c',
+        active: 'main.c',
+      })
+    );
+
+    expect(response.errors).toEqual([]);
+    expect(response.lints).toEqual([]);
+    expect(response.programLints).toEqual([
+      {
+        path: 'helper.c',
+        lints: [
+          expect.objectContaining({
+            rule: 'undeclared-identifier',
+            // The third line of helper.c, not of the composed unit.
+            line: 3,
+            column: 9,
+          }),
+        ],
+      },
+    ]);
+  });
+
+  it('reports a sibling syntax error without refusing anything', async () => {
+    const broken = files.map((file) =>
+      file.path === 'helper.c'
+        ? {
+            ...file,
+            text: file.text.replace('return doubled;', 'return doubled'),
+          }
+        : file
+    );
+    const response = await quiet(() =>
+      new Server().send({
+        controlEvent: 'SyntaxCheck',
+        sourcecode: broken[0].text,
+        files: broken,
+        entry: 'main.c',
+        active: 'main.c',
+      })
+    );
+
+    // `fileErrors` is what tells the editor a run did not happen, and nothing
+    // has been refused here: a check reports, it does not stop anything.
+    expect(response.fileErrors).toBeUndefined();
+    expect(response.errors).toEqual([]);
+    expect(response.programErrors).toEqual([
+      {
+        path: 'helper.c',
+        errors: [
+          // The sentence names the file's own line, not the composed unit's.
+          { line: 4, charPositionInLine: 0, msg: "line 4:0 unexpected '}'" },
+        ],
+      },
+    ]);
+  });
+
   it('maps steps into a helper file and back to the entry file', async () => {
     const server = new Server();
     const responses = [await quiet(() => server.send(request('Start')))];

@@ -195,6 +195,23 @@ int main(void) { return twice(2) + counter; }`);
   });
 });
 
+describe('a statement the interpreter cannot execute', () => {
+  it('turns a swallowed interpreter exception into a located fatal diagnostic', () => {
+    const session = run(`int main(void) {
+  int value = missing + 1;
+  return value;
+}`);
+    const [found] = session.diagnostics;
+
+    expect(found).toMatchObject({
+      rule: 'invalid-statement',
+      severity: 'error',
+      line: 2,
+      fatal: true,
+    });
+  });
+});
+
 describe('the session that carries them', () => {
   it('sends what the run has said with every step, and nothing once stopped', async () => {
     const server = new Server();
@@ -202,22 +219,27 @@ describe('the session that carries them', () => {
   int d = 0;
   return 4 / d;
 }`;
-    await server.send({ controlEvent: 'Start', sourcecode: code });
-    let response = await server.send({
-      controlEvent: 'Step',
-      sourcecode: code,
-    });
+    const request = (controlEvent: 'Start' | 'Step' | 'Stop') =>
+      server.send({
+        controlEvent,
+        sourcecode: code,
+        files: [{ path: 'main.c', text: code }],
+        entry: 'main.c',
+      });
+    await request('Start');
+    let response = await request('Step');
     while (response.debugState !== 'EOF') {
-      response = await server.send({ controlEvent: 'Step', sourcecode: code });
+      response = await request('Step');
     }
     expect(response.runtime!.map((one) => one.rule)).toEqual([
       'division-by-zero',
     ]);
-
-    const stopped = await server.send({
-      controlEvent: 'Stop',
-      sourcecode: code,
+    expect(response.location).toMatchObject({
+      path: 'main.c',
+      range: { begin: { y: 3 } },
     });
+
+    const stopped = await request('Stop');
     expect(stopped.runtime).toEqual([]);
   });
 });

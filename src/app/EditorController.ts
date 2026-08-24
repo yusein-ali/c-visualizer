@@ -11,6 +11,7 @@ import {
   ExecutionSource,
   ExpressionModel,
   ExpressionNodeModel,
+  FileLints,
   FileSyntaxErrors,
   StepModel,
   SourceLocation,
@@ -19,7 +20,7 @@ import {
 import strings from '../strings';
 import { defaultProgram } from '../defaultProgram';
 import { Construct } from '../interpreter/Construct';
-import { Expansion } from '../interpreter/Expansion';
+import { Expansion, originalRange } from '../interpreter/Expansion';
 import {
   DeclarationRequest,
   EditableRegion,
@@ -29,7 +30,9 @@ import {
   PlivetEditor,
   ProgramCompletions,
   goTo,
+  offsetAt,
   rangeOf,
+  rowRange,
   TeachingDiagnostic,
 } from '../ui/editor';
 import {
@@ -42,15 +45,25 @@ import { libraryHelp, libraryNames } from './libraryHelp';
 import { Bus } from './emitter';
 import { TabBar } from '../ui/tabs';
 import type { ZOOM_COMMAND } from '../ui/controls';
-import type { MemoryNavigationTarget } from '../ui/graph';
 import type {
+  DiagnosticEntry,
+  MemoryNavigationTarget,
+  RunStatus,
+} from '../ui/graph';
+import type {
+  CodeMirrorConfig,
   DiagnosticOptions,
   ExternalDiagnostic,
   SourceSnapshot,
   Unsubscribe,
 } from './host';
+import { codeMirrorSettings } from './host';
 
 const HEADER_EXTENSION = /\.(?:h|hh|hpp|hxx|h\+\+)$/i;
+/** The text size a host that configured none opens at, and Reset returns to. */
+const DEFAULT_FONT_SIZE = 14;
+/** How far Zoom Out goes, unless the host opened the editor smaller still. */
+const MINIMUM_FONT_SIZE = 10;
 const PREPROCESS_DELAY = 100;
 const SYNTAX_CHECK_DELAY = 1000;
 
@@ -98,10 +111,22 @@ export interface EditorControllerOptions {
    * exercise usually takes.
    */
   editableRegions?: EditableRegion[];
+  /**
+   * How the host's own editors are built, in either of the two spellings
+   * `codeMirrorSettings` reads. What it names is what this editor is built
+   * with; what it does not, the editor's own defaults.
+   */
+  codeMirror?: CodeMirrorConfig;
   /** Reports a complete immutable snapshot after any source change. */
   onSourceChange?: (snapshot: SourceSnapshot) => void;
   /** Reports tab changes, which do not themselves change the source revision. */
   onActiveFileChange?: (path: string) => void;
+}
+
+/** One file's share of what a checker found. */
+interface FileFindings {
+  errors: SyntaxErrorModel[];
+  lints: TeachingDiagnostic[];
 }
 
 /**
@@ -134,6 +159,39 @@ const asDiagnostic = (found: RuntimeDiagnosticModel): TeachingDiagnostic => ({
   endColumn: found.endColumn + 1,
 });
 
+/**
+ * The position `SyntaxErrorData` stamps on the head of its own message.
+ * unicoen writes `line 1:15 ` in front of every one, and the status line
+ * prints the file and the line itself, so carrying both would say it twice.
+ */
+const REPEATED_POSITION = /^line \d+:\d+\s*/;
+
+/**
+ * What the status line says about a run the preflight refused.
+ *
+ * The file is the one the editor is being switched to, so the sentence names
+ * the tab the reader is about to be looking at rather than whichever file the
+ * server happened to list first. A refusal with no error to point at is not a
+ * shape the preflight produces, but the reader still has to be told that the
+ * run did not happen, so the bare sentence remains for it.
+ */
+const rejectionStatus = (
+  found: FileSyntaxErrors[],
+  firstPath: string | undefined
+): RunStatus => {
+  const file = found.find((entry) => entry.path === firstPath) ?? found[0];
+  const error = file?.errors[0];
+  if (typeof file === 'undefined' || typeof error === 'undefined') {
+    return 'rejected';
+  }
+  return {
+    kind: 'rejected',
+    path: file.path,
+    line: error.line,
+    message: error.msg.replace(REPEATED_POSITION, ''),
+  };
+};
+
 const isPosition = (
   value: ExternalDiagnostic['from'] | undefined
 ): value is ExternalDiagnostic['from'] =>
@@ -161,6 +219,7 @@ const externalDiagnostic = (
   }
   return {
     rule: found.code ?? source,
+    origin: 'build',
     severity: found.severity,
     message: found.message,
     line: found.from.line + 1,
@@ -217,7 +276,13 @@ export class EditorController {
   private readonly statement: HoverTextSource;
   private readonly completions: ProgramCompletions;
   private isDebugging = false;
-  private fontSize = 14;
+  private fontSize: number;
+  /**
+   * The size the text returns to, which is the size it opened at: a host that
+   * set one meant that one, and Reset that went to 14 would be a way out of
+   * the page's own configuration rather than back to it.
+   */
+  private readonly defaultFontSize: number;
   /**
    * The three things the linter shows, kept apart because they arrive apart:
    * the parser answers on every edit, the teaching rules with it, and the run
@@ -240,10 +305,24 @@ export class EditorController {
   private executionConstructs: Construct[] = [];
   /** The composed run's preprocessing map, localized whenever a tab opens. */
   private executionExpansions: Expansion[] = [];
-  private syntaxErrors: SyntaxErrorModel[] = [];
-  private teachingLints: TeachingDiagnostic[] = [];
-  /** The tab whose parser and teaching diagnostics these arrays describe. */
-  private localDiagnosticsPath: string | null = null;
+  /**
+   * What the background checker found, per file.
+   *
+   * A map rather than one file's arrays, because the findings table is meant
+   * to tell a reader that the file they are *not* looking at is the broken
+   * one. Each check answers about the tab it was asked about, so it replaces
+   * that path's entry and leaves every other path alone: the answer about a
+   * file nobody has touched is still the answer.
+   */
+  private readonly localFindings = new Map<string, FileFindings>();
+  /**
+   * What the rules that read the whole program found, per file.
+   *
+   * Kept apart from the local findings because it is invalidated differently:
+   * these answer a question about every file at once, so a check replaces the
+   * whole set rather than one path's entry.
+   */
+  private readonly programFindings = new Map<string, FileFindings>();
   private runtimeLints: TeachingDiagnostic[] = [];
   /** Source text already checked in each tab, to avoid parsing on every call. */
   private readonly checkedSources = new Map<string, string>();
@@ -276,9 +355,13 @@ export class EditorController {
       files,
       entry,
       editableRegions = [],
+      codeMirror,
       onSourceChange,
       onActiveFileChange,
     } = options;
+    const settings = codeMirrorSettings(codeMirror);
+    this.defaultFontSize = settings.fontSize ?? DEFAULT_FONT_SIZE;
+    this.fontSize = this.defaultFontSize;
     this.bus = bus;
     this.client = client;
     if (typeof onSourceChange !== 'undefined') {
@@ -321,6 +404,7 @@ export class EditorController {
     });
 
     this.editor = new PlivetEditor(mount, {
+      ...settings,
       doc: this.sourcecode,
       dark,
       fontSize: this.fontSize,
@@ -371,9 +455,14 @@ export class EditorController {
       if (command === 'In') {
         this.setFontSize(this.fontSize + 1);
       } else if (command === 'Out') {
-        this.setFontSize(Math.max(this.fontSize - 1, 10));
+        this.setFontSize(
+          Math.max(
+            this.fontSize - 1,
+            Math.min(MINIMUM_FONT_SIZE, this.defaultFontSize)
+          )
+        );
       } else {
-        this.setFontSize(14);
+        this.setFontSize(this.defaultFontSize);
       }
     });
   }
@@ -384,17 +473,10 @@ export class EditorController {
    * Everything the editor knows about the program comes from a check: the
    * construct tooltips, the completion of the program's own names, the
    * teaching rules, and the modifier-hover link that goes to a declaration.
-   * Until now the first one ran a second after the first edit, so all four were dead on
-   * a program the reader had opened and not yet typed into - which is exactly
-   * the program a reader is most likely to be asking questions about.
-   *
-   * It is not run on construction either. The interpreter client starts its
-   * Worker on the first command on purpose, so that a page holding several
-   * PLIVETs pays for the ones somebody uses; checking from the constructor
-   * would spawn a Worker and load the parser chunk for every instance on the
-   * page. Coming near the editor - the pointer entering it, or the focus
-   * arriving from a keyboard - is the first moment that says this instance is
-   * the one being used, and it comes before the click that asks a question.
+   * Starting that check during construction makes an immediate Start wait
+   * behind a complete background parse. Approaching the editor is the first
+   * signal that source diagnostics are wanted, and normally gives the Worker
+   * time to finish before the reader asks a tooltip or begins editing.
    */
   private checkOnApproach(): void {
     let checked = false;
@@ -746,8 +828,15 @@ export class EditorController {
     }
   }
 
-  /** One source mutation invalidates every remote answer for the old revision. */
-  private sourceChanged(): void {
+  /**
+   * One source mutation invalidates every remote answer for the old revision.
+   *
+   * Every answer for *that file*, that is. The findings in a file the edit did
+   * not touch still describe its text exactly, and dropping them would empty
+   * the table on every keystroke and refill it a pause later - which is the
+   * whole of what the reader would see of the files they are not editing.
+   */
+  private sourceChanged(changed: string = this.activePath): void {
     this.cancelScheduledChecks();
     // Entry eligibility depends on the current text: adding or removing a
     // `main` definition must add or remove the triangle immediately.
@@ -757,8 +846,18 @@ export class EditorController {
     this.executionExpansions = [];
     // Linker results for every file can change when any one file changes.
     this.checkedSources.clear();
+    // What was found in the edited file is about text that no longer exists,
+    // and its line numbers have already moved. A preflight refusal and the
+    // background syntax error that duplicated it must both go with it;
+    // otherwise clearing the refusal only reveals the stale background copy
+    // until the delayed checker answers - and a refusal belongs to the run
+    // that was refused, not to any one file, so the whole set goes.
+    this.localFindings.delete(changed);
+    this.programFindings.delete(changed);
+    this.runtimeLints = [];
     this.preflightErrors.clear();
     this.externalLints.clear();
+    this.bus.signal('runStatus', null);
     this.showDiagnostics();
     const snapshot = this.sourceSnapshot();
     for (const listener of this.sourceListeners) {
@@ -776,9 +875,19 @@ export class EditorController {
     this.constructs = [];
     this.executionConstructs = [];
     this.executionExpansions = [];
-    this.syntaxErrors = [];
-    this.teachingLints = [];
-    this.localDiagnosticsPath = null;
+    this.clearLocalFindings();
+  }
+
+  /**
+   * Findings tied to one exact source revision, not editor source maps.
+   *
+   * Every file, unlike `sourceChanged`: this is for the cases where the
+   * program itself is replaced - a new file set, a new entry - and nothing
+   * that was said about the old one is about anything any more.
+   */
+  private clearLocalFindings(): void {
+    this.localFindings.clear();
+    this.programFindings.clear();
     this.runtimeLints = [];
     this.preflightErrors.clear();
   }
@@ -801,9 +910,22 @@ export class EditorController {
     };
     if (controlEvent === 'Preprocess' || controlEvent === 'SyntaxCheck') {
       const requestRevision = this.revision;
+      // The parser pass is the one a reader waits on: the preprocessor pass
+      // is a tenth of a second and shades the source rather than reporting
+      // anything. Only the check that produces findings reports that it is
+      // running, and it reports that it has finished whatever it found -
+      // including for an answer that has gone stale, because what the line is
+      // saying is whether the checker is still working.
+      const checking = controlEvent === 'SyntaxCheck';
+      if (checking) {
+        this.bus.signal('diagnosticActivity', 'localRunning');
+      }
       this.client
         .send(request)
         .then((response: Response) => {
+          if (checking) {
+            this.bus.signal('diagnosticActivity', 'localComplete');
+          }
           // A slower check for text that has since changed must not replace
           // the construct map delivered by Start for the program now running.
           const checkedFile = this.fileAt(checkedPath);
@@ -840,7 +962,7 @@ export class EditorController {
             path: checkedPath,
           };
           this.checkedSources.set(checkedPath, currentText);
-          const { errors, expansions, constructs, lints } = response;
+          const { expansions, constructs } = response;
           const seen = typeof constructs === 'undefined' ? [] : constructs;
           if (typeof response.programExpansions !== 'undefined') {
             this.executionExpansions = response.programExpansions;
@@ -848,11 +970,7 @@ export class EditorController {
           if (typeof response.programConstructs !== 'undefined') {
             this.executionConstructs = response.programConstructs;
           }
-          this.localDiagnosticsPath = checkedPath;
-          this.setSyntaxError(
-            errors,
-            typeof lints === 'undefined' ? [] : lints
-          );
+          this.setCheckResult(checkedPath, response);
           if (this.isDebugging) {
             // A tab reached during a run uses the composed parser map, which
             // knows about declarations and macros from its header tabs.
@@ -875,6 +993,9 @@ export class EditorController {
           }
         })
         .catch((e) => {
+          if (checking) {
+            this.bus.signal('diagnosticActivity', 'localComplete');
+          }
           console.log(e);
           alert(e);
         });
@@ -886,6 +1007,7 @@ export class EditorController {
         this.recieve(response);
       })
       .catch((e) => {
+        this.bus.signal('runStatus', 'stoppedOnError');
         console.log(e);
         alert(e);
       });
@@ -905,11 +1027,29 @@ export class EditorController {
     try {
       const { debugState, model, output, step, runtime, coverage, location } =
         response;
-      if (
-        typeof response.fileErrors !== 'undefined' &&
-        response.fileErrors.length !== 0
-      ) {
-        this.showPreflightErrors(response.fileErrors, response.diagnosticPath);
+      const fileErrors = response.fileErrors ?? [];
+      const rejected = fileErrors.length !== 0;
+      const stoppedOnError = runtime?.some((diagnostic) => diagnostic.fatal);
+      const runStatus: RunStatus | undefined = rejected
+        ? rejectionStatus(fileErrors, response.diagnosticPath)
+        : stoppedOnError
+          ? typeof location === 'undefined'
+            ? 'stoppedOnError'
+            : {
+                kind: 'invalidStatement',
+                path: location.path,
+                line: location.range.begin.y,
+              }
+          : debugState === 'First' ||
+              debugState === 'Executing' ||
+              debugState === 'Stop'
+            ? null
+            : undefined;
+      if (typeof runStatus !== 'undefined') {
+        this.bus.signal('runStatus', runStatus);
+      }
+      if (rejected) {
+        this.showPreflightErrors(fileErrors, response.diagnosticPath);
       } else if (debugState !== 'Stop') {
         this.preflightErrors.clear();
       }
@@ -1024,9 +1164,10 @@ export class EditorController {
     }
     const source = this.executionSource();
     const path = location.path;
+    const codeRange = this.localParsedRange(source, path, model.codeRange);
     return {
       ...model,
-      codeRange: location.range,
+      codeRange: codeRange ?? location.range,
       frames: model.frames.map((frame) => {
         if (frame.calledFrom === null) {
           return frame;
@@ -1044,12 +1185,16 @@ export class EditorController {
             };
       }),
       expression: this.localExpression(source, path, model.expression),
+      callExpansions: model.callExpansions.flatMap((call) => {
+        const expression = this.localExpression(source, path, call.expression);
+        return expression === null ? [] : [{ ...call, expression }];
+      }),
       constructStates: model.constructStates.flatMap((state) => {
-        const range = this.localRange(source, path, state.range);
+        const range = this.localParsedRange(source, path, state.range);
         return range === null ? [] : [{ ...state, range }];
       }),
       evaluations: model.evaluations.flatMap((evaluation) => {
-        const range = this.localRange(source, path, evaluation.range);
+        const range = this.localParsedRange(source, path, evaluation.range);
         return range === null ? [] : [{ ...evaluation, range }];
       }),
     };
@@ -1068,7 +1213,7 @@ export class EditorController {
   private showExecutionSourceFor(path: string): void {
     const source = this.executionSource();
     this.constructs = this.executionConstructs.flatMap((construct) => {
-      const range = this.localRange(source, path, {
+      const range = this.localParsedRange(source, path, {
         begin: { x: construct.column, y: construct.line },
         end: { x: construct.endColumn, y: construct.endLine },
       });
@@ -1079,7 +1224,7 @@ export class EditorController {
         if (typeof clause.range === 'undefined') {
           return clause;
         }
-        const local = this.localRange(source, path, clause.range);
+        const local = this.localParsedRange(source, path, clause.range);
         return typeof local === 'undefined' || local === null
           ? { ...clause, range: undefined }
           : { ...clause, range: local };
@@ -1159,6 +1304,19 @@ export class EditorController {
     return location?.path === path ? location.range : null;
   }
 
+  /** Map parser columns through macro replacement, then into one source tab. */
+  private localParsedRange(
+    source: ExecutionSource,
+    path: string,
+    range: CodeRangeModel
+  ): CodeRangeModel | null {
+    return this.localRange(
+      source,
+      path,
+      originalRange(range, this.executionExpansions)
+    );
+  }
+
   private localExpression(
     source: ExecutionSource,
     path: string,
@@ -1167,7 +1325,7 @@ export class EditorController {
     if (expression === null) {
       return null;
     }
-    const range = this.localRange(source, path, expression.range);
+    const range = this.localParsedRange(source, path, expression.range);
     if (range === null) {
       return null;
     }
@@ -1180,7 +1338,7 @@ export class EditorController {
     path: string,
     node: ExpressionNodeModel
   ): ExpressionNodeModel | null {
-    const range = this.localRange(source, path, node.range);
+    const range = this.localParsedRange(source, path, node.range);
     if (range === null) {
       return null;
     }
@@ -1452,6 +1610,10 @@ export class EditorController {
 
   /** Reveal the declaration represented by a double-clicked memory row. */
   private navigateFromMemory(target: MemoryNavigationTarget): void {
+    if (target.kind === 'location') {
+      this.navigateToLocation(target.path, target.line, target.column);
+      return;
+    }
     const executionConstructs =
       this.executionConstructs.length === 0
         ? this.constructs
@@ -1518,6 +1680,33 @@ export class EditorController {
     );
   }
 
+  /**
+   * A place in a file, opened and shown.
+   *
+   * This is what a diagnostic row asks for, and it asks for a position rather
+   * than a declaration: the checker already knows where it looked, so nothing
+   * has to be resolved, and the file it names is one of the open tabs or it is
+   * not one this window can show at all.
+   *
+   * The whole line is what gets marked. A finding names the token the checker
+   * stopped at, and a caret on that one character is easy to lose in a line a
+   * reader has just been sent to from another panel.
+   */
+  private navigateToLocation(path: string, line: number, column: number): void {
+    if (!this.files.some((file) => file.path === path)) {
+      return;
+    }
+    if (path !== this.activePath) {
+      this.activate(path, false, false);
+    }
+    const { doc } = this.editor.view.state;
+    const row = rowRange(doc, Math.max(line - 1, 0));
+    goTo(this.editor.view, {
+      from: offsetAt(doc, line, column),
+      to: row.to,
+    });
+  }
+
   setExpansions(expansions: Expansion[]) {
     this.expansions = expansions;
     this.hover.setExpansions(expansions);
@@ -1525,17 +1714,49 @@ export class EditorController {
   }
 
   /**
-   * What the parser refused and what the teaching rules found, in one call:
-   * the linter holds one set of diagnostics, and two calls would mean each
-   * replacing the other.
+   * Everything one check answered, in one call: what the parser refused in the
+   * file it read, what the teaching rules found there, and what the rules that
+   * read the whole program found in every file.
+   *
+   * One call because the linter holds one set of diagnostics, and two calls
+   * would mean each replacing the other. The two halves are stored apart
+   * because they go stale differently - see `localFindings`.
    */
-  setSyntaxError(
-    errors: SyntaxErrorModel[],
-    lints: LintDiagnosticModel[] = []
-  ) {
-    this.syntaxErrors = errors;
-    this.teachingLints = lints.map(withLibraryHelp);
+  private setCheckResult(path: string, response: Response): void {
+    this.localFindings.set(path, {
+      errors: response.errors,
+      lints: (response.lints ?? []).map(withLibraryHelp),
+    });
+    this.setProgramFindings(
+      response.programErrors ?? [],
+      response.programLints ?? []
+    );
     this.showDiagnostics();
+  }
+
+  /**
+   * The whole-program half, replaced as one set.
+   *
+   * Per path it would be wrong: an edit in `main.c` can answer a question
+   * about `tour.h` - defining a function the header declared - and merging
+   * would leave the answered one standing until somebody opened that file.
+   */
+  private setProgramFindings(
+    errors: FileSyntaxErrors[],
+    lints: FileLints[]
+  ): void {
+    this.programFindings.clear();
+    const findings = (path: string): FileFindings => {
+      const found = this.programFindings.get(path) ?? { errors: [], lints: [] };
+      this.programFindings.set(path, found);
+      return found;
+    };
+    for (const file of errors) {
+      findings(file.path).errors.push(...file.errors);
+    }
+    for (const file of lints) {
+      findings(file.path).lints.push(...file.lints.map(withLibraryHelp));
+    }
   }
 
   /**
@@ -1556,15 +1777,111 @@ export class EditorController {
     const external = Array.from(this.externalLints.values()).flatMap(
       (byPath) => byPath.get(this.activePath) ?? []
     );
-    const showsLocal = this.activePath === this.localDiagnosticsPath;
     const showsRuntime = this.activePath === this.entryPath;
-    const refused = this.preflightErrors.get(this.activePath);
+    const local = this.localFindings.get(this.activePath);
+    const program = this.programFindings.get(this.activePath);
     this.editor.debug.showDiagnostics(
       this.editor.view,
-      refused ?? (showsLocal ? this.syntaxErrors : []),
-      (showsLocal ? this.teachingLints : [])
+      this.errorsIn(this.activePath),
+      (local?.lints ?? [])
+        .concat(program?.lints ?? [])
         .concat(showsRuntime ? this.runtimeLints : [])
         .concat(external)
     );
+    this.bus.signal('diagnostics', this.collectedDiagnostics());
+  }
+
+  /**
+   * The parser errors to show for one file, from whichever parse read it last.
+   *
+   * Three parses can have something to say about the same file and they must
+   * not all say it: a refused start, the background check of that tab, and the
+   * composed parse that every check runs. A refusal wins - it is the answer
+   * about the program the reader just tried to run. The tab's own parse comes
+   * next, because its coordinates are the file's own and its message was
+   * written about the file alone. The composed parse is what is left, and it
+   * is not nothing: a file can parse by itself and fail to parse after the
+   * header it includes has been over it, and that error has nowhere else to
+   * be reported.
+   */
+  private errorsIn(path: string): SyntaxErrorModel[] {
+    const refused = this.preflightErrors.get(path);
+    if (typeof refused !== 'undefined') {
+      return refused;
+    }
+    const local = this.localFindings.get(path)?.errors ?? [];
+    return local.length === 0
+      ? (this.programFindings.get(path)?.errors ?? [])
+      : local;
+  }
+
+  /**
+   * Every finding the two checkers hold, for every file rather than for the
+   * tab in front of the reader.
+   *
+   * The editor's own marks are per-tab and have to be: a gutter can only mark
+   * the document it is beside. The table over the canvas is the other half of
+   * that - it is where a reader finds out that the file they are not looking
+   * at is the one the compiler refused - so it is built from the whole of what
+   * is held here, and each finding keeps the name of the file it came from.
+   *
+   * Which parse's errors a file is shown is `errorsIn`'s question, and the
+   * answer is the same one the gutter gets: they are parses of the same text,
+   * and drawing two of them would report every error twice.
+   */
+  /** Every file anything is currently held about, named once each. */
+  private knownPaths(): string[] {
+    return Array.from(
+      new Set([
+        ...this.preflightErrors.keys(),
+        ...this.localFindings.keys(),
+        ...this.programFindings.keys(),
+      ])
+    );
+  }
+
+  private collectedDiagnostics(): DiagnosticEntry[] {
+    const entries: DiagnosticEntry[] = [];
+    const syntax = (
+      path: string,
+      errors: SyntaxErrorModel[]
+    ): DiagnosticEntry[] =>
+      errors.map((error) => ({
+        severity: 'error' as const,
+        origin: 'local' as const,
+        path,
+        line: error.line,
+        column: error.charPositionInLine,
+        message: error.msg,
+      }));
+    const teaching = (
+      path: string,
+      origin: DiagnosticEntry['origin'],
+      lints: TeachingDiagnostic[]
+    ): DiagnosticEntry[] =>
+      lints.map((lint) => ({
+        severity: lint.severity,
+        origin,
+        path,
+        line: lint.line,
+        column: lint.column,
+        message: lint.message,
+        rule: lint.rule,
+      }));
+
+    for (const path of this.knownPaths()) {
+      entries.push(...syntax(path, this.errorsIn(path)));
+      entries.push(
+        ...teaching(path, 'local', this.localFindings.get(path)?.lints ?? []),
+        ...teaching(path, 'local', this.programFindings.get(path)?.lints ?? [])
+      );
+    }
+    entries.push(...teaching(this.entryPath, 'local', this.runtimeLints));
+    for (const byPath of this.externalLints.values()) {
+      for (const [path, lints] of byPath) {
+        entries.push(...teaching(path, 'build', lints));
+      }
+    }
+    return entries;
   }
 }

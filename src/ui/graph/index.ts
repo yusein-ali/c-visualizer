@@ -9,6 +9,22 @@ export {
 } from './geometry';
 export { StackTable, stackTableOf } from './StackTable';
 export { mutationTableCells } from './mutationTable';
+export {
+  activityIsPending,
+  diagnosticColumns,
+  diagnosticStatusCell,
+  diagnosticStatusText,
+  diagnosticsTableCells,
+  sameDiagnostics,
+  sortedDiagnostics,
+} from './diagnosticsTable';
+export type {
+  DiagnosticActivity,
+  DiagnosticEntry,
+  InvalidStatementRunStatus,
+  RejectedRunStatus,
+  RunStatus,
+} from './diagnosticsTable';
 export { callStackRows } from './callStack';
 export type { CallStackRow } from './callStack';
 export { callHeading } from './callSection';

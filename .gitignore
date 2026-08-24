@@ -76,5 +76,5 @@ typings/
 .fusebox/
 .cache-loader/
 
-dist/
+**/dist/
 **/.DS_Store

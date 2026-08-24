@@ -7,3 +7,6 @@ package-lock.json
 baseline/results/
 baseline/screenshots/
 baseline/programs/
+
+# Generated from src/interpreter/jscpp/ast.pegjs by scripts/generate-parser.js.
+src/interpreter/jscpp/ast.generated.js

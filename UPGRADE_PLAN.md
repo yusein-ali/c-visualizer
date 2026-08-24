@@ -996,15 +996,15 @@ it, and can be taken in any order or dropped.
    the variables the current statement reads or assigns; a whole frame rendered
    per line is noise. `StepModel` grows a per-step list of `{ name, display }`.
 
-   The effect now carries a `StepMark` - the range and the values together -
-   which two fields read: `stepHighlightField` for the marker and
-   `inlineValueField` for the widget. They travel as one because they are one
-   fact about one step, and nothing can put the marker on one line and the
-   values of another. `statementNames` in `src/interpreter/StatementNames.ts`
-   walks the statement about to run for the names it mentions, in source order,
-   and `extractModel` keeps the ones an object in scope answers to - so a call
-   to `printf` reports its arguments and not itself. Six is the most a line
-   gets; past that the canvas is the thing that shows a frame.
+    The effect now carries a `StepMark` - the range and the values together -
+    which two fields read: `stepHighlightField` for the marker and
+    `inlineValueField` for the widget. They travel as one because they are one
+    fact about one step, and nothing can put the marker on one line and the
+    values of another. `statementNames` in `src/interpreter/StatementNames.ts`
+    walks the statement about to run for the names it mentions, in source order,
+    and `extractModel` keeps the ones an object in scope answers to - so a call
+    to `printf` reports its arguments and not itself. Six is the most a line
+    gets; past that the canvas is the thing that shows a frame.
 
 2. **A teaching linter.** **Done.** `src/ui/editor/diagnostics.ts` maps `SyntaxErrorData`
    and nothing else, yet a `@codemirror/lint` diagnostic also carries
@@ -1021,23 +1021,23 @@ it, and can be taken in any order or dropped.
    toolchain is reachable, real compiler warnings can arrive from it instead of
    being reimplemented here; see Phase 13.
 
-   `src/interpreter/TeachingLint.ts` holds the table and the one walk over it.
-   A rule is `{ name, severity, enter, leave }`; the walk keeps the scope, so a
-   rule asks what a name was declared as rather than finding out for itself.
-   The five are there - `scanf` without an address, an assignment used as a
-   condition, a format string disagreeing with its arguments, a read before a
-   value arrives, and a function that can reach its end without returning - and
-   the two severities are a distinction rather than a mood: `error` is for what
-   C leaves undefined, `warning` for legal C that is nearly always a mistake.
-   Where a rule cannot tell - a `switch` whose cases fall into each other - it
-   says nothing, because a lesson a reader can see is wrong teaches worse than
-   no lesson at all. Fixes are offered as an offset from the finding, so an
-   edit above one moves the fix with it, and only where the text at that range
-   in the reader's own file is still what the rule thinks it is: the tree is
-   parsed from a rewritten source, and the two agree on lines but not always on
-   columns. `lintGutter()` is in the debug array, and the library entry a
-   message points at is looked up by the application and formatted by the
-   editor - `libraryHelp` stays the one place that knows what `scanf` is.
+    `src/interpreter/TeachingLint.ts` holds the table and the one walk over it.
+    A rule is `{ name, severity, enter, leave }`; the walk keeps the scope, so a
+    rule asks what a name was declared as rather than finding out for itself.
+    The five are there - `scanf` without an address, an assignment used as a
+    condition, a format string disagreeing with its arguments, a read before a
+    value arrives, and a function that can reach its end without returning - and
+    the two severities are a distinction rather than a mood: `error` is for what
+    C leaves undefined, `warning` for legal C that is nearly always a mistake.
+    Where a rule cannot tell - a `switch` whose cases fall into each other - it
+    says nothing, because a lesson a reader can see is wrong teaches worse than
+    no lesson at all. Fixes are offered as an offset from the finding, so an
+    edit above one moves the fix with it, and only where the text at that range
+    in the reader's own file is still what the rule thinks it is: the tree is
+    parsed from a rewritten source, and the two agree on lines but not always on
+    columns. `lintGutter()` is in the debug array, and the library entry a
+    message points at is looked up by the application and formatted by the
+    editor - `libraryHelp` stays the one place that knows what `scanf` is.
 
 3. **Runtime diagnostics.** **Done.** The same lint API, raised at the step that goes
    wrong rather than after the run: division by zero, an index past the end of
@@ -1050,24 +1050,24 @@ it, and can be taken in any order or dropped.
    alongside the message. Cleared on restart, like every other debug
    decoration.
 
-   `refuse` now records what it refused before it throws, and `warn` beside it
-   records what C leaves undefined but does not stop for. Four checks went in
-   with the surface: division and remainder by zero, an index outside an array
-   whose length the declaration gives, a dereference or subscript of a pointer
-   with a null pointer value, and evaluation of an automatic-storage-duration
-   object whose value is indeterminate. The last
-   is the only warning - reading uninitialized memory is not something C stops
-   for, and ending the run over it would teach that it does - and it is said
-   once per object however often the read happens. A local enters that set only
-   where the source is certain, a declaration with nothing after the name, and
-   leaves it on the first assignment or the first time its address is taken, so
-   a parameter, a global and anything `scanf` was pointed at are never in it.
-   The list rides every response, because the linter holds one set and a
-   session shows one response at a time; a stopped session sends an empty one,
-   which is what takes the marks off. `RuntimeDiagnostic` is the interpreter's
-   own coordinates - the end column names the last character - and the
-   application makes it exclusive on the way into the linter, the same
-   conversion the step highlight makes.
+    `refuse` now records what it refused before it throws, and `warn` beside it
+    records what C leaves undefined but does not stop for. Four checks went in
+    with the surface: division and remainder by zero, an index outside an array
+    whose length the declaration gives, a dereference or subscript of a pointer
+    with a null pointer value, and evaluation of an automatic-storage-duration
+    object whose value is indeterminate. The last
+    is the only warning - reading uninitialized memory is not something C stops
+    for, and ending the run over it would teach that it does - and it is said
+    once per object however often the read happens. A local enters that set only
+    where the source is certain, a declaration with nothing after the name, and
+    leaves it on the first assignment or the first time its address is taken, so
+    a parameter, a global and anything `scanf` was pointed at are never in it.
+    The list rides every response, because the linter holds one set and a
+    session shows one response at a time; a stopped session sends an empty one,
+    which is what takes the marks off. `RuntimeDiagnostic` is the interpreter's
+    own coordinates - the end column names the last character - and the
+    application makes it exclusive on the way into the linter, the same
+    conversion the step highlight makes.
 
 4. **A tooltip for every construct, not only for declarations.** **Done.**
    `constructText` in `src/components/hoverText.ts` formats five kinds richly -
@@ -1078,100 +1078,100 @@ it, and can be taken in any order or dropped.
    where a beginner's model of C actually breaks, so it is the wrong half of the
    language to leave unexplained. Each kind gets what a reader cannot recover by
    looking:
-   - **Function definition.** Beyond the current return type, identifier and
-     parameters: definition or declaration, storage class, and while stepping
-     the current activation - the arguments it was called with, and how many
-     times it has been entered.
-   - **Function call.** The callee's declared signature, arguments paired with
-     the corresponding parameters, the values passed at this step, and the
-     value returned once it returns. C passes by value and nothing on screen
-     says so today; this is the single most reliable beginner misconception.
-   - **`if`.** The controlling expression, the integer it evaluated to at this
-     step, and which branch was taken. Relational and equality operators yield
-     `int` values, so show 0 or 1 and explain the zero/nonzero interpretation
-     rather than displaying a JavaScript Boolean value.
-   - **`for`.** The three clauses named as the standard names them -
-     initialisation, controlling expression, iteration expression - the loop
-     variables as they stand, and the iteration count so far.
-   - **`while` and `do`-`while`.** The controlling expression, its current
-     value, the iteration count, and for `do`-`while` the fact that the body ran
-     before the first test.
-   - **`switch`.** The controlling expression's value, the matching case or
-     default label, and
-     whether control falls into the next label. Fall-through is invisible in the
-     source and is the classic trap.
-   - **`return`.** The expression, the value it yields here, and the function it
-     leaves.
-   - **`break` and `continue`.** Which enclosing loop or `switch` it leaves or
-     restarts. A `break` inside a `switch` inside a loop is ambiguous to a
-     reader and unambiguous to the parser.
-   - **Assignment.** The object assigned, its value before and after, and any
-     conversion the assignment itself performs - the truncation in
-     `int i = 2.7` is done by the assignment, not by the literal.
-   - **Cast and conditional expression.** For a cast, the source and destination
-     types and whether the conversion can lose information; for `?:`, the arm
-     chosen and the common type the two arms are brought to.
-   - **Subexpressions.** Hovering inside a compound expression reports the
-     innermost subexpression under the pointer, its type and its current value,
-     from the same evaluation data Phase 8 item 6 renders on the canvas. One
-     source of truth, three presentations: the hover, the canvas expansion, and
-     the statement explanation of item 13.
-   - **Preprocessor.** The existing macro tooltip reports one replacement step;
-     report the full expansion of a macro defined in terms of other macros, so a
-     nested definition does not have to be unfolded by hand.
+    - **Function definition.** Beyond the current return type, identifier and
+      parameters: definition or declaration, storage class, and while stepping
+      the current activation - the arguments it was called with, and how many
+      times it has been entered.
+    - **Function call.** The callee's declared signature, arguments paired with
+      the corresponding parameters, the values passed at this step, and the
+      value returned once it returns. C passes by value and nothing on screen
+      says so today; this is the single most reliable beginner misconception.
+    - **`if`.** The controlling expression, the integer it evaluated to at this
+      step, and which branch was taken. Relational and equality operators yield
+      `int` values, so show 0 or 1 and explain the zero/nonzero interpretation
+      rather than displaying a JavaScript Boolean value.
+    - **`for`.** The three clauses named as the standard names them -
+      initialisation, controlling expression, iteration expression - the loop
+      variables as they stand, and the iteration count so far.
+    - **`while` and `do`-`while`.** The controlling expression, its current
+      value, the iteration count, and for `do`-`while` the fact that the body ran
+      before the first test.
+    - **`switch`.** The controlling expression's value, the matching case or
+      default label, and
+      whether control falls into the next label. Fall-through is invisible in the
+      source and is the classic trap.
+    - **`return`.** The expression, the value it yields here, and the function it
+      leaves.
+    - **`break` and `continue`.** Which enclosing loop or `switch` it leaves or
+      restarts. A `break` inside a `switch` inside a loop is ambiguous to a
+      reader and unambiguous to the parser.
+    - **Assignment.** The object assigned, its value before and after, and any
+      conversion the assignment itself performs - the truncation in
+      `int i = 2.7` is done by the assignment, not by the literal.
+    - **Cast and conditional expression.** For a cast, the source and destination
+      types and whether the conversion can lose information; for `?:`, the arm
+      chosen and the common type the two arms are brought to.
+    - **Subexpressions.** Hovering inside a compound expression reports the
+      innermost subexpression under the pointer, its type and its current value,
+      from the same evaluation data Phase 8 item 6 renders on the canvas. One
+      source of truth, three presentations: the hover, the canvas expansion, and
+      the statement explanation of item 13.
+    - **Preprocessor.** The existing macro tooltip reports one replacement step;
+      report the full expansion of a macro defined in terms of other macros, so a
+      nested definition does not have to be unfolded by hand.
 
-   Three things this needs. The static half is `outline.ts` recording the
-   clauses and the enclosing loop or `switch` for each construct - today
-   `constructAt` deliberately knows nothing about enclosure, which is right for
-   choosing a construct and insufficient for describing one. The runtime half is
-   `StepModel` carrying per-construct evaluation results, the same data items 1
-   and 3 need, so build it once. And a tooltip shows a runtime line only when
-   the step it belongs to is the current one; the static description always
-   stands on its own, and a stopped session shows no values rather than the last
-   run's.
+    Three things this needs. The static half is `outline.ts` recording the
+    clauses and the enclosing loop or `switch` for each construct - today
+    `constructAt` deliberately knows nothing about enclosure, which is right for
+    choosing a construct and insufficient for describing one. The runtime half is
+    `StepModel` carrying per-construct evaluation results, the same data items 1
+    and 3 need, so build it once. And a tooltip shows a runtime line only when
+    the step it belongs to is the current one; the static description always
+    stands on its own, and a stopped session shows no values rather than the last
+    run's.
 
-   The static half is in `outline.ts`: `Construct` grew `clauses`, taken from
-   the source the reader wrote rather than the tree printed back; `enclosing`,
-   which is the loop a `continue` restarts and the `switch` a `break` leaves
-   even when a loop is nearer; `notes`, for what is true however the construct
-   runs, such as a `do`-`while` body running before its first test; and, on
-   `FunctionDeclarationDetail`, whether the declaration has a body and which
-   specifiers stand in front of the return type without being part of it. A
-   call's arguments are written beside the parameters they initialise, which is
-   the shortest way to say that C passes by value.
+    The static half is in `outline.ts`: `Construct` grew `clauses`, taken from
+    the source the reader wrote rather than the tree printed back; `enclosing`,
+    which is the loop a `continue` restarts and the `switch` a `break` leaves
+    even when a loop is nearer; `notes`, for what is true however the construct
+    runs, such as a `do`-`while` body running before its first test; and, on
+    `FunctionDeclarationDetail`, whether the declaration has a body and which
+    specifiers stand in front of the return type without being part of it. A
+    call's arguments are written beside the parameters they initialise, which is
+    the shortest way to say that C passes by value.
 
-   The runtime half is `src/interpreter/ConstructTrace.ts`, driven by the
-   engine the way `ExpressionTrace.ts` is, and it leaves plain data on the
-   `ExecState`. The engine wraps `execIf`, `execFor`, `execWhile` and
-   `execSwitch` to say what has been entered, and reports every evaluation
-   through `execExpr`; an index built once from the tree turns a node into the
-   construct that was interested in it, so nothing has to know the shape of the
-   forty-odd node classes twice. Two decisions carry the item. A value is
-   spelled the way C leaves it - the engine compares with JavaScript's
-   operators and hands back a boolean, and a reader told that `i < 3` is `true`
-   has learned the wrong language - and the zero/nonzero reading is offered
-   only where the value decides something, never for a `switch`, which selects
-   on a value rather than on whether it is zero. And a fact belongs to a step
-   in one of two ways: a construct the step is _inside_ is live and its
-   counters go on climbing, while a construct that _just finished_ - the call
-   that returned, the assignment that landed - is kept for exactly the one stop
-   that follows, because there is no stop at which a `return` has produced its
-   value and the statement is still the current one. Both are cleared at every
-   stop, so a stopped session says nothing.
+    The runtime half is `src/interpreter/ConstructTrace.ts`, driven by the
+    engine the way `ExpressionTrace.ts` is, and it leaves plain data on the
+    `ExecState`. The engine wraps `execIf`, `execFor`, `execWhile` and
+    `execSwitch` to say what has been entered, and reports every evaluation
+    through `execExpr`; an index built once from the tree turns a node into the
+    construct that was interested in it, so nothing has to know the shape of the
+    forty-odd node classes twice. Two decisions carry the item. A value is
+    spelled the way C leaves it - the engine compares with JavaScript's
+    operators and hands back a boolean, and a reader told that `i < 3` is `true`
+    has learned the wrong language - and the zero/nonzero reading is offered
+    only where the value decides something, never for a `switch`, which selects
+    on a value rather than on whether it is zero. And a fact belongs to a step
+    in one of two ways: a construct the step is _inside_ is live and its
+    counters go on climbing, while a construct that _just finished_ - the call
+    that returned, the assignment that landed - is kept for exactly the one stop
+    that follows, because there is no stop at which a `return` has produced its
+    value and the statement is still the current one. Both are cleared at every
+    stop, so a stopped session says nothing.
 
-   Two things came out differently from the sketch above. Subexpressions do not
-   read the tree Phase 8 renders: that tree carries the statement _about to_
-   run, so its operators have no values yet and never do in a snapshot the
-   reader sees. `StepModel.evaluations` records what the operators of the
-   statement just finished came to, by range, and the tooltip takes the
-   smallest range covering the pointer - the same rule `constructAt` uses one
-   level up. It reports the subexpression and its value, and not its type:
-   `Engine.getType` answers for names, `*`, `[]` and `.` and nothing else, and
-   a type invented for `a * b` would be a lesson a reader could see was wrong.
-   The other is the preprocessor: `Expansion.text` was already the full
-   expansion rather than one step, so what was missing was the middle -
-   `replacement` records the macro's own replacement list where it differs, and
-   the tooltip reads `NEXT → STEP → 3`.
+    Two things came out differently from the sketch above. Subexpressions do not
+    read the tree Phase 8 renders: that tree carries the statement _about to_
+    run, so its operators have no values yet and never do in a snapshot the
+    reader sees. `StepModel.evaluations` records what the operators of the
+    statement just finished came to, by range, and the tooltip takes the
+    smallest range covering the pointer - the same rule `constructAt` uses one
+    level up. It reports the subexpression and its value, and not its type:
+    `Engine.getType` answers for names, `*`, `[]` and `.` and nothing else, and
+    a type invented for `a * b` would be a lesson a reader could see was wrong.
+    The other is the preprocessor: `Expansion.text` was already the full
+    expansion rather than one step, so what was missing was the middle -
+    `replacement` records the macro's own replacement list where it differs, and
+    the tooltip reads `NEXT → STEP → 3`.
 
 5. **Completion from the program's own symbols.** **Done.** `completeAnyWord` in
    `PlivetEditor.ts` was a placeholder that completed any word in the buffer,
@@ -1182,23 +1182,23 @@ it, and can be taken in any order or dropped.
    panel. The reference material is reachable while typing instead of only on
    hover.
 
-   `ProgramCompletions` in `src/ui/editor/completion.ts` holds the constructs
-   of the last syntax check - the same ones the tooltip reads, so nothing here
-   parses anything - and the syntax tree is asked one question, which is a
-   question about text rather than about C: whether the cursor is inside a
-   comment or a string, where a suggestion interrupts rather than offers.
-   Scope is read as C reads it, a name after its declaration and a local
-   inside its own function, and deliberately no narrower: the constructs
-   record where a declaration is, not where its block ends, and offering a
-   name one block too widely is a smaller wrong answer than hiding one the
-   reader can see on the screen. A member list is offered only where the name
-   in front of the `.` resolves to a record - through a pointer, and through
-   however many typedefs stand between the reader's spelling and the tag the
-   members are recorded under - because a list of every member of every
-   structure would be a guess wearing the clothes of an answer. Leaving the
-   source out turns completion off rather than falling back to the buffer's
-   own words; the library arrives from the application, so `libraryHelp` stays
-   the one place that knows what `printf` is.
+    `ProgramCompletions` in `src/ui/editor/completion.ts` holds the constructs
+    of the last syntax check - the same ones the tooltip reads, so nothing here
+    parses anything - and the syntax tree is asked one question, which is a
+    question about text rather than about C: whether the cursor is inside a
+    comment or a string, where a suggestion interrupts rather than offers.
+    Scope is read as C reads it, a name after its declaration and a local
+    inside its own function, and deliberately no narrower: the constructs
+    record where a declaration is, not where its block ends, and offering a
+    name one block too widely is a smaller wrong answer than hiding one the
+    reader can see on the screen. A member list is offered only where the name
+    in front of the `.` resolves to a record - through a pointer, and through
+    however many typedefs stand between the reader's spelling and the tag the
+    members are recorded under - because a list of every member of every
+    structure would be a guess wearing the clothes of an answer. Leaving the
+    source out turns completion off rather than falling back to the buffer's
+    own words; the library arrives from the application, so `libraryHelp` stays
+    the one place that knows what `printf` is.
 
 6. **Snippets.** **Done.** `snippetCompletion` skeletons for `for`, `while`,
    `switch`, `struct`, `printf` and `scanf`, with tab-through fields. Beginners
@@ -1206,17 +1206,17 @@ it, and can be taken in any order or dropped.
    shows the syntax rather than hiding it, which is the difference between this
    and a block editor.
 
-   `src/ui/editor/snippets.ts` holds the six, and they arrive through the same
-   completion source item 5 built, above the names in scope: a reader who has
-   typed `for` wants the loop rather than a variable beginning with those
-   letters. Two things the templates lean on. A field written twice under one
-   name is one field, so the counter of a `for` is declared, tested and
-   incremented by a single tab stop - which is the fact about a `for` that is
-   worth teaching. And a leading tab in a template is one level of
-   indentation, expanded to whatever the editor indents with, so the result
-   matches the file it lands in. Where a snippet and a library function are
-   the same word, one entry is offered rather than two, and it is the template
-   carrying `libraryHelp`'s own signature and sentence.
+    `src/ui/editor/snippets.ts` holds the six, and they arrive through the same
+    completion source item 5 built, above the names in scope: a reader who has
+    typed `for` wants the loop rather than a variable beginning with those
+    letters. Two things the templates lean on. A field written twice under one
+    name is one field, so the counter of a `for` is declared, tested and
+    incremented by a single tab stop - which is the fact about a `for` that is
+    worth teaching. And a leading tab in a template is one level of
+    indentation, expanded to whatever the editor indents with, so the result
+    matches the file it lands in. Where a snippet and a library function are
+    the same word, one entry is offered rather than two, and it is the template
+    carrying `libraryHelp`'s own signature and sentence.
 
 7. **Structured hover, and cross-highlighting with the graph.** **Done.**
    `src/ui/editor/tooltip.ts` set `textContent`; `create()` may return any DOM.
@@ -1229,47 +1229,47 @@ it, and can be taken in any order or dropped.
    formatting is the tooltip's business. Item 13 reads those same records, so
    the record is the interface both surfaces are written against.
 
-   What makes the link is one key. A cell key names a cell, and an object is a
-   row of them, so `CellModel.object` carries the key every cell of one
-   variable's row shares and `VariableModel.key` carries the same one - two
-   passes over the same stacks that have to agree about exactly one thing.
-   From there it is only carriage: `layoutMemory` puts the key on the row,
-   `MemoryNode` writes it onto the boxes as `data-object-key`, and the paper's
-   own hover reads it back off the DOM, because what a reader points at is one
-   row of a segment and the paper would report the node. The mark itself is a
-   class rather than an attribute - JointJS writes fill and stroke as
-   presentation attributes, which a stylesheet outranks - and it is put back
-   after every render, since a reader holding the pointer over a row while the
-   program steps is still pointing at it. Across the bus it is one event
-   carrying the object and which panel it came from, so a side ignores what it
-   said itself. The editor's end is a second decoration rather than a reuse of
-   the step marker: one says where execution stands and one says where the
-   reader is looking, and neither can take the other's place. And it does not
-   scroll - the reader is looking at the canvas, and a page that moved under a
-   pointer they are not pointing with would be the editor answering a question
-   nobody asked.
+    What makes the link is one key. A cell key names a cell, and an object is a
+    row of them, so `CellModel.object` carries the key every cell of one
+    variable's row shares and `VariableModel.key` carries the same one - two
+    passes over the same stacks that have to agree about exactly one thing.
+    From there it is only carriage: `layoutMemory` puts the key on the row,
+    `MemoryNode` writes it onto the boxes as `data-object-key`, and the paper's
+    own hover reads it back off the DOM, because what a reader points at is one
+    row of a segment and the paper would report the node. The mark itself is a
+    class rather than an attribute - JointJS writes fill and stroke as
+    presentation attributes, which a stylesheet outranks - and it is put back
+    after every render, since a reader holding the pointer over a row while the
+    program steps is still pointing at it. Across the bus it is one event
+    carrying the object and which panel it came from, so a side ignores what it
+    said itself. The editor's end is a second decoration rather than a reuse of
+    the step marker: one says where execution stands and one says where the
+    reader is looking, and neither can take the other's place. And it does not
+    scroll - the reader is looking at the canvas, and a page that moved under a
+    pointer they are not pointing with would be the editor answering a question
+    nobody asked.
 
 8. **Pinned watches.** **Done.** A `showTooltip` `StateField` holding tooltips
    the reader pinned to a variable, updated on every step. A watch window with
    no new user interface.
 
-   `src/ui/editor/watches.ts` holds the field and the gesture. The values a
-   debugger's watch pane shows are already in the document, beside the names
-   they belong to, and a pane on the far side of the editor asks the reader to
-   hold a second copy of the program in their head to use it - so a pinned
-   tooltip stays where the name is written and says what it says there. The
-   gesture is alt-click rather than a plain click, because a plain click is
-   how a reader moves the cursor and a watch pinned by every cursor move is
-   not a watch window but a mess. A watch is pinned to a place in the text: an
-   edit above it moves it, and an edit that deletes the name takes the watch
-   with it rather than leaving a value floating over whatever moved into that
-   position. Which names are pinned is the editor's - they are positions in
-   its document - and what a name is worth is the application's, so the
-   records are pushed in at every step rather than looked up by the editor;
-   they are the same records item 7 built, so a watch and a hover of the same
-   name cannot disagree. A pinned name the current frame has no object for
-   says so instead of vanishing, which is a lesson about scope rather than a
-   pin that seems to have come loose.
+    `src/ui/editor/watches.ts` holds the field and the gesture. The values a
+    debugger's watch pane shows are already in the document, beside the names
+    they belong to, and a pane on the far side of the editor asks the reader to
+    hold a second copy of the program in their head to use it - so a pinned
+    tooltip stays where the name is written and says what it says there. The
+    gesture is alt-click rather than a plain click, because a plain click is
+    how a reader moves the cursor and a watch pinned by every cursor move is
+    not a watch window but a mess. A watch is pinned to a place in the text: an
+    edit above it moves it, and an edit that deletes the name takes the watch
+    with it rather than leaving a value floating over whatever moved into that
+    position. Which names are pinned is the editor's - they are positions in
+    its document - and what a name is worth is the application's, so the
+    records are pushed in at every step rather than looked up by the editor;
+    they are the same records item 7 built, so a watch and a hover of the same
+    name cannot disagree. A pinned name the current frame has no object for
+    says so instead of vanishing, which is a lesson about scope rather than a
+    pin that seems to have come loose.
 
 9. **Editor affordances**, worth one pull request together. **Done.**
    `highlightSelectionMatches` lights up every occurrence of the identifier
@@ -1284,20 +1284,20 @@ it, and can be taken in any order or dropped.
    `placeholder` and `highlightSpecialChars`, the last of which turns a pasted
    non-breaking space from a mystery into a visible character.
 
-   Two of them needed a decision rather than a line. The counting is the
-   interpreter's, in `Server`, not the editor's: a run reports two responses
-   and takes thousands of steps between them, so anything counted on this side
-   would be a count of what the reader happened to be shown. It is four bands
-   rather than a gradient, because the questions a gutter is asked are whether
-   a line ran, whether it ran often and whether it ran far more often than its
-   neighbours - not what the exact count was. And the fold service answers for
-   the first line of a run of excluded lines only, since a service that
-   answered for every line of the run would offer a fold on each of them;
-   function bodies need no service at all, because `lang-cpp` already marks
-   their blocks. What the announcement says is the statement and what its
-   variables hold - the same values item 1 prints at the end of the line -
-   because that is what a reader who cannot see the marker would otherwise
-   hover every name on the line to learn.
+    Two of them needed a decision rather than a line. The counting is the
+    interpreter's, in `Server`, not the editor's: a run reports two responses
+    and takes thousands of steps between them, so anything counted on this side
+    would be a count of what the reader happened to be shown. It is four bands
+    rather than a gradient, because the questions a gutter is asked are whether
+    a line ran, whether it ran often and whether it ran far more often than its
+    neighbours - not what the exact count was. And the fold service answers for
+    the first line of a run of excluded lines only, since a service that
+    answered for every line of the run would offer a fold on each of them;
+    function bodies need no service at all, because `lang-cpp` already marks
+    their blocks. What the announcement says is the statement and what its
+    variables hold - the same values item 1 prints at the end of the line -
+    because that is what a reader who cannot see the marker would otherwise
+    hover every name on the line to learn.
 
 10. **Protected regions.** **Done.** A `transactionFilter` rejecting edits
     outside marked spans turns a program into a fill-in-the-blank exercise,

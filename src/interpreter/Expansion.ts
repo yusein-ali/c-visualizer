@@ -50,3 +50,67 @@ export interface Expansion {
    */
   taken?: boolean;
 }
+
+/** A range carrying the coordinates emitted by the interpreter. */
+export interface PreprocessedRange {
+  begin: { x: number; y: number };
+  end: { x: number; y: number };
+}
+
+/**
+ * Maps one column in preprocessed text back to the source the reader wrote.
+ *
+ * Macro replacement preserves lines but may change their width. A point
+ * inside replacement text has no narrower source equivalent, so either end
+ * of a range expands to cover the complete macro invocation.
+ */
+const originalColumn = (
+  line: number,
+  column: number,
+  edge: 'begin' | 'end',
+  expansions: Expansion[]
+): number => {
+  let drift = 0;
+  const macros = expansions
+    .filter(
+      (expansion) =>
+        expansion.kind === 'macro' &&
+        expansion.line === line &&
+        !expansion.text.includes('\n')
+    )
+    .sort((left, right) => left.column - right.column);
+
+  for (const expansion of macros) {
+    const processedFrom = expansion.column + drift;
+    const processedTo = processedFrom + expansion.text.length;
+    if (column < processedFrom) {
+      break;
+    }
+    if (processedFrom <= column && column < processedTo) {
+      return edge === 'begin'
+        ? expansion.column
+        : expansion.column + Math.max(expansion.length - 1, 0);
+    }
+    drift += expansion.text.length - expansion.length;
+  }
+  return column - drift;
+};
+
+/**
+ * Restores the original columns of an inclusive interpreter source range.
+ * Expansion records themselves already use original coordinates; this is for
+ * ranges produced by parsing the replaced text.
+ */
+export const originalRange = (
+  range: PreprocessedRange,
+  expansions: Expansion[]
+): PreprocessedRange => ({
+  begin: {
+    x: originalColumn(range.begin.y, range.begin.x, 'begin', expansions),
+    y: range.begin.y,
+  },
+  end: {
+    x: originalColumn(range.end.y, range.end.x, 'end', expansions),
+    y: range.end.y,
+  },
+});

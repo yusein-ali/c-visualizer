@@ -4,55 +4,55 @@
  * did before tabs existed.
  */
 .plivet-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.15rem;
-  padding: 0.15rem 0.2rem;
-  border-bottom: 1px solid var(--plivet-line, #ccc);
-  background: var(--plivet-surface, #fff);
-  color: var(--plivet-ink, #222);
-  font-size: 0.8rem;
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.15rem;
+	padding: 0.15rem 0.2rem;
+	border-bottom: 1px solid var(--plivet-line, #ccc);
+	background: var(--plivet-surface, #fff);
+	color: var(--plivet-ink, #222);
+	font-size: 0.8rem;
 }
 
 .plivet-tabs[hidden] {
-  display: none;
+	display: none;
 }
 
 .plivet-tabs__tab {
-  display: flex;
-  align-items: center;
-  border: 1px solid var(--plivet-line, #ccc);
-  border-radius: 3px 3px 0 0;
-  background: var(--plivet-button-bg, #f5f5f5);
+	display: flex;
+	align-items: center;
+	border: 1px solid var(--plivet-line, #ccc);
+	border-radius: 3px 3px 0 0;
+	background: var(--plivet-button-bg, #f5f5f5);
 }
 
 .plivet-tabs__tab--active {
-  background: var(--plivet-surface, #fff);
-  border-bottom-color: transparent;
-  font-weight: bold;
+	background: var(--plivet-surface, #fff);
+	border-bottom-color: transparent;
+	font-weight: bold;
 }
 
 .plivet-tabs__select,
 .plivet-tabs__entry,
 .plivet-tabs__close {
-  border: none;
-  background: none;
-  color: inherit;
-  font: inherit;
-  padding: 0.15rem 0.35rem;
-  cursor: pointer;
+	border: none;
+	background: none;
+	color: inherit;
+	font: inherit;
+	padding: 0.15rem 0.35rem;
+	cursor: pointer;
 }
 
 .plivet-tabs__entry {
-  opacity: 0.55;
+	opacity: 0.55;
 }
 
 .plivet-tabs__entry--on {
-  opacity: 1;
-  cursor: default;
+	opacity: 1;
+	cursor: default;
 }
 
 .plivet-tabs__close:hover,
 .plivet-tabs__select:hover {
-  background: var(--plivet-button-hover-bg, #e6e6e6);
+	background: var(--plivet-button-hover-bg, #e6e6e6);
 }

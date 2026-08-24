@@ -51,6 +51,8 @@ export const diagnosticsFor = (
  */
 export interface TeachingDiagnostic {
   rule: string;
+  /** Where the finding came from, for the diagnostic source prefix. */
+  origin?: 'local' | 'build';
   severity: 'info' | 'warning' | 'error';
   message: string;
   /** 1-based line, 0-based column; the end is exclusive. */
@@ -140,7 +142,7 @@ export const teachingDiagnosticsFor = (
       from,
       to,
       severity: diagnostic.severity,
-      source: `plivet/${diagnostic.rule}`,
+      source: `c-visualizer:${diagnostic.origin ?? 'local'}/${diagnostic.rule}`,
       message: diagnostic.message,
       renderMessage: renderMessage(diagnostic),
       actions: actionsFor(doc, diagnostic, from),

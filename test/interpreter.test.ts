@@ -60,11 +60,71 @@ int main(){ LOG("%d %d\\n", 1, 2); LOG("done\\n"); return 0; }`;
   expect(run(code)).toBe('1 2\ndone\n');
 });
 
+it('continues after an empty declaration while leaving it as a warning', () => {
+  const code = `#include<stdio.h>
+int main(void) {
+  int register const volatile ;
+  auto int automatic = 1;
+  register int fast = 2;
+  printf("%d\\n", automatic + fast);
+  return 0;
+}`;
+  expect(run(code)).toBe('3\n');
+});
+
 it('does not expand a macro name inside a string literal', () => {
   const code = `#include<stdio.h>
 #define N 7
 int main(){ printf("N=%d\\n", N); return 0; }`;
   expect(run(code)).toBe('N=7\n');
+});
+
+describe('the bitwise operators', () => {
+  /**
+   * unicoen's `execBinOpImple` has no case for any of them. `x | 1` fell off
+   * the end of its switch, returned null, and took the statement with it:
+   * `printf("%d\\n", 6 | 1)` printed nothing at all and said nothing about
+   * why, which is the failure this project can least afford - a beginner
+   * masking bits has no way to tell a broken visualizer from a broken
+   * program.
+   */
+  it.each([
+    ['and', '6 & 3', '2'],
+    ['or', '6 | 1', '7'],
+    ['xor', '6 ^ 3', '5'],
+    ['left shift', '1 << 3', '8'],
+    ['right shift', '28 >> 2', '7'],
+    ['complement of a literal', '~0', '-1'],
+    ['a mask built from a shift', '(1 << 3) - 1', '7'],
+    ['precedence against addition', '1 | 2 + 4', '7'],
+  ])('evaluates %s', (_name, expression, expected) => {
+    expect(
+      run(
+        `#include<stdio.h>\nint main(){ printf("%d\\n", ${expression}); return 0; }`
+      )
+    ).toBe(`${expected}\n`);
+  });
+
+  it.each([
+    ['|=', 'int y = 1;\n  y |= 6;', '7'],
+    ['&=', 'int y = 7;\n  y &= 7;', '7'],
+    ['^=', 'int y = 1;\n  y ^= 6;', '7'],
+    ['<<=', 'int y = 1;\n  y <<= 3;', '8'],
+  ])('assigns through %s', (_name, body, expected) => {
+    expect(
+      run(
+        `#include<stdio.h>\nint main(){\n  ${body}\n  printf("%d\\n", y);\n  return 0;\n}`
+      )
+    ).toBe(`${expected}\n`);
+  });
+
+  it('shifts a variable rather than a literal', () => {
+    expect(
+      run(
+        '#include<stdio.h>\nint main(){\n  int x = 28;\n  int y = x >> 2;\n  printf("%d\\n", y);\n  return 0;\n}'
+      )
+    ).toBe('7\n');
+  });
 });
 
 describe('constructs for the editor', () => {
@@ -547,6 +607,24 @@ int main(){
   it('returns nothing rather than throwing on code that does not parse', () => {
     expect(constructs('int main(){ this is not C ;;; }')).toEqual([]);
   });
+});
+
+it('reuses the diagnostics parse when unchanged source starts', () => {
+  const code = 'int main(void) { return 0; }';
+  const interpreter = new PlivetCPP14Interpreter();
+  const mapper = (interpreter as any).plivetMapper;
+  const parse = jest.spyOn(mapper, 'parseToANTLRTree');
+  interpreter.analyze(code);
+  expect(parse).toHaveBeenCalledTimes(1);
+
+  const log = console.log;
+  console.log = () => undefined;
+  try {
+    interpreter.startStepExecution(code);
+  } finally {
+    console.log = log;
+  }
+  expect(parse).toHaveBeenCalledTimes(1);
 });
 
 describe('library help', () => {

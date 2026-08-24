@@ -133,6 +133,71 @@ export function memoryGeometry(
 }
 
 /**
+ * The Variables section uses the memory renderer's vertical object rows, but
+ * only for names visible in the current source context. Keeping the original
+ * cell rows preserves aggregate fold paths and indentation; flattening the
+ * values into the old six-column summary was what made arrays run sideways.
+ */
+export function variableMemoryGeometry(
+  model: StepModel,
+  folds: FoldState,
+  availableWidth?: number
+): MemoryGeometry {
+  const visible = new Set(
+    model.variables
+      .filter((variable) =>
+        /^(Static|Heap):/.test(variable.name)
+          ? false
+          : variable.frame === 'GLOBAL'
+            ? true
+            : variable.active
+      )
+      .map((variable) => variable.key)
+  );
+  const rows: MemorySegmentModel['rows'] = [];
+  for (const segment of model.memory) {
+    let included = false;
+    for (const row of segment.rows) {
+      const root = row.find(
+        (cell) =>
+          cell.kind === 'name' &&
+          typeof cell.object !== 'undefined' &&
+          typeof cell.foldGroup === 'undefined'
+      );
+      if (typeof root?.object !== 'undefined') {
+        included = visible.has(root.object);
+      }
+      if (included) {
+        rows.push(row);
+      }
+    }
+  }
+  const startAddress = rows
+    .flatMap((row) => row)
+    .find(
+      (cell) => cell.kind === 'address' && typeof cell.address === 'number'
+    )?.address;
+  const segment: MemorySegmentModel = {
+    key: 'stack',
+    name: strings.viewVariables,
+    startAddress: startAddress ?? 0,
+    rows,
+    groups: [],
+  };
+  // layoutMemory is designed for two memory columns. Doubling the available
+  // width gives this single Variables node the full canvas width. The segment
+  // reuses the stack key only because the row model requires a MemoryRegion;
+  // it must not inherit the user's collapsed Memory section state.
+  const variableFolds = Object.create(folds) as FoldState;
+  variableFolds.isCollapsed = () => false;
+  return layoutMemory(
+    { ...model, memory: rows.length === 0 ? [] : [segment] },
+    variableFolds,
+    typeof availableWidth === 'number' ? availableWidth * 2 + 28 : undefined
+  );
+}
+
+/**
  * The call-frame tables. A step that carries memory segments is drawn as a
  * memory map instead, so this is what is left for a model that has stacks and
  * no segments - the empty model the graph starts on, and any caller that

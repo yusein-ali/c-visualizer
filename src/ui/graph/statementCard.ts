@@ -73,17 +73,19 @@ const factLine = (
 
 const factRows = (
   facts: NonNullable<StatementExplanation['statement']>['facts']
-): StatementCardRow[] | undefined => {
-  if (facts.length === 0 || facts.some((fact) => fact.value === '')) {
-    return undefined;
-  }
-  return facts.map((fact) => ({
-    label: sentenceLabel(fact.label),
-    value: plainText(fact.value),
-    labelCode: false,
-    valueCode: true,
-  }));
-};
+): StatementCardRow[] | undefined =>
+  facts.length === 0
+    ? undefined
+    : facts.map((fact) => ({
+        // Empty values are narrative notes. `cardRow` renders those as a
+        // full-width note, so they can share the same row layout as the
+        // label/value facts instead of forcing the whole explanation into one
+        // multiline cell.
+        label: sentenceLabel(fact.label),
+        value: plainText(fact.value),
+        labelCode: false,
+        valueCode: true,
+      }));
 
 /** A list that reads as prose rather than as columns in a data table. */
 const list = (parts: string[]): string => {

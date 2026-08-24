@@ -18,7 +18,18 @@ interface Segment {
   lastLine: number;
 }
 
-const lineCount = (text: string): number => text.split('\n').length;
+/**
+ * How many lines one file takes up in the composed unit.
+ *
+ * Not `split('\n').length`: a file ending in a newline has an empty string
+ * after the final one, and counting that phantom line put every file after
+ * the first one line further down the composed source than it really was.
+ * The segment map was then a line out for every file but the entry - a step
+ * in a helper was reported one line above the statement that ran, and a
+ * breakpoint set on a line was armed on the line below it.
+ */
+const lineCount = (text: string): number =>
+  text.split('\n').length - (text.endsWith('\n') ? 1 : 0);
 
 const isHeader = (path: string): boolean => /\.(h|hh|hpp|hxx)$/i.test(path);
 

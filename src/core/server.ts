@@ -1,5 +1,6 @@
 import { ExecState } from 'unicoen.ts/dist/interpreter/Engine/ExecState';
 import { Interpreter } from 'unicoen.ts/dist/interpreter/Interpreter';
+import type { SyntaxErrorData } from 'unicoen.ts/dist/interpreter/mapper/SyntaxErrorData';
 import { HISTORY_LIMIT, StepHistory } from './history';
 import { extractModel } from './extractModel';
 import { StepModel, emptyStepModel } from './model';
@@ -7,6 +8,7 @@ import { Construct } from '../interpreter/Construct';
 import { Expansion } from '../interpreter/Expansion';
 import { RuntimeDiagnostic } from '../interpreter/RuntimeDiagnostic';
 import { LintDiagnostic } from '../interpreter/TeachingLint';
+import type { SourceAnalysis } from '../interpreter/CPP14';
 import { ExecutionSource } from './executionSource';
 import type { SourceLocation } from './executionSource';
 
@@ -75,11 +77,154 @@ export interface SyntaxErrorModel {
   msg: string;
 }
 
+const syntaxErrorMessage = (
+  source: string,
+  line: number,
+  column: number,
+  message: string
+): string => {
+  if (!message.startsWith('no viable alternative')) {
+    return message;
+  }
+  const sourceLine = source.split(/\r?\n/)[line - 1] ?? '';
+  const beforeError = sourceLine.slice(0, column).trimEnd();
+  if (beforeError.endsWith('=')) {
+    return "expected an expression after '='";
+  }
+  const lines = source.split(/\r?\n/);
+  const previousLine =
+    lines
+      .slice(0, Math.max(0, line - 1))
+      .reverse()
+      .find((candidate) => candidate.trim() !== '')
+      ?.trim() ?? '';
+  const looksLikeDeclaration =
+    /^(?:(?:const|static|extern|unsigned|signed|long|short)\s+)*(?:void|char|short|int|long|float|double|struct|enum|union)\b/.test(
+      previousLine
+    );
+  const looksLikeStatement = /^[_A-Za-z]\w*\s*\(/.test(sourceLine.trim());
+  if (
+    looksLikeDeclaration &&
+    looksLikeStatement &&
+    !/[;{}:]$/.test(previousLine)
+  ) {
+    return "expected ';' after declaration";
+  }
+  return message;
+};
+
+/**
+ * The rules whose diagnostics refuse a run rather than merely marking it.
+ *
+ * A teaching rule describes a program that compiles and behaves badly, and a
+ * reader has to be able to run one and watch it misbehave - that is what the
+ * visualizer is for. These are different: they describe a program a compiler
+ * refuses to translate, so there is no execution to show. Using a name that
+ * nothing declares is the first of them; C has no implicit declaration of
+ * objects, and PLIVET used to run such a program, print nothing and report
+ * success.
+ */
+const REFUSING_RULES = new Set(['undeclared-identifier']);
+
+const refusals = (analysis: SourceAnalysis): LintDiagnostic[] =>
+  analysis.linkerLints.filter((diagnostic) =>
+    REFUSING_RULES.has(diagnostic.rule)
+  );
+
 /** Syntax errors belonging to one named file in a start/run preflight. */
 export interface FileSyntaxErrors {
   path: string;
   errors: SyntaxErrorModel[];
 }
+
+/** Findings belonging to one named file, with that file's own coordinates. */
+export interface FileLints {
+  path: string;
+  lints: LintDiagnostic[];
+}
+
+/**
+ * Parser errors from the composed program, grouped by the file each one is in.
+ *
+ * The interpreter is handed one translation unit and answers in its
+ * coordinates, so every error has to be put back into the file it came from
+ * before a reader can be sent to it. An error the map cannot place belongs to
+ * `fallback` - the entry file - because a line that is nowhere is still a line
+ * somebody has to be told about.
+ */
+const errorsByFile = (
+  errors: SyntaxErrorData[],
+  execution: ExecutionSource,
+  sources: SourceFile[],
+  fallback: string
+): Map<string, SyntaxErrorModel[]> => {
+  const byPath = new Map<string, SyntaxErrorModel[]>();
+  for (const error of errors) {
+    const location = execution.locate({
+      begin: { x: error.charPositionInLine, y: error.line },
+      end: { x: error.charPositionInLine, y: error.line },
+    });
+    const path = location?.path ?? fallback;
+    const line = location?.range.begin.y ?? error.line;
+    const file = sources.find((candidate) => candidate.path === path);
+    const model = {
+      line,
+      charPositionInLine: error.charPositionInLine,
+      msg: syntaxErrorMessage(
+        file?.text ?? execution.code,
+        line,
+        error.charPositionInLine,
+        // `getMsg` writes the coordinate into the sentence, and the one it
+        // has is the composed unit's. A row saying `helper.c:3` beside a
+        // sentence saying `line 10:0` names two different places, so the
+        // sentence is given the file's own line as well.
+        error
+          .getMsg()
+          .replace(/^line \d+:\d+/, `line ${line}:${error.charPositionInLine}`)
+      ),
+    };
+    const found = byPath.get(path) ?? [];
+    found.push(model);
+    byPath.set(path, found);
+  }
+  return byPath;
+};
+
+/**
+ * Whole-program findings, grouped by the file each one is in.
+ *
+ * The same mapping as `errorsByFile` and for the same reason, with one
+ * difference: a lint has a range rather than a point, so both ends are mapped
+ * and the file's own line numbers replace the composed unit's.
+ */
+const lintsByFile = (
+  lints: LintDiagnostic[],
+  execution: ExecutionSource,
+  fallback: string
+): FileLints[] => {
+  const byPath = new Map<string, LintDiagnostic[]>();
+  for (const lint of lints) {
+    const location = execution.locate({
+      begin: { x: lint.column, y: lint.line },
+      end: { x: lint.endColumn, y: lint.endLine },
+    });
+    const path = location?.path ?? fallback;
+    const found = byPath.get(path) ?? [];
+    found.push(
+      location === null
+        ? lint
+        : {
+            ...lint,
+            line: location.range.begin.y,
+            column: location.range.begin.x,
+            endLine: location.range.end.y,
+            endColumn: location.range.end.x,
+          }
+    );
+    byPath.set(path, found);
+  }
+  return Array.from(byPath, ([path, found]) => ({ path, lints: found }));
+};
 
 export interface Response {
   output: string;
@@ -112,8 +257,25 @@ export interface Response {
   constructs?: Construct[];
   /** Parsed statements in the complete composed program. Syntax checks only. */
   programConstructs?: Construct[];
-  /** What the teaching rules found in a program that parses. Checks only. */
+  /** What the teaching rules found in the checked file. Checks only. */
   lints?: LintDiagnostic[];
+  /**
+   * What the rules that read the whole program found, in every file rather
+   * than in the one being edited: what is declared but never defined, what is
+   * used but never declared. Sent per file with that file's own coordinates,
+   * and replaced as a set by each check - one edit can answer or raise a
+   * question about a file nobody has touched, so a reader cannot be left
+   * holding half of an older answer.
+   */
+  programLints?: FileLints[];
+  /**
+   * Parser errors in every file of the composed program, from an editor check
+   * rather than from a refused start.
+   *
+   * Not `fileErrors`: nothing has been refused here, and the two must stay
+   * apart because `fileErrors` is what tells the editor a run did not happen.
+   */
+  programErrors?: FileSyntaxErrors[];
   /**
    * How often the run has arrived at each line so far. Counted here rather
    * than by the editor because a run reports two responses and takes
@@ -161,6 +323,15 @@ const activeTextOf = (request: Request): string => {
   );
 };
 
+/** The files in the same stable order used when a refusal chooses the first. */
+const sourceFilesOf = (request: Request): SourceFile[] =>
+  typeof request.files === 'undefined' || request.files.length === 0
+    ? [{ path: request.entry ?? '', text: entryTextOf(request) }]
+    : [
+        ...request.files.filter((file) => file.path === request.entry),
+        ...request.files.filter((file) => file.path !== request.entry),
+      ];
+
 /** The composed source used for execution; syntax checks remain entry-only. */
 const executionSourceOf = (request: Request): ExecutionSource =>
   new ExecutionSource(
@@ -207,8 +378,22 @@ interface StartResult {
   expansions: Expansion[];
 }
 
+interface PreparedStart {
+  interpreter: Interpreter;
+  constructs: Construct[];
+  expansions: Expansion[];
+}
+
+interface CheckedProgram extends PreparedStart {
+  activeCode: string;
+  activePath: string;
+  executionCode: string;
+  analysis: SourceAnalysis;
+}
+
 /** Implemented by interpreters that can describe their source. */
 interface ExpansionSource {
+  analyze(code: string, linkedCode?: string): SourceAnalysis;
   getExpansions(code: string): Expansion[];
   getConstructs(code: string): Construct[];
   getLints(code: string, linkedCode?: string): LintDiagnostic[];
@@ -223,6 +408,7 @@ function reportsExpansions(
   const source = interpreter as unknown as ExpansionSource;
   return (
     typeof source.getExpansions === 'function' &&
+    typeof source.analyze === 'function' &&
     typeof source.getConstructs === 'function' &&
     typeof source.getLints === 'function' &&
     typeof source.getTeachingLints === 'function' &&
@@ -260,6 +446,8 @@ export class Server {
    */
   private readonly coverage = new Map<number, number>();
   private interpreter: Interpreter | null = null;
+  /** The latest diagnostics parse, reusable only while its source is exact. */
+  private checkedProgram: CheckedProgram | null = null;
   /**
    * The source map armed by Start. Follow-up commands intentionally do not
    * have to repeat their source text, so their ranges must use the same map
@@ -294,12 +482,13 @@ export class Server {
     const module = await import(/* webpackChunkName: "CPP14" */ '../interpreter/CPP14');
     return new module.PlivetCPP14Interpreter();
   }
-  private async reset() {
+  private async reset(prepared?: PreparedStart) {
     // A restart retires a run still in flight, the same way stopping does.
     this.runToken += 1;
     this.count = 0;
     this.coverage.clear();
-    const interpreter = await this.createInterpreter();
+    const interpreter =
+      prepared?.interpreter ?? (await this.createInterpreter());
     interpreter.setFileList(this.files);
     this.interpreter = interpreter;
     this.history.clear();
@@ -335,12 +524,16 @@ export class Server {
 
     switch (controlEvent) {
       case 'Start': {
-        const refused = await this.preflight(request);
-        if (refused !== null) {
-          return refused;
+        const prepared = this.takeCheckedProgram(request, requestedExecution);
+        const preflight =
+          prepared === null
+            ? await this.preflight(request, requestedExecution)
+            : prepared;
+        if ('debugState' in preflight) {
+          return preflight;
         }
         this.execution = requestedExecution;
-        const started = await this.Start(requestedExecution.code);
+        const started = await this.Start(requestedExecution.code, preflight);
         return this.respond(
           started.step,
           requestedExecution,
@@ -384,12 +577,16 @@ export class Server {
         );
       }
       case 'Exec': {
-        const refused = await this.preflight(request);
-        if (refused !== null) {
-          return refused;
+        const prepared = this.takeCheckedProgram(request, requestedExecution);
+        const preflight =
+          prepared === null
+            ? await this.preflight(request, requestedExecution)
+            : prepared;
+        if ('debugState' in preflight) {
+          return preflight;
         }
         this.execution = requestedExecution;
-        const started = await this.Start(requestedExecution.code);
+        const started = await this.Start(requestedExecution.code, preflight);
         return this.respond(
           this.StepAll(requestedExecution, globalBreakpoints),
           requestedExecution,
@@ -404,6 +601,7 @@ export class Server {
         return this.SyntaxCheck(
           activeTextOf(request),
           activePathOf(request),
+          sourceFilesOf(request),
           requestedExecution
         );
       }
@@ -507,8 +705,11 @@ export class Server {
     };
   }
 
-  private async Start(sourcecode: string): Promise<StartResult> {
-    await this.reset();
+  private async Start(
+    sourcecode: string,
+    prepared?: PreparedStart
+  ): Promise<StartResult> {
+    await this.reset(prepared);
     if (this.interpreter === null) {
       throw new Error('interpreter is not found');
     }
@@ -516,8 +717,8 @@ export class Server {
     // the run: doing it after `startStepExecution` resets the engine's cached
     // global scope and function addresses, so the entry point disappears from
     // text memory on the next step.
-    const constructs = this.constructs(sourcecode);
-    const expansions = this.expansions(sourcecode);
+    const constructs = prepared?.constructs ?? this.constructs(sourcecode);
+    const expansions = prepared?.expansions ?? this.expansions(sourcecode);
     const execState = this.interpreter.startStepExecution(sourcecode);
     const output = this.interpreter.getStdout();
     this.record(execState, output);
@@ -763,7 +964,7 @@ export class Server {
     // `default` is the one that happens in practice - and a breakpoint cannot
     // be on a line the step does not have, so this is read rather than
     // destructured.
-    const next = result.execState.getNextExpr();
+    const next = result.execState.getNextExpr() ?? null;
     const codeRange = next === null ? null : next.codeRange;
     return (
       codeRange !== null &&
@@ -772,62 +973,74 @@ export class Server {
     );
   }
 
+  /**
+   * Consume a diagnostics parse only when every byte of its source still
+   * matches. The cached interpreter owns the prepared AST and may be armed
+   * once; a restart after that deliberately performs a fresh analysis.
+   */
+  private takeCheckedProgram(
+    request: Request,
+    execution: ExecutionSource
+  ): PreparedStart | null {
+    const checked = this.checkedProgram;
+    if (
+      checked === null ||
+      checked.activeCode !== activeTextOf(request) ||
+      checked.activePath !== activePathOf(request) ||
+      checked.executionCode !== execution.code ||
+      checked.analysis.programErrors.length !== 0 ||
+      refusals(checked.analysis).length !== 0
+    ) {
+      return null;
+    }
+    this.checkedProgram = null;
+    return checked;
+  }
+
   private async SyntaxCheck(
     code: string,
     path: string,
+    sources: SourceFile[],
     execution: ExecutionSource
   ): Promise<Response> {
     // Deliberately a throwaway interpreter, never `this.interpreter`.
     const interpreter = await this.createInterpreter();
-    const errors: SyntaxErrorModel[] = interpreter
-      .checkSyntaxError(code)
-      .map(({ line, charPositionInLine, getMsg }) => ({
+    if (!reportsExpansions(interpreter)) {
+      throw new Error('interpreter cannot analyze source');
+    }
+    const analysis = interpreter.analyze(code, execution.code);
+    const errors: SyntaxErrorModel[] = analysis.errors.map(
+      ({ line, charPositionInLine, getMsg }) => ({
         line,
         charPositionInLine,
-        msg: getMsg(),
-      }));
-    const lints =
-      reportsExpansions(interpreter) && errors.length === 0
-        ? interpreter.getTeachingLints(code).concat(
-            interpreter.getLinkerLints(execution.code).flatMap((diagnostic) => {
-              const location = execution.locate({
-                begin: { x: diagnostic.column, y: diagnostic.line },
-                end: {
-                  x: diagnostic.endColumn,
-                  y: diagnostic.endLine,
-                },
-              });
-              return location?.path === path
-                ? [
-                    {
-                      ...diagnostic,
-                      line: location.range.begin.y,
-                      column: location.range.begin.x,
-                      endLine: location.range.end.y,
-                      endColumn: location.range.end.x,
-                    },
-                  ]
-                : [];
-            })
-          )
-        : [];
-    return {
+        msg: syntaxErrorMessage(code, line, charPositionInLine, getMsg()),
+      })
+    );
+    // The teaching rules read the file in front of the reader, so what they
+    // found is about that file alone. A program that does not parse has
+    // syntax errors to fix first, and a teaching rule reading a broken tree
+    // would only add noise to them.
+    const lints = errors.length === 0 ? analysis.teachingLints : [];
+    // The rules that read the whole program are a different question, and one
+    // the active tab does not bound: both halves were being computed on every
+    // check and everything outside the open file thrown away, which is why a
+    // reader was never told that the file they were not looking at was the
+    // broken one. `analysis.linkerLints` is already empty where the composed
+    // program did not parse, so nothing here needs to ask a second time.
+    const programLints = lintsByFile(analysis.linkerLints, execution, path);
+    const programErrors: FileSyntaxErrors[] = Array.from(
+      errorsByFile(analysis.programErrors, execution, sources, path),
+      ([file, found]) => ({ path: file, errors: found })
+    );
+    const response: Response = {
       errors,
-      expansions: reportsExpansions(interpreter)
-        ? interpreter.getExpansions(code)
-        : [],
-      programExpansions: reportsExpansions(interpreter)
-        ? interpreter.getExpansions(execution.code)
-        : [],
-      constructs: reportsExpansions(interpreter)
-        ? interpreter.getConstructs(code)
-        : [],
-      programConstructs: reportsExpansions(interpreter)
-        ? interpreter.getConstructs(execution.code)
-        : [],
-      // A program that does not parse has syntax errors to fix first, and a
-      // teaching rule reading a broken tree would only add noise to them.
+      expansions: analysis.expansions,
+      programExpansions: analysis.programExpansions,
+      constructs: analysis.constructs,
+      programConstructs: analysis.programConstructs,
       lints,
+      programLints,
+      programErrors,
       sourcecode: code,
       diagnosticPath: path,
       model: emptyStepModel(),
@@ -835,6 +1048,16 @@ export class Server {
       output: '',
       step: this.count,
     };
+    this.checkedProgram = {
+      activeCode: code,
+      activePath: path,
+      executionCode: execution.code,
+      interpreter,
+      analysis,
+      constructs: analysis.programConstructs,
+      expansions: analysis.programExpansions,
+    };
+    return response;
   }
 
   /**
@@ -843,30 +1066,53 @@ export class Server {
    * useful while editing but wrong for Start/Run: a debugger must not pretend
    * that a program the compiler rejects is executable.
    */
-  private async preflight(request: Request): Promise<Response | null> {
-    const sources =
-      typeof request.files === 'undefined' || request.files.length === 0
-        ? [{ path: request.entry ?? '', text: entryTextOf(request) }]
-        : [
-            ...request.files.filter((file) => file.path === request.entry),
-            ...request.files.filter((file) => file.path !== request.entry),
-          ];
+  private async preflight(
+    request: Request,
+    execution: ExecutionSource
+  ): Promise<PreparedStart | Response> {
+    const sources = sourceFilesOf(request);
     const interpreter = await this.createInterpreter();
-    const fileErrors: FileSyntaxErrors[] = [];
-    for (const file of sources) {
-      const errors = interpreter
-        .checkSyntaxError(file.text)
-        .map(({ line, charPositionInLine, getMsg }) => ({
-          line,
-          charPositionInLine,
-          msg: getMsg(),
-        }));
-      if (errors.length !== 0) {
-        fileErrors.push({ path: file.path, errors });
-      }
+    if (!reportsExpansions(interpreter)) {
+      throw new Error('interpreter cannot analyze source');
     }
+    const analysis = interpreter.analyze(execution.code);
+    const fallback = request.entry ?? sources[0]?.path ?? '';
+    const byPath = errorsByFile(
+      analysis.programErrors,
+      execution,
+      sources,
+      fallback
+    );
+    // A program that parses can still be one no compiler would translate.
+    // Reported through the same channel as a syntax error, and after them, so
+    // a file with both shows the parse failure first.
+    for (const diagnostic of refusals(analysis)) {
+      const location = execution.locate({
+        begin: { x: diagnostic.column, y: diagnostic.line },
+        end: { x: diagnostic.endColumn, y: diagnostic.endLine },
+      });
+      const path = location?.path ?? fallback;
+      const errors = byPath.get(path) ?? [];
+      errors.push({
+        line: location?.range.begin.y ?? diagnostic.line,
+        charPositionInLine: location?.range.begin.x ?? diagnostic.column,
+        msg: diagnostic.message,
+      });
+      byPath.set(path, errors);
+    }
+    const fileErrors: FileSyntaxErrors[] = Array.from(
+      byPath,
+      ([path, errors]) => ({
+        path,
+        errors,
+      })
+    );
     if (fileErrors.length === 0) {
-      return null;
+      return {
+        interpreter,
+        constructs: analysis.programConstructs,
+        expansions: analysis.programExpansions,
+      };
     }
     const stopped = this.Stop();
     const first = fileErrors[0];
@@ -902,7 +1148,11 @@ export class Server {
    * rather than a model.
    */
   private recordArrival(execState: ExecState) {
-    const next = execState.getNextExpr();
+    // A program with nothing left to run has no next expression, and unicoen
+    // says so with `undefined` rather than the `null` its type promises:
+    // `int main(void) {}` is entirely valid C, and reading `codeRange` off
+    // that threw before the first step ever completed.
+    const next = execState.getNextExpr() ?? null;
     const range = next === null ? null : next.codeRange;
     if (!range || !range.begin) {
       return;

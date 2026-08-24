@@ -1,6 +1,7 @@
 import { dia, shapes } from '@joint/core';
 import {
   ArrowGeometry,
+  DEBUG_STATE,
   CallExpansionModel,
   Geometry,
   MemoryGeometry,
@@ -15,17 +16,33 @@ import {
 } from '../../core';
 import strings from '../../strings';
 import { IconName, iconFor } from '../controls/icons';
-import { graphGeometry, memoryGeometry } from './geometry';
+import {
+  graphGeometry,
+  memoryGeometry,
+  variableMemoryGeometry,
+} from './geometry';
 import { expressionGeometry } from './expressionLayout';
 import { expressionNodeOf } from './ExpressionNode';
 import { ViewPanelHandle, viewPanel } from './ViewPanel';
 import { callStackRows } from './callStack';
 import { callHeading } from './callSection';
-import { variableContextLabel, variableTableRows } from './variableTable';
+import { variableContextLabel } from './variableTable';
 import { emptyStatementExplanation, StatementExplanation } from '../records';
 import { MemoryNode, memoryNodeOf } from './MemoryNode';
 import { StackTable, stackTableOf } from './StackTable';
 import { mutationTableCells } from './mutationTable';
+import {
+  DiagnosticActivity,
+  DiagnosticEntry,
+  RunStatus,
+  STATUS_HEIGHT,
+  activityIsPending,
+  diagnosticStatusCell,
+  diagnosticStatusText,
+  diagnosticsTableCells,
+  sameDiagnostics,
+  sortedDiagnostics,
+} from './diagnosticsTable';
 import {
   statementCard,
   StatementCardModel,
@@ -57,7 +74,13 @@ export interface PlivetGraphOptions {
 /** What a double-clicked variable or memory row names in the source. */
 export type MemoryNavigationTarget =
   | { kind: 'object'; key: string }
-  | { kind: 'function'; name: string };
+  | { kind: 'function'; name: string }
+  /**
+   * A place rather than a name: what a diagnostic row points at. The canvas
+   * has the file and the line already and nothing to resolve, so this asks
+   * for a position instead of asking for a declaration to be found.
+   */
+  | { kind: 'location'; path: string; line: number; column: number };
 
 /** Functions share the row-key mechanism with objects, but name definitions. */
 export const memoryNavigationTarget = (
@@ -101,13 +124,24 @@ const ORIGIN_Y = 24;
 const MEMORY_DROP = HEADING_HEIGHT + HEADING_GAP;
 const CALL_ROW_GAP = 5;
 const VARIABLE_CONTEXT_HEIGHT = 30;
-const VARIABLE_HEADER_HEIGHT = 28;
+/**
+ * How long the status line above the findings keeps reporting the last thing
+ * that finished before it admits that nothing is happening. Long enough that
+ * a reader who looked away still sees the answer to what they pressed, short
+ * enough that "Build complete" is never left standing over a program that has
+ * been rewritten since.
+ */
+const DIAGNOSTICS_IDLE_DELAY = 8000;
+/** The bands that are collapsed while nothing is running, in layout order. */
+const STATE_SECTIONS: CanvasSection[] = [
+  'statement',
+  'callStack',
+  'expression',
+  'variables',
+  'memory',
+  'mutations',
+];
 const VARIABLE_ROW_HEIGHT = 34;
-const VARIABLE_COLUMN_WIDTHS = [190, 250, 250, 90, 300, 124] as const;
-const VARIABLE_TABLE_WIDTH = VARIABLE_COLUMN_WIDTHS.reduce(
-  (total, width) => total + width,
-  0
-);
 
 /** JointJS rectangles center labels unless both axes are overridden. */
 export const leftAlignedLabel = (x: number, height: number) => ({
@@ -147,6 +181,7 @@ export const expressionSectionIsCollapsed = (
  * the step changes.
  */
 type CanvasSection =
+  | 'diagnostics'
   | 'statement'
   | 'callStack'
   | 'expression'
@@ -156,6 +191,7 @@ type CanvasSection =
   | `call:${string}`;
 
 const isCanvasSection = (value: string): value is CanvasSection =>
+  value === 'diagnostics' ||
   value === 'statement' ||
   value === 'callStack' ||
   value === 'expression' ||
@@ -246,6 +282,31 @@ export class PlivetGraph {
   private reported: string | null = null;
   private readonly onFocus?: (object: string | null) => void;
   private readonly onNavigate?: (target: MemoryNavigationTarget) => void;
+  /** Every finding the checkers have reported, unordered as it arrived. */
+  private diagnostics: DiagnosticEntry[] = [];
+  /**
+   * The same findings in the order they were last drawn in. A row carries its
+   * index, so the click has to be read against the list that produced it
+   * rather than against whatever has arrived since.
+   */
+  private drawnDiagnostics: DiagnosticEntry[] = [];
+  private activity: DiagnosticActivity | null = null;
+  /** Why the latest run was refused or terminated, independently of Stop. */
+  private runStatus: RunStatus = null;
+  private debugState: DEBUG_STATE = 'Stop';
+  /** Nothing has happened for long enough to stop reporting what did. */
+  private diagnosticsIdle = false;
+  private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The status sentence as it stands on the canvas now. */
+  private drawnStatus = '';
+  /**
+   * What the reader had collapsed before a stop collapsed everything for
+   * them, and null while nothing is being held. A run puts it back, so the
+   * automatic collapse is a way of clearing the canvas rather than a way of
+   * overwriting what they chose.
+   */
+  private heldCollapsed: Set<CanvasSection> | null = null;
+  private executing = false;
 
   /** Width of a section band in the visible canvas, in paper coordinates. */
   private fullCanvasWidth(): number {
@@ -321,9 +382,16 @@ export class PlivetGraph {
         target === null
           ? null
           : target.closest(
-              '[data-section-target], [data-fold-target], [data-frame-target], [data-collapse-target]'
+              '[data-section-target], [data-fold-target], [data-frame-target], [data-collapse-target], [data-diagnostic-index]'
             );
       if (hit === null) {
+        return;
+      }
+      const finding = hit.getAttribute('data-diagnostic-index');
+      if (finding !== null) {
+        // A finding is a place in the source rather than anything on the
+        // canvas: the row is followed, and the drawing does not change.
+        this.followDiagnostic(Number(finding));
         return;
       }
       const group = hit.getAttribute('data-fold-target');
@@ -373,6 +441,9 @@ export class PlivetGraph {
     if (this.resizeObserver !== null) {
       this.resizeObserver.observe(this.container);
     }
+    // Nothing is running yet, which is the state the state views have nothing
+    // to say in: the canvas opens the way a stop leaves it.
+    this.collapseStateSections();
     this.render(this.model);
   }
 
@@ -397,6 +468,28 @@ export class PlivetGraph {
     this.contentHeight = 0;
     const cells: dia.Cell[] = [];
     let nextY = ORIGIN_Y;
+
+    // The status strip is drawn whether or not anything has been found: it is
+    // where a reader learns that a build is under way, and a line that
+    // appeared only once the compiler had found something would be silent for
+    // exactly the wait it exists to explain. The table under it is the
+    // opposite - absent rather than empty, because a heading over no findings
+    // is a band of canvas spent saying nothing.
+    if (this.view.areDiagnosticsShown()) {
+      cells.push(this.statusCell(ORIGIN_X, nextY));
+      nextY += STATUS_HEIGHT;
+      if (this.diagnostics.length === 0) {
+        this.drawnDiagnostics = [];
+      } else {
+        nextY += HEADING_GAP;
+        cells.push(...this.diagnosticsCells(ORIGIN_X, nextY));
+        nextY = Math.max(this.contentHeight, nextY + HEADING_HEIGHT);
+      }
+      nextY += SECTION_GAP;
+    } else {
+      this.drawnDiagnostics = [];
+      this.drawnStatus = '';
+    }
 
     // Statement and Call stack are peers: the first names the operation and
     // the second the activation whose state that operation is changing.
@@ -477,7 +570,7 @@ export class PlivetGraph {
           Math.max(this.contentHeight, memory.height)
         );
         cells.push(
-          ...memory.segments.map(memoryNodeOf),
+          ...memory.segments.map((segment) => memoryNodeOf(segment)),
           ...frames.stacks.map(stackTableOf),
           ...[...memory.arrows, ...frames.arrows].map((arrow) =>
             this.pointerLink(arrow)
@@ -518,7 +611,8 @@ export class PlivetGraph {
           model.mutations,
           ORIGIN_X,
           mutationY + HEADING_HEIGHT + HEADING_GAP,
-          tableWidth
+          tableWidth,
+          this.folds
         );
         cells.push(...table.cells);
         this.contentWidth = Math.max(
@@ -540,6 +634,78 @@ export class PlivetGraph {
     // mark goes back on. `async` paper draws after this returns, which is why
     // it is put back on the next frame rather than now.
     this.repaintFocus();
+  }
+
+  /**
+   * What the checkers have found, replacing what they had found before.
+   *
+   * Every finding of both kinds arrives in one call for the same reason the
+   * linter takes one set: two calls would each be a complete answer, and the
+   * second would be drawing a table the first had already contradicted.
+   */
+  setDiagnostics(diagnostics: DiagnosticEntry[]): void {
+    if (sameDiagnostics(this.diagnostics, diagnostics)) {
+      return;
+    }
+    const wasDrawn = this.diagnosticsAreDrawn();
+    this.diagnostics = diagnostics.slice();
+    if (wasDrawn || this.diagnosticsAreDrawn()) {
+      this.render(this.model);
+    }
+  }
+
+  /**
+   * What the checkers are doing, for the line over the table.
+   *
+   * The canvas is told rather than asked: which of them is running is known
+   * where the requests are made, and a widget that polled for it would be
+   * holding a second copy of the application's state.
+   */
+  setDiagnosticActivity(activity: DiagnosticActivity): void {
+    this.activity = activity;
+    this.diagnosticsIdle = false;
+    this.restartIdleTimer();
+    this.refreshStatus();
+  }
+
+  /** Report or clear an abnormal outcome of the latest run. */
+  setRunStatus(status: RunStatus): void {
+    if (status === this.runStatus) {
+      return;
+    }
+    this.runStatus = status;
+    this.diagnosticsIdle = false;
+    this.restartIdleTimer();
+    this.refreshStatus();
+  }
+
+  /**
+   * Whether a program is running, and what it is doing while it runs.
+   *
+   * A canvas with nothing running on it draws six sections that all say the
+   * same thing - that nothing is running - so a stop closes them and leaves
+   * the findings open. A start puts back exactly what the reader had, which
+   * is what makes this a clearing rather than a preference of its own.
+   */
+  setDebugState(state: DEBUG_STATE): void {
+    if (state === this.debugState) {
+      return;
+    }
+    this.debugState = state;
+    const executing = state !== 'Stop';
+    if (executing === this.executing) {
+      this.refreshStatus();
+      return;
+    }
+    this.executing = executing;
+    if (executing) {
+      this.restoreStateSections();
+    } else {
+      this.collapseStateSections();
+    }
+    this.diagnosticsIdle = false;
+    this.restartIdleTimer();
+    this.render(this.model);
   }
 
   /**
@@ -572,6 +738,10 @@ export class PlivetGraph {
   }
 
   destroy(): void {
+    if (this.idleTimer !== null) {
+      clearTimeout(this.idleTimer);
+      this.idleTimer = null;
+    }
     if (this.resizeObserver !== null) {
       this.resizeObserver.disconnect();
     }
@@ -626,12 +796,167 @@ export class PlivetGraph {
     if (section === 'expression' && this.model.expression === null) {
       return;
     }
-    if (this.collapsed.has(section)) {
+    const opening = this.collapsed.has(section);
+    if (opening) {
       this.collapsed.delete(section);
     } else {
       this.collapsed.add(section);
     }
+    // A band the reader opens while the canvas is cleared is a band they
+    // want: the run that puts the rest back must not close it again.
+    if (this.heldCollapsed !== null) {
+      if (opening) {
+        this.heldCollapsed.delete(section);
+      } else {
+        this.heldCollapsed.add(section);
+      }
+    }
     this.render(this.model);
+  }
+
+  /** Whether the findings band is on the canvas at the moment. */
+  private diagnosticsAreDrawn(): boolean {
+    return this.view.areDiagnosticsShown() && this.diagnostics.length !== 0;
+  }
+
+  /**
+   * Redraw for the status line alone, and only when the line has something
+   * different to say. A local check runs on every pause in typing, and
+   * rebuilding the scene to write the same sentence again would cost a redraw
+   * a second for nothing.
+   */
+  private refreshStatus(): void {
+    // The strip is drawn whenever the section is switched on, so this asks
+    // about the switch rather than about the findings: a build with nothing
+    // to report still has a status to report.
+    if (!this.view.areDiagnosticsShown()) {
+      return;
+    }
+    const status = diagnosticStatusText(
+      this.activity,
+      this.debugState,
+      this.diagnosticsIdle,
+      this.runStatus
+    );
+    if (status === this.drawnStatus) {
+      return;
+    }
+    this.render(this.model);
+  }
+
+  private restartIdleTimer(): void {
+    if (this.idleTimer !== null) {
+      clearTimeout(this.idleTimer);
+      this.idleTimer = null;
+    }
+    // Nothing goes idle while a checker is still working or a program is
+    // still running: the line is reporting the present, not waiting out a
+    // silence.
+    if (activityIsPending(this.activity) || this.debugState !== 'Stop') {
+      return;
+    }
+    this.idleTimer = setTimeout(() => {
+      this.idleTimer = null;
+      this.diagnosticsIdle = true;
+      this.refreshStatus();
+    }, DIAGNOSTICS_IDLE_DELAY);
+  }
+
+  /** Close every state view and leave the findings open over them. */
+  private collapseStateSections(): void {
+    if (this.heldCollapsed === null) {
+      this.heldCollapsed = new Set(this.collapsed);
+    }
+    for (const section of STATE_SECTIONS) {
+      this.collapsed.add(section);
+    }
+    this.collapsed.delete('diagnostics');
+  }
+
+  /** Put back what the reader had open before the canvas was cleared. */
+  private restoreStateSections(): void {
+    if (this.heldCollapsed === null) {
+      return;
+    }
+    this.collapsed.clear();
+    for (const section of this.heldCollapsed) {
+      this.collapsed.add(section);
+    }
+    this.heldCollapsed = null;
+  }
+
+  /** Follow a clicked finding to the place in the source it was found in. */
+  private followDiagnostic(index: number): void {
+    const entry = this.drawnDiagnostics[index];
+    if (
+      typeof entry === 'undefined' ||
+      typeof this.onNavigate === 'undefined'
+    ) {
+      return;
+    }
+    this.onNavigate({
+      kind: 'location',
+      path: entry.path,
+      line: entry.line,
+      column: entry.column,
+    });
+  }
+
+  /**
+   * The strip over the whole canvas: what the checkers and the debugger are
+   * doing, in one sentence.
+   *
+   * It is above the sections rather than inside the findings band, and outside
+   * the band's own disclosure, because the two answer different questions. The
+   * table says what is wrong with the program; this says whether anybody has
+   * looked lately - and the moment a reader most needs that answer is the one
+   * where the table is not there to carry it, waiting on a build of a program
+   * nothing has been found wrong with yet.
+   */
+  private statusCell(originX: number, originY: number): dia.Cell {
+    const width = this.fullCanvasWidth();
+    this.drawnStatus = diagnosticStatusText(
+      this.activity,
+      this.debugState,
+      this.diagnosticsIdle,
+      this.runStatus
+    );
+    this.contentWidth = Math.max(this.contentWidth, originX + width + ORIGIN_X);
+    this.contentHeight = Math.max(this.contentHeight, originY + STATUS_HEIGHT);
+    return diagnosticStatusCell(this.drawnStatus, originX, originY, width);
+  }
+
+  /** The findings themselves, under their own disclosure heading. */
+  private diagnosticsCells(originX: number, originY: number): dia.Cell[] {
+    const width = this.fullCanvasWidth();
+    const cells: dia.Cell[] = [
+      this.sectionHeading(
+        strings.diagnosticsHeading,
+        originX,
+        originY,
+        'diagnostics',
+        width
+      ),
+    ];
+    if (this.collapsed.has('diagnostics')) {
+      this.drawnDiagnostics = [];
+      return cells;
+    }
+    const top = originY + HEADING_HEIGHT + HEADING_GAP;
+    this.drawnDiagnostics = sortedDiagnostics(this.diagnostics);
+    const table = diagnosticsTableCells(
+      this.drawnDiagnostics,
+      originX,
+      top,
+      width
+    );
+    cells.push(...table.cells);
+    this.contentWidth = Math.max(
+      this.contentWidth,
+      originX + Math.max(width, table.width) + ORIGIN_X
+    );
+    this.contentHeight = Math.max(this.contentHeight, top + table.height);
+    return cells;
   }
 
   /**
@@ -951,9 +1276,6 @@ export class PlivetGraph {
     }
 
     const tableWidth = this.fullCanvasWidth();
-    const columnWidths = VARIABLE_COLUMN_WIDTHS.map(
-      (width) => (width / VARIABLE_TABLE_WIDTH) * tableWidth
-    );
     let y = originY + HEADING_HEIGHT + HEADING_GAP;
     cells.push(
       this.cardCell(
@@ -972,32 +1294,13 @@ export class PlivetGraph {
     );
     y += VARIABLE_CONTEXT_HEIGHT;
 
-    const headings = [
-      strings.memoryColumnName,
-      strings.variableColumnType,
-      strings.memoryColumnValue,
-      strings.variableColumnSize,
-      strings.variableColumnSegment,
-      strings.memoryColumnAddress,
-    ];
-    let x = originX;
-    headings.forEach((heading, index) => {
-      const width = columnWidths[index];
-      cells.push(
-        this.cardCell(heading, x, y, width, VARIABLE_HEADER_HEIGHT, {
-          fill: 'var(--plivet-graph-header, #eef2f6)',
-          stroke: 'var(--plivet-graph-grid, #cfd8e1)',
-          color: 'var(--plivet-graph-header-text, #4a5b6c)',
-          bold: true,
-          fontSize: 12,
-        })
-      );
-      x += width;
-    });
-    y += VARIABLE_HEADER_HEIGHT;
-
-    const rows = variableTableRows(model);
-    if (rows.length === 0) {
+    const variableMemory = variableMemoryGeometry(
+      model,
+      this.folds,
+      tableWidth
+    );
+    const segment = variableMemory.segments[0];
+    if (typeof segment === 'undefined') {
       cells.push(
         this.cardCell(
           strings.variableNoneActive,
@@ -1015,42 +1318,18 @@ export class PlivetGraph {
       );
       y += VARIABLE_ROW_HEIGHT;
     } else {
-      for (const row of rows) {
-        const values = [
-          row.name,
-          model.variables.find((variable) => variable.key === row.key)?.type ??
-            '',
-          row.value,
-          row.size,
-          row.segment,
-          row.address,
-        ];
-        x = originX;
-        values.forEach((value, index) => {
-          const width = columnWidths[index];
-          const cell = this.cardCell(value, x, y, width, VARIABLE_ROW_HEIGHT, {
-            fill:
-              index === 5
-                ? 'var(--plivet-graph-address, #fbfcfd)'
-                : 'var(--plivet-graph-surface, #ffffff)',
-            stroke: 'var(--plivet-graph-grid, #cfd8e1)',
-            color: 'var(--plivet-graph-ink, #26384a)',
-            code: index !== 4,
-            fontSize: 13,
-          });
-          cell.attr({
-            body: {
-              'data-object-key': encodeURIComponent(row.key),
-              class:
-                'plivet-object-cell plivet-variable-cell plivet-identifier',
-            },
-            label: { pointerEvents: 'none' },
-          });
-          cells.push(cell);
-          x += width;
-        });
-        y += VARIABLE_ROW_HEIGHT;
-      }
+      cells.push(
+        memoryNodeOf(
+          {
+            ...segment,
+            x: originX,
+            y,
+            collapsed: false,
+          },
+          { collapsible: false }
+        )
+      );
+      y += segment.height;
     }
 
     this.contentWidth = Math.max(

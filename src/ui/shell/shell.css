@@ -17,35 +17,35 @@
  */
 
 .plivet {
-  --plivet-surface: var(--plivet-bg, var(--bs-body-bg, #ffffff));
-  --plivet-ink: var(--plivet-color, var(--bs-body-color, #000000));
-  --plivet-line: var(--plivet-border-color, var(--bs-border-color, #000000));
-  /*
+	--plivet-surface: var(--plivet-bg, var(--bs-body-bg, #ffffff));
+	--plivet-ink: var(--plivet-color, var(--bs-body-color, #000000));
+	--plivet-line: var(--plivet-border-color, var(--bs-border-color, #000000));
+	/*
    * The widgets - the controls, the upload panel, the instructions - paint
    * their own buttons, and each of them names these three rather than a
    * literal, so one definition here dresses all of them. Each still carries a
    * literal fallback, so a widget mounted outside this shell still has a
    * button that looks like one.
    */
-  --plivet-button-bg: #f6f6f6;
-  --plivet-button-hover-bg: #e7edf4;
-  --plivet-button-color: #333333;
-  --plivet-debug-bg: #f3f3f3;
-  --plivet-debug-color: #333333;
-  --plivet-debug-grip: #777777;
-  --plivet-debug-hover-bg: rgb(0 0 0 / 8%);
-  --plivet-debug-border: rgb(0 0 0 / 14%);
-  --plivet-debug-shadow: rgb(0 0 0 / 28%);
-  --plivet-debug-focus: #007fd4;
+	--plivet-button-bg: #f6f6f6;
+	--plivet-button-hover-bg: #e7edf4;
+	--plivet-button-color: #333333;
+	--plivet-debug-bg: #f3f3f3;
+	--plivet-debug-color: #333333;
+	--plivet-debug-grip: #777777;
+	--plivet-debug-hover-bg: rgb(0 0 0 / 8%);
+	--plivet-debug-border: rgb(0 0 0 / 14%);
+	--plivet-debug-shadow: rgb(0 0 0 / 28%);
+	--plivet-debug-focus: #007fd4;
 
-  box-sizing: border-box;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 5px;
-  padding: 5px;
-  background-color: var(--plivet-surface);
-  color: var(--plivet-ink);
-  font-family: var(--plivet-font, system-ui, sans-serif);
+	box-sizing: border-box;
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+	gap: 5px;
+	padding: 5px;
+	background-color: var(--plivet-surface);
+	color: var(--plivet-ink);
+	font-family: var(--plivet-font, system-ui, sans-serif);
 }
 
 /*
@@ -55,33 +55,33 @@
  * background behind unchanged black text and was never seen either.
  */
 .plivet--dark {
-  --plivet-surface: var(--plivet-bg, var(--bs-body-bg, rgb(30 30 30)));
-  --plivet-ink: var(--plivet-color, var(--bs-body-color, rgb(241 241 241)));
-  --plivet-line: var(
-    --plivet-border-color,
-    var(--bs-border-color, rgb(90 90 90))
-  );
-  --plivet-button-bg: rgb(58 58 58);
-  --plivet-button-hover-bg: rgb(74 74 74);
-  --plivet-button-color: rgb(241 241 241);
-  --plivet-debug-bg: #333333;
-  --plivet-debug-color: #f0f0f0;
-  --plivet-debug-grip: #a0a0a0;
-  --plivet-debug-hover-bg: rgb(255 255 255 / 10%);
-  --plivet-debug-border: rgb(255 255 255 / 10%);
-  --plivet-debug-shadow: rgb(0 0 0 / 45%);
-  /*
+	--plivet-surface: var(--plivet-bg, var(--bs-body-bg, rgb(30 30 30)));
+	--plivet-ink: var(--plivet-color, var(--bs-body-color, rgb(241 241 241)));
+	--plivet-line: var(
+		--plivet-border-color,
+		var(--bs-border-color, rgb(90 90 90))
+	);
+	--plivet-button-bg: rgb(58 58 58);
+	--plivet-button-hover-bg: rgb(74 74 74);
+	--plivet-button-color: rgb(241 241 241);
+	--plivet-debug-bg: #333333;
+	--plivet-debug-color: #f0f0f0;
+	--plivet-debug-grip: #a0a0a0;
+	--plivet-debug-hover-bg: rgb(255 255 255 / 10%);
+	--plivet-debug-border: rgb(255 255 255 / 10%);
+	--plivet-debug-shadow: rgb(0 0 0 / 45%);
+	/*
    * The native controls - the theme `select`, the file input's button - are
    * drawn by the browser, and this is the only thing that tells it which way
    * round to draw them.
    */
-  color-scheme: dark;
+	color-scheme: dark;
 }
 
 .plivet *,
 .plivet *::before,
 .plivet *::after {
-  box-sizing: inherit;
+	box-sizing: inherit;
 }
 
 /*
@@ -92,46 +92,46 @@
  * is the only flexible track left, and the canvas takes whatever is over.
  */
 @media (min-width: 768px) {
-  .plivet {
-    grid-template-columns: var(--plivet-side-width, minmax(0, 6fr)) auto minmax(
-        0,
-        6fr
-      );
-  }
+	.plivet {
+		grid-template-columns: var(--plivet-side-width, minmax(0, 6fr)) auto minmax(
+				0,
+				6fr
+			);
+	}
 }
 
 @media (min-width: 992px) {
-  .plivet {
-    grid-template-columns: var(--plivet-side-width, minmax(0, 5fr)) auto minmax(
-        0,
-        7fr
-      );
-  }
+	.plivet {
+		grid-template-columns: var(--plivet-side-width, minmax(0, 5fr)) auto minmax(
+				0,
+				7fr
+			);
+	}
 }
 
 @media (min-width: 1200px) {
-  .plivet {
-    grid-template-columns: var(--plivet-side-width, minmax(0, 4fr)) auto minmax(
-        0,
-        8fr
-      );
-  }
+	.plivet {
+		grid-template-columns: var(--plivet-side-width, minmax(0, 4fr)) auto minmax(
+				0,
+				8fr
+			);
+	}
 }
 
 .plivet__side {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
 }
 
 .plivet__column {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
 }
 
 .plivet__main {
-  min-width: 0;
+	min-width: 0;
 }
 
 /*
@@ -143,15 +143,15 @@
  * only where there are two columns.
  */
 .plivet__splitter {
-  position: relative;
-  flex: none;
-  background-color: transparent;
-  touch-action: none;
+	position: relative;
+	flex: none;
+	background-color: transparent;
+	touch-action: none;
 }
 
 .plivet__splitter--x {
-  width: 9px;
-  cursor: col-resize;
+	width: 9px;
+	cursor: col-resize;
 }
 
 /*
@@ -162,46 +162,46 @@
  * them.
  */
 @media (max-width: 767.98px) {
-  .plivet__splitter--x {
-    display: none;
-  }
+	.plivet__splitter--x {
+		display: none;
+	}
 }
 
 .plivet__splitter--y {
-  height: 9px;
-  cursor: row-resize;
+	height: 9px;
+	cursor: row-resize;
 }
 
 /* The grip: a line down the middle of the handle, in the shell's own ink. */
 .plivet__splitter::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  margin: auto;
-  border-radius: 1px;
-  background-color: var(--plivet-line);
-  opacity: 35%;
+	content: '';
+	position: absolute;
+	inset: 0;
+	margin: auto;
+	border-radius: 1px;
+	background-color: var(--plivet-line);
+	opacity: 35%;
 }
 
 .plivet__splitter--x::after {
-  width: 3px;
-  height: 28px;
+	width: 3px;
+	height: 28px;
 }
 
 .plivet__splitter--y::after {
-  width: 28px;
-  height: 3px;
+	width: 28px;
+	height: 3px;
 }
 
 .plivet__splitter:hover::after,
 .plivet__splitter:focus-visible::after,
 .plivet__splitter--active::after {
-  opacity: 100%;
+	opacity: 100%;
 }
 
 .plivet__splitter:focus-visible {
-  outline: 2px solid var(--plivet-line);
-  outline-offset: -2px;
+	outline: 2px solid var(--plivet-line);
+	outline-offset: -2px;
 }
 
 /*
@@ -209,7 +209,7 @@
  * The handle is a child of the root, so the root can see it is being held.
  */
 .plivet:has(.plivet__splitter--active) {
-  user-select: none;
+	user-select: none;
 }
 
 /*
@@ -228,11 +228,11 @@
  * top of the window.
  */
 .plivet__controls {
-  position: sticky;
-  top: var(--plivet-controls-top, 0);
-  /* Above the editor's own layers, below CodeMirror's tooltips and panels. */
-  z-index: 3;
-  background-color: var(--plivet-surface);
+	position: sticky;
+	top: var(--plivet-controls-top, 0);
+	/* Above the editor's own layers, below CodeMirror's tooltips and panels. */
+	z-index: 3;
+	background-color: var(--plivet-surface);
 }
 
 /*
@@ -243,8 +243,8 @@
  * on a page that has never heard of PLIVET.
  */
 .plivet__editor {
-  margin: 1px;
-  border: 1px solid var(--plivet-line);
+	margin: 1px;
+	border: 1px solid var(--plivet-line);
 }
 
 /*
@@ -252,19 +252,19 @@
  * under it sets; unset, this is the 62vh the box has always had.
  */
 .plivet__editor .cm-editor {
-  height: var(--plivet-editor-height, 62vh);
+	height: var(--plivet-editor-height, 62vh);
 }
 
 .plivet__footer {
-  grid-column: 1 / -1;
-  margin: 1px;
-  padding: 2px;
-  background-color: #000000;
-  color: #ffffff;
-  font-size: 10px;
-  text-align: center;
+	grid-column: 1 / -1;
+	margin: 1px;
+	padding: 2px;
+	background-color: #000000;
+	color: #ffffff;
+	font-size: 10px;
+	text-align: center;
 }
 
 .plivet__footer a {
-  color: #ffffff;
+	color: #ffffff;
 }

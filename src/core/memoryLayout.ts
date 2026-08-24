@@ -299,7 +299,7 @@ const titleFitsOnOneLine = (
     addressLabel.length * CHARACTER_WIDTH +
     4 * MEMORY_PADDING_X +
     MEMORY_TITLE_TOGGLE_WIDTH <=
-    width;
+  width;
 
 function columnWidths(
   segments: MemorySegmentModel[],

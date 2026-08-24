@@ -2,6 +2,9 @@ import { Interpreter } from 'unicoen.ts/dist/interpreter/Interpreter';
 import { CPP14Mapper } from 'unicoen.ts/dist/interpreter/CPP14/CPP14Mapper';
 import { ExecState } from 'unicoen.ts/dist/interpreter/Engine/ExecState';
 import { SyntaxErrorData } from 'unicoen.ts/dist/interpreter/mapper/SyntaxErrorData';
+import { SyntaxErrorListener } from 'unicoen.ts/dist/interpreter/mapper/SyntaxErrorListener';
+import { UniProgram } from 'unicoen.ts/dist/node/UniProgram';
+import { CommonTokenStream } from 'antlr4ts';
 import { PlivetCPP14Engine } from './CPP14Engine';
 import { Construct } from './Construct';
 import { DeclarationSpecifiers } from './DeclarationSpecifiers';
@@ -22,9 +25,69 @@ import {
 } from './RuntimeTypeInfo';
 import { RuntimeDiagnostic } from './RuntimeDiagnostic';
 import { StructTable } from './StructTable';
-import { LintDiagnostic, teachingDiagnostics } from './TeachingLint';
+import {
+  LintDiagnostic,
+  programDiagnostics,
+  teachingDiagnostics,
+} from './TeachingLint';
 import { linkerDiagnostics } from './LinkerCheck';
+import { JscppCheck, JscppWarning, jscppCheck } from './jscpp/JscppSyntax';
 import { UnionTable } from './UnionTable';
+
+interface PreparedSource {
+  code: string;
+  /** The same source, rewritten only as far as the syntax check needs. */
+  checkCode: string;
+  expansions: Expansion[];
+  source: string;
+  declarationSpecifiers: DeclarationSpecifiers;
+  functionPointers: FunctionPointerTable;
+  enumConstants: Enumerator[];
+}
+
+/** All source facts produced by one parser activation. */
+export interface SourceAnalysis {
+  errors: SyntaxErrorData[];
+  expansions: Expansion[];
+  constructs: Construct[];
+  teachingLints: LintDiagnostic[];
+  programErrors: SyntaxErrorData[];
+  programExpansions: Expansion[];
+  programConstructs: Construct[];
+  linkerLints: LintDiagnostic[];
+}
+
+interface ParsedSource {
+  errors: SyntaxErrorData[];
+  tree: UniProgram | null;
+}
+
+/**
+ * unicoen's public methods parse once for errors and again for the UniCOEN
+ * tree. Diagnostics need both, so expose the two products of one ANTLR parse.
+ */
+class PlivetCPP14Mapper extends CPP14Mapper {
+  analyze(code: string): ParsedSource {
+    const antlrTree = this.parseToANTLRTree(code);
+    const errors = this.parser
+      .getErrorListeners()
+      .filter((listener) => listener instanceof SyntaxErrorListener)
+      .flatMap((listener) =>
+        (listener as SyntaxErrorListener<number>).getErrorMessages()
+      );
+    try {
+      return {
+        errors,
+        tree: this.makeUniTree(
+          antlrTree,
+          this.parser.inputStream as CommonTokenStream
+        ),
+      };
+    } catch {
+      return { errors, tree: null };
+    }
+  }
+}
 
 /**
  * PLIVET's C interpreter: the stock mapper and engine behaviour, with the
@@ -42,14 +105,19 @@ import { UnionTable } from './UnionTable';
  */
 export class PlivetCPP14Interpreter extends Interpreter {
   private readonly plivetEngine: PlivetCPP14Engine;
+  private readonly plivetMapper: PlivetCPP14Mapper;
   private enumTypes: RuntimeEnumTypes;
   private recordTypes: RuntimeRecordTypes;
   private functionPointerTypes: RuntimeFunctionPointerTypes;
+  /** A diagnostics parse that can be consumed by the next matching Start. */
+  private analyzedExecution: { code: string; tree: UniProgram } | null = null;
 
   constructor() {
     const engine = new PlivetCPP14Engine();
-    super(engine, new CPP14Mapper());
+    const mapper = new PlivetCPP14Mapper();
+    super(engine, mapper);
     this.plivetEngine = engine;
+    this.plivetMapper = mapper;
     this.enumTypes = {};
     this.recordTypes = {};
     this.functionPointerTypes = {};
@@ -60,6 +128,17 @@ export class PlivetCPP14Interpreter extends Interpreter {
   }
 
   startStepExecution(code: string): ExecState {
+    // Direct callers have not necessarily gone through Server.preflight.
+    // Analyze once here too so empty declarations are normalized before the
+    // execution tree reaches unicoen's exception-swallowing function runner.
+    if (this.analyzedExecution?.code !== code) {
+      this.analyze(code);
+    }
+    if (this.analyzedExecution?.code === code) {
+      const { tree } = this.analyzedExecution;
+      this.analyzedExecution = null;
+      return this.describeState(this.plivetEngine.startStepExecution(tree));
+    }
     return this.describeState(super.startStepExecution(code));
   }
 
@@ -101,35 +180,161 @@ export class PlivetCPP14Interpreter extends Interpreter {
    */
   getConstructs(code: string): Construct[] {
     const prepared = this.prepare(code);
-    const sourceTypes = typeDeclarations(prepared.source).concat(
-      enumeratorDeclarations(prepared.enumConstants)
-    );
     try {
-      const parsed = outline(
+      return this.constructsFrom(
         this.mapper.parseToUniTree(prepared.code),
-        prepared.source,
-        prepared.declarationSpecifiers
-      );
-      // Where both readers describe the same type declaration the source one
-      // wins: the mapper keeps only the type a typedef renames, so its mark
-      // says `Mode` where the source says `ReadOnlyMode = const enum Mode`.
-      const described = sourceTypes
-        .filter((construct) => construct.kind === 'typeDec')
-        .map((construct) => construct.line);
-      return sourceTypes.concat(
-        this.displaySyntheticTypes(parsed)
-          .filter(
-            (construct) =>
-              construct.kind !== 'typeDec' ||
-              described.indexOf(construct.line) === -1
-          )
-          .map((construct) =>
-            sourceColumns(construct, prepared.functionPointers)
-          )
+        prepared
       );
     } catch {
-      return sourceTypes;
+      return this.sourceTypes(prepared);
     }
+  }
+
+  /**
+   * Parse the active file and the executable program without repeating either
+   * tree construction for errors, teaching rules, linker rules and tooltips.
+   */
+  analyze(code: string, linkedCode: string = code): SourceAnalysis {
+    const local = this.analyzeSource(code);
+    if (linkedCode === code) {
+      if (local.parsed.tree !== null) {
+        this.analyzedExecution = { code, tree: local.parsed.tree };
+      }
+      return {
+        errors: local.errors,
+        expansions: local.prepared.expansions,
+        constructs: local.constructs,
+        teachingLints: local.teachingLints,
+        programErrors: local.errors,
+        programExpansions: local.prepared.expansions,
+        programConstructs: local.constructs,
+        linkerLints:
+          local.errors.length === 0 && local.parsed.tree !== null
+            ? this.programLints(local.parsed.tree, code)
+            : [],
+      };
+    }
+
+    const program = this.analyzeSource(linkedCode, false);
+    if (program.parsed.tree !== null) {
+      this.analyzedExecution = { code: linkedCode, tree: program.parsed.tree };
+    }
+    return {
+      errors: local.errors,
+      expansions: local.prepared.expansions,
+      constructs: local.constructs,
+      teachingLints: local.teachingLints,
+      programErrors: program.errors,
+      programExpansions: program.prepared.expansions,
+      programConstructs: program.constructs,
+      linkerLints:
+        program.errors.length === 0 && program.parsed.tree !== null
+          ? this.programLints(program.parsed.tree, linkedCode)
+          : [],
+    };
+  }
+
+  /**
+   * The diagnostics whose question spans the whole program rather than one
+   * file: what is declared but never defined, and what is used but never
+   * declared. Both carry the linked source's coordinates, which `server.ts`
+   * maps back to whichever file the reader has open.
+   */
+  private programLints(tree: UniProgram, source: string): LintDiagnostic[] {
+    return linkerDiagnostics(tree).concat(programDiagnostics(tree, source));
+  }
+
+  private analyzeSource(
+    code: string,
+    teaching: boolean = true
+  ): {
+    prepared: PreparedSource;
+    parsed: ParsedSource;
+    errors: SyntaxErrorData[];
+    constructs: Construct[];
+    teachingLints: LintDiagnostic[];
+  } {
+    const prepared = this.prepare(code);
+    const check = jscppCheck(prepared.checkCode, code);
+    const parsed = this.plivetMapper.analyze(
+      omitEmptyDeclarations(prepared.code, check.warnings)
+    );
+    const errors = this.syntaxErrors(check, parsed);
+    return {
+      prepared,
+      parsed,
+      errors,
+      constructs:
+        parsed.tree === null
+          ? this.sourceTypes(prepared)
+          : this.constructsFrom(parsed.tree, prepared),
+      teachingLints:
+        teaching && errors.length === 0 && parsed.tree !== null
+          ? warningLints(check.warnings).concat(
+              teachingDiagnostics(parsed.tree, code)
+            )
+          : [],
+    };
+  }
+
+  /**
+   * Whether the program is C, decided by the PEG grammar in `jscpp/` and not
+   * by the parse that just ran.
+   *
+   * ANTLR is here to build a tree, and it recovers in order to build one from
+   * input a compiler would reject - which is the wrong instinct for a check
+   * that refuses the run. It stayed silent on `int a` with no semicolon, it
+   * answered one unbalanced parenthesis with three errors on two innocent
+   * lines, and it rejected `case 1:` falling into `case 2:`, which is C and
+   * could therefore not be stepped at all. The grammar gets all three right
+   * and reads the whole file in a fiftieth of the time.
+   *
+   * ANTLR keeps exactly one say. When the grammar accepts a program that the
+   * mapper could not turn into a tree, nothing can execute it, and its own
+   * account of why is better than reporting no error and crashing at Start.
+   */
+  private syntaxErrors(
+    check: JscppCheck,
+    parsed: ParsedSource
+  ): SyntaxErrorData[] {
+    const error = check.error;
+    if (error !== null) {
+      return [new SyntaxErrorData(error.line, error.column, error.message)];
+    }
+    return parsed.tree === null ? parsed.errors : [];
+  }
+
+  private sourceTypes(prepared: PreparedSource): Construct[] {
+    return typeDeclarations(prepared.source).concat(
+      enumeratorDeclarations(prepared.enumConstants)
+    );
+  }
+
+  private constructsFrom(
+    tree: UniProgram,
+    prepared: PreparedSource
+  ): Construct[] {
+    const sourceTypes = this.sourceTypes(prepared);
+    const parsed = outline(
+      tree,
+      prepared.source,
+      prepared.declarationSpecifiers
+    );
+    // Where both readers describe the same type declaration the source one
+    // wins: the mapper keeps only the type a typedef renames, so its mark says
+    // `Mode` where the source says `ReadOnlyMode = const enum Mode`.
+    const described = sourceTypes
+      .filter((construct) => construct.kind === 'typeDec')
+      .map((construct) => construct.line);
+    return sourceTypes.concat(
+      this.displaySyntheticTypes(parsed)
+        .filter(
+          (construct) =>
+            construct.kind !== 'typeDec' ||
+            described.indexOf(construct.line) === -1
+        )
+        .map((construct) => sourceColumns(construct, prepared.functionPointers))
+    );
   }
 
   /**
@@ -198,21 +403,26 @@ export class PlivetCPP14Interpreter extends Interpreter {
   /** Diagnostics whose coordinates belong to this one source file. */
   getTeachingLints(code: string): LintDiagnostic[] {
     const prepared = this.prepare(code);
+    // The grammar's own warnings first: they are read from a source the later
+    // rewrites have not been over, so they survive where a tree rule could
+    // not - unicoen drops `int volatile register;` to a positionless `UniExpr`.
+    const warnings = warningLints(
+      jscppCheck(prepared.checkCode, code).warnings
+    );
     try {
-      return teachingDiagnostics(
-        this.mapper.parseToUniTree(prepared.code),
-        code
+      return warnings.concat(
+        teachingDiagnostics(this.mapper.parseToUniTree(prepared.code), code)
       );
     } catch {
-      return [];
+      return warnings;
     }
   }
 
-  /** Linker diagnostics whose coordinates belong to the complete program. */
+  /** Program-wide diagnostics, whose coordinates are the whole program's. */
   getLinkerLints(code: string): LintDiagnostic[] {
     const prepared = this.prepare(code);
     try {
-      return linkerDiagnostics(this.mapper.parseToUniTree(prepared.code));
+      return this.programLints(this.mapper.parseToUniTree(prepared.code), code);
     } catch {
       return [];
     }
@@ -226,19 +436,26 @@ export class PlivetCPP14Interpreter extends Interpreter {
    * the right lines.
    */
   checkSyntaxError(code: string): SyntaxErrorData[] {
-    return super.checkSyntaxError(this.prepare(code).code);
+    const prepared = this.prepare(code);
+    // The grammar decides, as it does for `analyze`. ANTLR is only asked for
+    // a tree, and only when the grammar has already accepted the program -
+    // there is nothing to say about a file that does not parse.
+    const check = jscppCheck(prepared.checkCode, code);
+    return this.syntaxErrors(check, this.plivetMapper.analyze(prepared.code));
   }
 
   /** Runs every source pass once and gives the engine fresh record metadata. */
-  private prepare(code: string): {
-    code: string;
-    expansions: Expansion[];
-    source: string;
-    declarationSpecifiers: DeclarationSpecifiers;
-    functionPointers: FunctionPointerTable;
-    enumConstants: Enumerator[];
-  } {
+  private prepare(code: string): PreparedSource {
     const preprocessed = preprocessSource(code);
+    // What the syntax check reads, in place of the fully rewritten `code`
+    // below. The passes after this one exist for ANTLR's C++14 grammar, and
+    // two of them erase the evidence a check needs: the qualifier pass blanks
+    // `const`, `volatile` and `_Atomic` in place, so `int x volatile;` - which
+    // is not a declaration - reached the parser as `int x         ;` and was
+    // accepted. The grammar in `jscpp/` reads those itself, and function
+    // pointers, and enums; a designated initializer is the one form it has no
+    // rule for. Its own instance, so the engine's is left alone.
+    const checkCode = new DesignatedInitializers().rewrite(preprocessed.code);
     const declarationSpecifiers = new DeclarationSpecifiers();
     const declarations = declarationSpecifiers.rewrite(preprocessed.code);
     // Read where the qualifiers have been blanked - `int (* const op)(void)`
@@ -274,6 +491,7 @@ export class PlivetCPP14Interpreter extends Interpreter {
     );
     return {
       code: recordsForParser,
+      checkCode,
       expansions: preprocessed.expansions.concat(enums.expansions),
       source: preprocessed.code,
       declarationSpecifiers,
@@ -281,6 +499,55 @@ export class PlivetCPP14Interpreter extends Interpreter {
       enumConstants: enumTable.declaredConstants(),
     };
   }
+}
+
+/**
+ * A grammar warning as the editor's lint panel reads it.
+ *
+ * These are not syntax errors and must not refuse the run: clang reports
+ * `int volatile register;` as a warning and compiles the program.
+ */
+function warningLints(warnings: JscppWarning[]): LintDiagnostic[] {
+  return warnings.map((warning) => ({
+    rule: warning.rule,
+    severity: 'warning' as const,
+    message: warning.message,
+    line: warning.line,
+    column: warning.column,
+    endLine: warning.endLine,
+    endColumn: warning.endColumn,
+  }));
+}
+
+/**
+ * Remove declarations the C checker has already identified as naming no
+ * object before UniCOEN builds its execution tree.
+ *
+ * They are valid enough for a compiler to continue with a warning, but
+ * UniCOEN maps one to a range-less expression followed by a raw `";"`. Its
+ * function runner catches the exception raised by that string and silently
+ * ends the function. Blanking the exact warning range preserves every source
+ * coordinate and makes execution match the compiler behavior.
+ */
+function omitEmptyDeclarations(code: string, warnings: JscppWarning[]): string {
+  const lines = code.split('\n');
+  for (const warning of warnings) {
+    if (
+      warning.rule !== 'empty-declaration' ||
+      warning.line !== warning.endLine
+    ) {
+      continue;
+    }
+    const line = lines[warning.line - 1];
+    if (typeof line === 'undefined') {
+      continue;
+    }
+    const from = Math.max(0, warning.column);
+    const to = Math.min(line.length, warning.endColumn);
+    lines[warning.line - 1] =
+      line.slice(0, from) + ' '.repeat(Math.max(0, to - from)) + line.slice(to);
+  }
+  return lines.join('\n');
 }
 
 /**

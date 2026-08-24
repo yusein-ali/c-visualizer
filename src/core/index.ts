@@ -15,6 +15,7 @@ export { ExecutionSource } from './executionSource';
 export type {
   CONTROL_EVENT,
   DEBUG_STATE,
+  FileLints,
   FileSyntaxErrors,
   LineCount,
   RUN_EVENT,

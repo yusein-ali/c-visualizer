@@ -11,6 +11,7 @@ import { defaultProgram } from '../src/defaultProgram';
 import { stepHighlightField } from '../src/ui/editor/stepHighlight';
 import { expansionField } from '../src/ui/editor/expansions';
 import { diagnosticCount } from '@codemirror/lint';
+import { preprocessSource } from '../src/interpreter/preprocess';
 
 /**
  * The controller with more than one file open.
@@ -61,6 +62,21 @@ const FILES = [
 ];
 
 describe('the editor with several files', () => {
+  it('does not activate the parser until the editor is approached', () => {
+    const { host, controller, sent } = mounted(FILES);
+    expect(sent).toHaveLength(0);
+
+    host
+      .querySelector<HTMLElement>('.cm-editor')!
+      .dispatchEvent(new MouseEvent('mouseenter'));
+    expect(sent.map((request) => request.controlEvent)).toEqual([
+      'Preprocess',
+      'SyntaxCheck',
+    ]);
+    controller.destroy();
+    host.remove();
+  });
+
   it('opens the three-file construct tour by default', () => {
     const host = document.createElement('div');
     document.body.appendChild(host);
@@ -181,6 +197,55 @@ describe('the editor with several files', () => {
     });
 
     expect(drawn.codeRange?.begin.y).toBe(2);
+    controller.destroy();
+    host.remove();
+  });
+
+  it('highlights the complete source macro when its replacement is shorter', () => {
+    const text =
+      '#define ITEM_COUNT 3\nint main(void) { for (int i = 0; i < ITEM_COUNT; i += 1) {} }';
+    const { host, controller } = mounted([{ path: 'main.c', text }], 'main.c');
+    const processed = preprocessSource(text);
+    const processedLine = processed.code.split('\n')[1];
+    const begin = processedLine.indexOf('i <');
+    const end = processedLine.indexOf('3');
+    const model = emptyStepModel();
+    model.codeRange = {
+      begin: { x: begin, y: 2 },
+      end: { x: end, y: 2 },
+    };
+
+    controller.recieve({
+      output: '',
+      sourcecode: text,
+      debugState: 'Debugging',
+      step: 1,
+      errors: [],
+      model,
+      location: { path: 'main.c', range: model.codeRange },
+      constructs: [],
+      expansions: processed.expansions,
+    });
+
+    const editor = (controller as any).editor;
+    let highlighted = '';
+    editor.view.state
+      .field(stepHighlightField)
+      .between(
+        0,
+        editor.view.state.doc.length,
+        (
+          from: number,
+          to: number,
+          decoration: { spec: { class?: string } }
+        ) => {
+          if (decoration.spec.class === 'plivet-step-range') {
+            highlighted = editor.view.state.sliceDoc(from, to);
+          }
+        }
+      );
+    expect(highlighted).toBe('i < ITEM_COUNT');
+
     controller.destroy();
     host.remove();
   });

@@ -14,82 +14,82 @@
  */
 
 .plivet-console {
-  --plivet-console-surface: var(
-    --plivet-console-bg,
-    var(--interactive-editor-bg, var(--bs-body-bg, #ffffff))
-  );
-  --plivet-console-ink: var(
-    --plivet-console-color,
-    var(--interactive-editor-color, var(--bs-body-color, #212529))
-  );
-  --plivet-console-field: var(
-    --plivet-console-input-bg,
-    var(--bs-tertiary-bg, #fffbe6)
-  );
-  --plivet-console-heading-surface: var(--plivet-console-title-bg, #26384a);
-  --plivet-console-heading-ink: var(--plivet-console-title-color, #ffffff);
-  --plivet-console-heading-line: var(--plivet-console-title-border, #333333);
+	--plivet-console-surface: var(
+		--plivet-console-bg,
+		var(--interactive-editor-bg, var(--bs-body-bg, #ffffff))
+	);
+	--plivet-console-ink: var(
+		--plivet-console-color,
+		var(--interactive-editor-color, var(--bs-body-color, #212529))
+	);
+	--plivet-console-field: var(
+		--plivet-console-input-bg,
+		var(--bs-tertiary-bg, #fffbe6)
+	);
+	--plivet-console-heading-surface: var(--plivet-console-title-bg, #26384a);
+	--plivet-console-heading-ink: var(--plivet-console-title-color, #ffffff);
+	--plivet-console-heading-line: var(--plivet-console-title-border, #333333);
 
-  box-sizing: border-box;
-  margin: 1px;
-  overflow: hidden;
-  border: 1px black solid;
-  background-color: var(--plivet-console-surface);
-  color: var(--plivet-console-ink);
-  font-family: var(
-    --plivet-console-font,
-    ui-monospace,
-    SFMono-Regular,
-    Menlo,
-    Consolas,
-    monospace
-  );
-  font-size: 14px;
-  line-height: 1.4;
+	box-sizing: border-box;
+	margin: 1px;
+	overflow: hidden;
+	border: 1px black solid;
+	background-color: var(--plivet-console-surface);
+	color: var(--plivet-console-ink);
+	font-family: var(
+		--plivet-console-font,
+		ui-monospace,
+		SFMono-Regular,
+		Menlo,
+		Consolas,
+		monospace
+	);
+	font-size: 14px;
+	line-height: 1.4;
 }
 
 .plivet-console[open] {
-  height: 18vh;
-  overflow-y: auto;
+	height: 18vh;
+	overflow-y: auto;
 }
 
 .plivet-console--dark {
-  --plivet-console-surface: var(
-    --plivet-console-bg,
-    var(--interactive-editor-bg, var(--bs-body-bg, #272822))
-  );
-  --plivet-console-ink: var(
-    --plivet-console-color,
-    var(--interactive-editor-color, var(--bs-body-color, #f8f8f2))
-  );
-  --plivet-console-field: var(
-    --plivet-console-input-bg,
-    var(--bs-tertiary-bg, #3e3d32)
-  );
-  --plivet-console-heading-surface: var(--plivet-console-title-bg, #526f89);
-  --plivet-console-heading-ink: var(--plivet-console-title-color, #f5f8fb);
-  --plivet-console-heading-line: var(--plivet-console-title-border, #73808c);
+	--plivet-console-surface: var(
+		--plivet-console-bg,
+		var(--interactive-editor-bg, var(--bs-body-bg, #272822))
+	);
+	--plivet-console-ink: var(
+		--plivet-console-color,
+		var(--interactive-editor-color, var(--bs-body-color, #f8f8f2))
+	);
+	--plivet-console-field: var(
+		--plivet-console-input-bg,
+		var(--bs-tertiary-bg, #3e3d32)
+	);
+	--plivet-console-heading-surface: var(--plivet-console-title-bg, #526f89);
+	--plivet-console-heading-ink: var(--plivet-console-title-color, #f5f8fb);
+	--plivet-console-heading-line: var(--plivet-console-title-border, #73808c);
 }
 
 .plivet-console-title {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  margin: 0;
-  padding: 3px 8px;
-  border-bottom: 1px solid var(--plivet-console-heading-line);
-  background: var(--plivet-console-heading-surface);
-  color: var(--plivet-console-heading-ink);
-  font-family:
-    system-ui,
-    -apple-system,
-    'Segoe UI',
-    sans-serif;
-  font-size: 14px;
-  font-weight: 700;
-  line-height: 20px;
-  cursor: pointer;
-  user-select: none;
+	position: sticky;
+	top: 0;
+	z-index: 1;
+	margin: 0;
+	padding: 3px 8px;
+	border-bottom: 1px solid var(--plivet-console-heading-line);
+	background: var(--plivet-console-heading-surface);
+	color: var(--plivet-console-heading-ink);
+	font-family:
+		system-ui,
+		-apple-system,
+		'Segoe UI',
+		sans-serif;
+	font-size: 14px;
+	font-weight: 700;
+	line-height: 20px;
+	cursor: pointer;
+	user-select: none;
 }
 
 /*
@@ -98,33 +98,33 @@
  * line comes back in the next response rather than being written here.
  */
 .plivet-console-output {
-  margin: 0;
-  padding: 4px 6px 0;
-  border: 0;
-  background: none;
-  color: inherit;
-  font: inherit;
-  white-space: pre-wrap;
-  overflow-wrap: break-word;
+	margin: 0;
+	padding: 4px 6px 0;
+	border: 0;
+	background: none;
+	color: inherit;
+	font: inherit;
+	white-space: pre-wrap;
+	overflow-wrap: break-word;
 }
 
 .plivet-console-input {
-  box-sizing: border-box;
-  display: block;
-  width: 100%;
-  min-height: 1.4em;
-  /* Taller input scrolls inside itself rather than pushing the transcript out
+	box-sizing: border-box;
+	display: block;
+	width: 100%;
+	min-height: 1.4em;
+	/* Taller input scrolls inside itself rather than pushing the transcript out
      of the box. */
-  max-height: 6em;
-  padding: 0 6px 4px;
-  border: 0;
-  outline: 0;
-  resize: none;
-  overflow-y: auto;
-  background-color: transparent;
-  color: inherit;
-  font: inherit;
-  caret-color: transparent;
+	max-height: 6em;
+	padding: 0 6px 4px;
+	border: 0;
+	outline: 0;
+	resize: none;
+	overflow-y: auto;
+	background-color: transparent;
+	color: inherit;
+	font: inherit;
+	caret-color: transparent;
 }
 
 /*
@@ -132,18 +132,18 @@
  * when the program blocks on a read that it says so.
  */
 .plivet-console--accepting .plivet-console-input {
-  background-color: var(--plivet-console-field);
-  caret-color: currentColor;
+	background-color: var(--plivet-console-field);
+	caret-color: currentColor;
 }
 
 .plivet-console-input::placeholder {
-  color: inherit;
-  opacity: 0.55;
-  font-style: italic;
+	color: inherit;
+	opacity: 0.55;
+	font-style: italic;
 }
 
 .plivet-console-input:disabled {
-  color: inherit;
-  opacity: 1;
-  -webkit-text-fill-color: currentColor;
+	color: inherit;
+	opacity: 1;
+	-webkit-text-fill-color: currentColor;
 }

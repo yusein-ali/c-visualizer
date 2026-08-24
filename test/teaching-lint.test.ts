@@ -1,5 +1,7 @@
 import { PlivetCPP14Interpreter } from '../src/interpreter/CPP14';
 import { LintDiagnostic } from '../src/interpreter/TeachingLint';
+import { Server } from '../src/core/server';
+import { defaultProgram } from '../src/defaultProgram';
 
 /**
  * The teaching rules, over programs that parse. Every case is a program a
@@ -245,6 +247,92 @@ int main(void) { return left; }
   });
 });
 
+describe('a name used as a value that nothing declares', () => {
+  it('reports it, where the engine used to run the program and print nothing', () => {
+    const code = `#include <stdio.h>
+
+int main(void) {
+  int a = 10;
+  printf(f);
+  return 0;
+}
+`;
+    const [found] = only(code, 'undeclared-identifier');
+    expect(found).toBeDefined();
+    expect(found.severity).toBe('error');
+    expect(found.line).toBe(5);
+    expect(found.message).toContain('f is not declared');
+  });
+
+  it('reports a misspelled name at the use, not at the declaration', () => {
+    const code = `#include <stdio.h>
+int main(void) {
+  int count = 1;
+  printf("%d", cuont);
+  return 0;
+}
+`;
+    const [found] = only(code, 'undeclared-identifier');
+    expect(found.line).toBe(4);
+    expect(found.message).toContain('cuont');
+  });
+
+  it('reports a record member used as though it were an object', () => {
+    // The member is real, but it is not in any lexical scope: `left` alone
+    // names nothing. The same fixture proves `uninitialized-read` stays quiet.
+    const code = `struct Pair { int left; };
+int main(void) { return left; }
+`;
+    expect(rules(code)).toContain('undeclared-identifier');
+  });
+
+  it('says nothing about a library function it cannot see declared', () => {
+    const code = `#include <stdio.h>
+int main(void) { printf("hi"); return 0; }
+`;
+    expect(rules(code)).not.toContain('undeclared-identifier');
+  });
+
+  it('says nothing about a library object it cannot see declared', () => {
+    const code = `#include <stdio.h>
+int main(void) { fprintf(stdout, "hi"); return 0; }
+`;
+    expect(rules(code)).not.toContain('undeclared-identifier');
+  });
+
+  it('says nothing about a macro it has no header to expand', () => {
+    // PLIVET does not read stdio.h, so `NULL` and `EOF` arrive as bare
+    // identifiers. Refusing them would refuse a program that is not wrong.
+    const code = `#include <stdio.h>
+int main(void) { int *p = NULL; int c = EOF; return p == NULL ? c : 0; }
+`;
+    expect(rules(code)).not.toContain('undeclared-identifier');
+  });
+
+  it('says nothing about a function used as a value', () => {
+    const code = `#include <stdio.h>
+void greet(void) { printf("hi"); }
+int main(void) { void (*g)(void) = greet; g(); return 0; }
+`;
+    expect(rules(code)).not.toContain('undeclared-identifier');
+  });
+
+  it('says nothing about a function called before it is defined', () => {
+    const code = `int later(void);
+int main(void) { return later(); }
+int later(void) { return 1; }
+`;
+    expect(rules(code)).not.toContain('undeclared-identifier');
+  });
+
+  it('says nothing about a type named in sizeof', () => {
+    const code = `struct Pair { int a; };
+int main(void) { return sizeof(int) + sizeof(struct Pair); }
+`;
+    expect(rules(code)).not.toContain('undeclared-identifier');
+  });
+});
+
 describe('a non-void function whose closing brace is reachable', () => {
   it('does not treat a function prototype as a body with no return', () => {
     const code = `int helper(int value);
@@ -341,4 +429,77 @@ int main(void) {
 `;
     expect(lint(code)).toEqual([]);
   });
+});
+
+describe('a program that names something nothing declares', () => {
+  const bad = `#include <stdio.h>
+
+int main(void) {
+  int a = 10;
+  printf(f);
+  return 0;
+}
+`;
+
+  /**
+   * A teaching rule marks a program that runs badly, and the reader has to be
+   * able to run one and watch it. This is the other kind: no compiler would
+   * translate it, so there is nothing to step through. PLIVET used to run it,
+   * print nothing, and report success.
+   */
+  it.each(['Exec', 'Start'] as const)(
+    'refuses %s',
+    async (controlEvent) => {
+      const response = await new Server().send({
+        controlEvent,
+        sourcecode: bad,
+        entry: 'main.c',
+        active: 'main.c',
+      });
+      expect(response.debugState).toBe('Stop');
+      expect(response.diagnosticPath).toBe('main.c');
+      expect(response.errors).toEqual([
+        {
+          line: 5,
+          charPositionInLine: 9,
+          msg: expect.stringContaining('f is not declared'),
+        },
+      ]);
+    },
+    30000
+  );
+
+  it('refuses it after a syntax check has already passed the program', async () => {
+    // The clean check arms a cached parse that Start may consume. A refusal
+    // is not a syntax error, so the cache has to be told about it separately.
+    const server = new Server();
+    await server.send({
+      controlEvent: 'SyntaxCheck',
+      sourcecode: bad,
+      entry: 'main.c',
+      active: 'main.c',
+    });
+    const response = await server.send({
+      controlEvent: 'Start',
+      sourcecode: bad,
+      entry: 'main.c',
+      active: 'main.c',
+    });
+    expect(response.debugState).toBe('Stop');
+    expect(response.errors).toHaveLength(1);
+  }, 30000);
+
+  it('says nothing about a name one file declares and another uses', async () => {
+    // Asked per file, `main.c` reported ten names that `tour.h` declares.
+    const files = defaultProgram().files.map((file) => ({ ...file }));
+    const response = await new Server().send({
+      controlEvent: 'Start',
+      sourcecode: files[0].text,
+      files,
+      entry: 'main.c',
+      active: 'main.c',
+    });
+    expect(response.errors).toEqual([]);
+    expect(response.debugState).not.toBe('Stop');
+  }, 30000);
 });

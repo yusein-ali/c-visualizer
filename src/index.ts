@@ -33,6 +33,8 @@ export type { Theme } from './app/theme';
 export type { EditableRegion, SessionJSON } from './ui/editor';
 export type { SourceFile } from './core';
 export type {
+  CodeMirrorConfig,
+  CodeMirrorSettings,
   DiagnosticOptions,
   DiagnosticProvider,
   ExternalDiagnostic,
@@ -40,3 +42,4 @@ export type {
   SourceSnapshot,
   Unsubscribe,
 } from './app/host';
+export { codeMirrorSettings } from './app/host';

@@ -22,6 +22,11 @@ import {
 } from '../ui/controls';
 import { PlivetConsole } from '../ui/console';
 import { PlivetGraph } from '../ui/graph';
+import type {
+  DiagnosticActivity,
+  DiagnosticEntry,
+  RunStatus,
+} from '../ui/graph';
 import { FilePanel, download } from '../ui/files';
 import { HowToDialog } from '../ui/help';
 import type { PreprocessedDialog } from '../ui/preprocessed';
@@ -30,6 +35,7 @@ import { EditorController } from './EditorController';
 import { Bus } from './emitter';
 import { Theme, isDark } from './theme';
 import type {
+  CodeMirrorConfig,
   DiagnosticOptions,
   DiagnosticProvider,
   ExternalDiagnostic,
@@ -101,6 +107,14 @@ export interface PlivetOptions {
    * instruction in a comment.
    */
   editableRegions?: EditableRegion[];
+  /**
+   * How the editor is built: indentation, the line-number gutter, bracket
+   * matching, completion and text size. A host page that has editors of its
+   * own hands over the configuration it built those with, so the window a
+   * reader opens from one of them types the way the block they left did. Left
+   * out, the editor's own defaults.
+   */
+  codeMirror?: CodeMirrorConfig;
   /**
    * Where the footer's licence report is. A deployed bundle ships the report
    * beside itself, under the host's assets, rather than beside the page that
@@ -213,6 +227,7 @@ export class Plivet {
       files: options.files,
       entry: options.entry,
       editableRegions: options.editableRegions,
+      codeMirror: options.codeMirror,
       onSourceChange: options.onSourceChange,
       onActiveFileChange: options.onActiveFileChange,
     });
@@ -254,7 +269,19 @@ export class Plivet {
     bus.slot('changeState', (debugState: DEBUG_STATE, step: number) => {
       this.debugState = debugState;
       this.controls.setDebugState(debugState, step);
+      // The canvas clears its state views while nothing is running, and its
+      // status line says what the debugger is doing while something is.
+      this.graph.setDebugState(debugState);
     });
+    bus.slot('diagnostics', (entries: DiagnosticEntry[]) =>
+      this.graph.setDiagnostics(entries)
+    );
+    bus.slot('diagnosticActivity', (activity: DiagnosticActivity) =>
+      this.graph.setDiagnosticActivity(activity)
+    );
+    bus.slot('runStatus', (status: RunStatus) =>
+      this.graph.setRunStatus(status)
+    );
     bus.slot('changeOutput', (output: string) =>
       this.console.setOutput(output)
     );
@@ -402,23 +429,33 @@ export class Plivet {
       return false;
     }
     const snapshot = this.sourceSnapshot();
-    const results = await Promise.all(
-      providers.map(async ([name, provider]) => {
-        const diagnostics = await provider(snapshot);
-        // A provider replaced while this answer was in flight no longer owns
-        // the diagnostic source, even if the program itself did not change.
-        if (this.diagnosticProviders.get(name) !== provider) {
-          return false;
-        }
-        if (!Array.isArray(diagnostics)) {
-          throw new TypeError('A diagnostic provider must return an array');
-        }
-        return this.setDiagnostics(name, diagnostics, {
-          revision: snapshot.revision,
-        });
-      })
-    );
-    return results.some(Boolean);
+    // A compile is a round trip to the course's own grader, so the canvas is
+    // told that one is under way before it is waited on, and told again
+    // however it ends. A build that failed still ended: leaving the line
+    // reading "Build started" would be the one state the reader cannot act
+    // on, which is the state this line exists to prevent.
+    this.bus.signal('diagnosticActivity', 'buildStarted');
+    try {
+      const results = await Promise.all(
+        providers.map(async ([name, provider]) => {
+          const diagnostics = await provider(snapshot);
+          // A provider replaced while this answer was in flight no longer owns
+          // the diagnostic source, even if the program itself did not change.
+          if (this.diagnosticProviders.get(name) !== provider) {
+            return false;
+          }
+          if (!Array.isArray(diagnostics)) {
+            throw new TypeError('A diagnostic provider must return an array');
+          }
+          return this.setDiagnostics(name, diagnostics, {
+            revision: snapshot.revision,
+          });
+        })
+      );
+      return results.some(Boolean);
+    } finally {
+      this.bus.signal('diagnosticActivity', 'buildComplete');
+    }
   }
 
   /**

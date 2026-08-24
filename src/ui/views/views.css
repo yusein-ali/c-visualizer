@@ -1,87 +1,87 @@
 .plivet-view {
-  flex: none;
-  max-height: 30%;
-  margin: 0 24px 8px;
-  overflow: auto;
-  background: var(--plivet-graph-surface, var(--plivet-surface, #fff));
-  color: var(--plivet-graph-ink, var(--plivet-ink, #222));
-  font-size: 0.85rem;
+	flex: none;
+	max-height: 30%;
+	margin: 0 24px 8px;
+	overflow: auto;
+	background: var(--plivet-graph-surface, var(--plivet-surface, #fff));
+	color: var(--plivet-graph-ink, var(--plivet-ink, #222));
+	font-size: 0.85rem;
 }
 
 .plivet-view__title {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  margin: 0;
-  min-height: 26px;
-  padding: 3px 12px;
-  border-radius: 4px;
-  background: var(--plivet-graph-title, #26384a);
-  color: var(--plivet-graph-title-text, #fff);
-  font-size: 14px;
-  font-weight: bold;
-  line-height: 20px;
-  text-align: left;
-  cursor: pointer;
-  list-style: none;
+	position: sticky;
+	top: 0;
+	z-index: 1;
+	margin: 0;
+	min-height: 26px;
+	padding: 3px 12px;
+	border-radius: 4px;
+	background: var(--plivet-graph-title, #26384a);
+	color: var(--plivet-graph-title-text, #fff);
+	font-size: 14px;
+	font-weight: bold;
+	line-height: 20px;
+	text-align: left;
+	cursor: pointer;
+	list-style: none;
 }
 
 .plivet-view__title::-webkit-details-marker {
-  display: none;
+	display: none;
 }
 
 .plivet-view__title::before {
-  content: '▶';
-  display: inline-block;
-  margin-right: 0.4rem;
-  font-size: 0.75em;
+	content: '▶';
+	display: inline-block;
+	margin-right: 0.4rem;
+	font-size: 0.75em;
 }
 
 .plivet-view[open] > .plivet-view__title::before {
-  content: '▼';
+	content: '▼';
 }
 
 .plivet-view__body {
-  padding: 0.4rem 0.6rem;
-  border: 1px solid var(--plivet-graph-grid, #cfd8e1);
-  border-top: 0;
-  border-radius: 0 0 4px 4px;
+	padding: 0.4rem 0.6rem;
+	border: 1px solid var(--plivet-graph-grid, #cfd8e1);
+	border-top: 0;
+	border-radius: 0 0 4px 4px;
 }
 
 .plivet-view[open] > .plivet-view__title {
-  border-radius: 4px 4px 0 0;
+	border-radius: 4px 4px 0 0;
 }
 
 .plivet-view__empty {
-  margin: 0;
-  font-style: italic;
-  opacity: 0.65;
+	margin: 0;
+	font-style: italic;
+	opacity: 0.65;
 }
 
 .plivet-view__code {
-  font-family: var(
-    --plivet-editor-font,
-    ui-monospace,
-    SFMono-Regular,
-    Menlo,
-    Consolas,
-    monospace
-  );
+	font-family: var(
+		--plivet-editor-font,
+		ui-monospace,
+		SFMono-Regular,
+		Menlo,
+		Consolas,
+		monospace
+	);
 }
 
 .plivet-view__table {
-  width: 100%;
-  border-collapse: collapse;
+	width: 100%;
+	border-collapse: collapse;
 }
 
 .plivet-view__table th {
-  text-align: left;
-  font-weight: normal;
-  opacity: 0.7;
-  padding-right: 0.8rem;
+	text-align: left;
+	font-weight: normal;
+	opacity: 0.7;
+	padding-right: 0.8rem;
 }
 
 .plivet-view__table td {
-  padding-right: 0.8rem;
-  white-space: nowrap;
+	padding-right: 0.8rem;
+	white-space: nowrap;
 }

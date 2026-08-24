@@ -1,5 +1,8 @@
 import { CPP14Engine } from 'unicoen.ts/dist/interpreter/CPP14/CPP14Engine';
-import { Engine } from 'unicoen.ts/dist/interpreter/Engine/Engine';
+import {
+  ControlException,
+  Engine,
+} from 'unicoen.ts/dist/interpreter/Engine/Engine';
 import { ExecState } from 'unicoen.ts/dist/interpreter/Engine/ExecState';
 import { Scope } from 'unicoen.ts/dist/interpreter/Engine/Scope';
 import { UniRuntimeError } from 'unicoen.ts/dist/interpreter/Engine/RuntimeException';
@@ -59,6 +62,21 @@ export const CODE_SEGMENT_BASE = 0x1000;
  * each expression.
  */
 export const TEXT_BYTES_PER_EXPRESSION = 16;
+
+/**
+ * The binary operators unicoen's engine has no case for.
+ *
+ * `>>` is the arithmetic shift, which is what C does to a signed integer and
+ * what every type the engine holds is. An unsigned right shift would need a
+ * signedness this engine does not carry through its values.
+ */
+const BITWISE: Record<string, (l: number, r: number) => number> = {
+  '&': (l, r) => l & r,
+  '|': (l, r) => l | r,
+  '^': (l, r) => l ^ r,
+  '<<': (l, r) => l << r,
+  '>>': (l, r) => l >> r,
+};
 
 /**
  * Runtime-backed stdio routines that occupy illustrative text memory too.
@@ -585,6 +603,13 @@ export class PlivetCPP14Engine extends CPP14Engine {
    * nothing to dispatch on.
    */
   protected *execUnaryOp(uniOp: UniUnaryOp, scope: Scope): any {
+    // The other half of the gap `BITWISE` fills: unicoen's unary table has no
+    // case for `~` either, so `~x` evaluated to null and killed its
+    // statement without a word.
+    if (uniOp.operator === '~') {
+      const value = yield* this.execExpr(uniOp.expr, scope);
+      return ~Number(value?.valueOf?.() ?? value);
+    }
     if (uniOp.operator === '&' && uniOp.expr instanceof UniIdent) {
       const designator = this.functionNamed(uniOp.expr.name, scope);
       if (designator !== null) {
@@ -661,6 +686,24 @@ export class PlivetCPP14Engine extends CPP14Engine {
     let value: any;
     try {
       value = yield* super.execExpr(expr, scope);
+    } catch (error) {
+      // The stock function runner catches every exception, including an
+      // unsupported or malformed statement, and then reports ordinary EOF.
+      // Preserve C's own control-flow exceptions, and turn every other silent
+      // termination into a diagnostic before the runner consumes it.
+      if (
+        !(error instanceof ControlException) &&
+        !this.runtimeDiagnostics.some((diagnostic) => diagnostic.fatal)
+      ) {
+        this.record(
+          'invalid-statement',
+          'error',
+          'This statement could not be executed.',
+          true,
+          rangeOfNode(expr) ?? this.currentRange()
+        );
+      }
+      throw error;
     } finally {
       this.constructs.ends(marks);
     }
@@ -1227,6 +1270,10 @@ export class PlivetCPP14Engine extends CPP14Engine {
         qualifiers: declaration.qualifiers,
         baseQualifiers: declaration.baseQualifiers,
         pointerQualifiers: declaration.pointerQualifiers,
+        // Present only where the rewrite reduced a type the mapper could not
+        // read, so the canvas spells `long long` over an engine holding a
+        // `long`.
+        declaredType: declaration.declaredType,
         region: this.storageRegion(storageClasses, scope),
         initialized:
           def.value !== null && !(def.value instanceof UniNoneLiteral),
@@ -1273,12 +1320,27 @@ export class PlivetCPP14Engine extends CPP14Engine {
    * value no C program can produce and the memory view cannot show. Both
    * operands come through here already evaluated, so this is the last point
    * where the program can be stopped on the statement that did it.
+   *
+   * The bitwise operators are here because unicoen's table has no case for
+   * any of them: `x | 1` fell off the end of its switch, returned null, and
+   * took the statement with it - `printf("%d", 6 | 1)` printed nothing at
+   * all, and nothing was said about why. JavaScript's own bitwise operators
+   * are defined on 32-bit integers, which is the width `basicSizeof` gives a
+   * C `int` here, so they are the operation C asks for rather than an
+   * approximation of it.
    */
   protected execBinOpImple(op: string, l: any, r: any): any {
     if ((op === '/' || op === '%') && Number(r?.valueOf?.() ?? r) === 0) {
       this.refuse(
         'division-by-zero',
         op === '/' ? 'division by zero' : 'remainder of a division by zero'
+      );
+    }
+    const bitwise = BITWISE[op];
+    if (typeof bitwise !== 'undefined') {
+      return bitwise(
+        Number(l?.valueOf?.() ?? l),
+        Number(r?.valueOf?.() ?? r)
       );
     }
     return super.execBinOpImple(op, l, r);

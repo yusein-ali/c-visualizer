@@ -65,6 +65,19 @@ The fork modernizes PLIVET and reshapes it into an embeddable teaching widget:
   diagnostics, and teaching lint rules with quick fixes. These features help
   learners connect source code with C semantics and identify problems where
   they occur.
+- **One place that says why a program will not run.** Every finding of both
+  checkers - the parser that runs as the reader types, and the course's own
+  compiler behind the Build button - is collected into a Diagnostic output
+  table at the top of the canvas, with the severity, which checker found it,
+  the file, the line and the message. A row is clickable and opens that place
+  in the editor, including in a tab the reader is not looking at. While
+  nothing is running the state views close and this table is what the canvas
+  shows, because a refused Start is the moment a reader most needs to be told
+  what is wrong. A status line across the top of the canvas - above the table
+  and drawn whether or not anything has been found - says whether a checker is
+  still working: local validation running or complete, a build started or
+  complete, what the debugger is doing, or that nothing has happened for a
+  while. It is what reports a build of a program nothing is wrong with.
 - **Richer execution visualization** presents the current statement and
   expression, active function invocations, object writes, and an explicitly
   implementation-oriented memory model covering register-class objects,
@@ -199,15 +212,15 @@ required scripts are loaded, so the host builds the instances from there:
 <div class="c-visualizer-block"></div>
 <div class="c-visualizer-block"></div>
 <script
-  data-c-visualizer-auto-mount="false"
-  src="_static/c-visualizer/c-visualizer.js"
+    data-c-visualizer-auto-mount="false"
+    src="_static/c-visualizer/c-visualizer.js"
 ></script>
 <script>
-  CVisualizerReady.then((CVisualizer) => {
-    document.querySelectorAll('.c-visualizer-block').forEach((element) => {
-      new CVisualizer(element, { theme: 'light' });
+    CVisualizerReady.then((CVisualizer) => {
+        document.querySelectorAll('.c-visualizer-block').forEach((element) => {
+            new CVisualizer(element, { theme: 'light' });
+        });
     });
-  });
 </script>
 ```
 
@@ -244,8 +257,8 @@ builds anything:
 
 ```html
 <div
-  id="c-visualizer-config"
-  config='{
+    id="c-visualizer-config"
+    config='{
     "theme": "dark",
     "features": { "preprocessor": false, "loadFile": false },
     "views": { "expression": false, "regions": { "registers": false } }
@@ -262,17 +275,33 @@ tour as three tabs: `main.c`, `tour.h`, and `tour.c`. It pauses for one integer
 through `scanf`, then writes and reads `c-visualizer.txt` in the browser-side
 virtual file system.
 
-| Field             | What it says                                                                                                                                                                                                               |
-| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `theme`           | `"light"` or `"dark"`. The switch in the control bar still changes it afterwards.                                                                                                                                          |
-| `sourceCode`      | The program the editor opens with.                                                                                                                                                                                         |
-| `files`           | `{ "path", "text" }` objects, drawn as tabs over the editor.                                                                                                                                                               |
-| `entry`           | Which source file opens as the runnable entry. Headers are composed before it, followed by the remaining implementation files. Defaults to the first.                                                                      |
-| `editableRegions` | `{ "from", "to" }` offsets the reader may type in. Everything outside them is fixed.                                                                                                                                       |
-| `features`        | `preprocessor` - the button showing the preprocessed source; `loadFile` - the upload panel of data files a program can `fopen`.                                                                                            |
-| `support-build`   | Whether to construct the host-backed Build button. A programmatic host must also provide at least one `diagnosticProviders` callback; JSON cannot contain callbacks.                                                       |
-| `licenses`        | Where the footer's third-party licence report is. The deployed bundle points at its own copy; a host that publishes one elsewhere names it here.                                                                           |
-| `views`           | Which canvas sections start visible: `statement`, `callStack`, `expression`, `variables`, `memory`, `mutations`, and `regions` for each implementation-memory region (`text`, `readOnly`, `data`, `bss`, `heap`, `stack`, `registers`). |
+| Field             | What it says                                                                                                                                                                                                                                           |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `theme`           | `"light"` or `"dark"`. The switch in the control bar still changes it afterwards.                                                                                                                                                                      |
+| `sourceCode`      | The program the editor opens with.                                                                                                                                                                                                                     |
+| `files`           | `{ "path", "text" }` objects, drawn as tabs over the editor.                                                                                                                                                                                           |
+| `entry`           | Which source file opens as the runnable entry. Headers are composed before it, followed by the remaining implementation files. Defaults to the first.                                                                                                  |
+| `editableRegions` | `{ "from", "to" }` offsets the reader may type in. Everything outside them is fixed.                                                                                                                                                                   |
+| `features`        | `preprocessor` - the button showing the preprocessed source; `loadFile` - the upload panel of data files a program can `fopen`.                                                                                                                        |
+| `support-build`   | Whether to construct the host-backed Build button. A programmatic host must also provide at least one `diagnosticProviders` callback; JSON cannot contain callbacks.                                                                                   |
+| `licenses`        | Where the footer's third-party licence report is. The deployed bundle points at its own copy; a host that publishes one elsewhere names it here.                                                                                                       |
+| `codeMirror`      | How the editor itself is built: `indent_unit`, `indent_with_tabs`, `electric_chars`, `match_brackets`, `line_numbers`, `autocomplete`, `font_size`. A host that has editors of its own hands over the configuration it built those with.               |
+| `views`           | Which canvas sections start visible: `diagnostics`, `statement`, `callStack`, `expression`, `variables`, `memory`, `mutations`, and `regions` for each implementation-memory region (`text`, `readOnly`, `data`, `bss`, `heap`, `stack`, `registers`). |
+
+`codeMirror` is the one field written for a host that already has editors on
+the page. A course chapter holds a block's editors and the window this opens
+beside each other, and a reader moves between them mid-exercise; handing over
+the settings those editors were built with is what keeps one of them from
+indenting with tabs while the other indents with two spaces. Both spellings of
+every setting are read - the `codemirror_config` keys of a Sphinx course's
+`conf.py` and the camelCase names the editor takes - and so is a setting
+written as the text of what it says, because that is how a page generator
+usually fills in the ones its author left out. A key that is neither, such as
+the `language_configs` of a page with editors in several languages, is ignored
+in silence rather than warned about: what arrives is a page's whole
+configuration, and most of it was never about this editor. The configuration
+may also be written under the `codemirror` or `codemirror_config` key it has on
+the page it came from.
 
 Everything is optional, and a feature or a view left out is on. The View panel
 over the canvas still holds every switch, so `views` says where a reader
@@ -293,35 +322,37 @@ the findings on the matching source tabs:
 <div class="c-visualizer-managed"></div>
 <button id="save-code">Save in host</button>
 <script
-  data-c-visualizer-auto-mount="false"
-  src="_static/c-visualizer/c-visualizer.js"
+    data-c-visualizer-auto-mount="false"
+    src="_static/c-visualizer/c-visualizer.js"
 ></script>
 <script>
-  CVisualizerReady.then((CVisualizer) => {
-    const visualizer = new CVisualizer(
-      document.querySelector('.c-visualizer-managed'),
-      {
-        files: [{ path: 'main.c', text: 'int main(void) { return 0; }' }],
-        entry: 'main.c',
-        supportBuild: true,
-        diagnosticProviders: {
-          aplus: async (snapshot) => {
-            const response = await fetch('/grader/compile', {
-              method: 'POST',
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify(snapshot),
-            });
-            return response.json();
-          },
-        },
-      }
-    );
+    CVisualizerReady.then((CVisualizer) => {
+        const visualizer = new CVisualizer(
+            document.querySelector('.c-visualizer-managed'),
+            {
+                files: [
+                    { path: 'main.c', text: 'int main(void) { return 0; }' },
+                ],
+                entry: 'main.c',
+                supportBuild: true,
+                diagnosticProviders: {
+                    aplus: async (snapshot) => {
+                        const response = await fetch('/grader/compile', {
+                            method: 'POST',
+                            headers: { 'content-type': 'application/json' },
+                            body: JSON.stringify(snapshot),
+                        });
+                        return response.json();
+                    },
+                },
+            }
+        );
 
-    document.querySelector('#save-code').addEventListener('click', () => {
-      const snapshot = visualizer.sourceSnapshot();
-      // Save snapshot.files, snapshot.entry, and snapshot.revision in the host.
+        document.querySelector('#save-code').addEventListener('click', () => {
+            const snapshot = visualizer.sourceSnapshot();
+            // Save snapshot.files, snapshot.entry, and snapshot.revision in the host.
+        });
     });
-  });
 </script>
 ```
 

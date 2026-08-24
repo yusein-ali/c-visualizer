@@ -8,4 +8,10 @@
  * that a CommonJS build cannot express, and the tests run under one.
  */
 export const spawnWorker = (): Worker =>
-  new Worker(new URL('./interpreter.worker.ts', import.meta.url));
+  new Worker(new URL('./interpreter.worker.ts', import.meta.url), {
+    // Course pages and their static assets may be served from different
+    // origins. The static host deliberately answers with
+    // Access-Control-Allow-Origin: *, which cannot be used with the default
+    // credential mode for a cross-origin worker request.
+    credentials: 'omit',
+  });

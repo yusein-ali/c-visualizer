@@ -14,7 +14,8 @@ const isDebug = process.env.DEBUG_DEPLOY === '1';
  * `_static` whole:
  *
  *     dist/embed/c-visualizer.js           <- the one <script src>, a loader
- *     dist/embed/c-visualizer.app.js       <- the application
+ *     dist/embed/c-visualizer.app.js       <- the application's entry stub
+ *     dist/embed/c-visualizer.app-<hash>.js <- the application, in async parts
  *     dist/embed/codemirror-fallback.js    <- loaded only without host CM6
  *     dist/embed/CPP14.<hash>.js           <- the interpreter, fetched on Start
  *     dist/embed/<worker>.<hash>.js        <- the interpreter's Worker
@@ -47,6 +48,17 @@ const output = (uniqueName) => ({
   clean: false,
 });
 
+const hostChunking = {
+  splitChunks: {
+    chunks: 'all',
+    maxSize: 200000,
+    automaticNameDelimiter: '-',
+    cacheGroups: {
+      defaultVendors: false,
+    },
+  },
+};
+
 const deployed = (name, entry, extra = {}) => {
   const config = merge(baseConfig, {
     name,
@@ -75,10 +87,19 @@ const loader = deployed('embed-loader', {
   'c-visualizer': './src/embed.loader.ts',
 });
 
+/*
+ * The fallback is one file because the loader addresses it by name and has no
+ * way to discover a second. Splitting it - by `maxSize`, or into an entry per
+ * package - either leaves code in a chunk nothing fetches or leaves five
+ * scripts racing each other for the shared runtime they were split against.
+ * It is also the file a course page never asks for: it is fetched only where
+ * `window.CodeMirror` is missing, which is a popup or a host that is not A+.
+ */
 const fallback = deployed(
   'embed-codemirror',
   { 'codemirror-fallback': './src/codemirror.fallback.ts' },
   {
+    optimization: { splitChunks: false },
     output: {
       ...output('embed-codemirror'),
       library: { name: 'CodeMirror', type: 'assign-properties' },
@@ -88,8 +109,15 @@ const fallback = deployed(
 
 const application = deployed(
   'embed-app',
-  { 'c-visualizer.app': './src/embed.ts' },
+  { 'c-visualizer.app': './src/embed.entry.ts' },
   {
+    // Keep the host-facing application below the static asset-size limit used
+    // by course pages. The entry is a stub that imports `embed.ts`, so the
+    // application is in async chunks and `maxSize` divides those: an initial
+    // chunk over the limit would be split into files named after it, and the
+    // loader would find nothing under `c-visualizer.app.js`. The application
+    // runtime discovers the chunks relative to the loader script.
+    optimization: hostChunking,
     externalsType: 'window',
     externals: {
       '@codemirror/autocomplete': ['CodeMirror', 'autocomplete'],

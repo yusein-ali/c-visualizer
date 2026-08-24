@@ -33,6 +33,8 @@ import { MemoryRegion } from './model';
  * reader of any one caller.
  */
 export interface ViewSelection {
+  /** The findings band over the state views. */
+  diagnostics?: boolean;
   statement?: boolean;
   callStack?: boolean;
   expression?: boolean;
@@ -48,6 +50,12 @@ export interface ViewSelection {
 
 export class ViewOptions {
   private readonly chosen = new Map<MemoryRegion, boolean>();
+  /**
+   * Whether the findings band is drawn at all. It has a switch like every
+   * other section, but unlike them it is also absent while there is nothing
+   * to report: a table of no diagnostics is a heading in the way.
+   */
+  private diagnostics = true;
   /** Whether the current statement's explanation is drawn. */
   private statement = true;
   /** Whether the active calls beside the statement are drawn. */
@@ -78,6 +86,14 @@ export class ViewOptions {
   /** Flips a region, given whether it is on the canvas at the moment. */
   public toggleRegion(region: MemoryRegion, shownNow = true): void {
     this.showRegion(region, !this.isRegionShown(region, shownNow));
+  }
+
+  public areDiagnosticsShown(): boolean {
+    return this.diagnostics;
+  }
+
+  public showDiagnostics(shown: boolean): void {
+    this.diagnostics = shown;
   }
 
   public isStatementShown(): boolean {
@@ -136,6 +152,9 @@ export class ViewOptions {
    * about without settling the other four.
    */
   public apply(selection: ViewSelection): void {
+    if (typeof selection.diagnostics === 'boolean') {
+      this.diagnostics = selection.diagnostics;
+    }
     if (typeof selection.statement === 'boolean') {
       this.statement = selection.statement;
     }
@@ -164,6 +183,7 @@ export class ViewOptions {
   /** Back to what the canvas decides for itself. */
   public clear(): void {
     this.chosen.clear();
+    this.diagnostics = true;
     this.statement = true;
     this.callStack = true;
     this.expression = true;

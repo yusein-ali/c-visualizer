@@ -362,6 +362,10 @@ class LintPass {
   readonly assigned = new Set<any>();
   /** Identifiers that name a member after `.` or `->`, rather than an object. */
   readonly memberSelectors = new Set<any>();
+  /** Identifiers that do not name an object: a callee, or a type in sizeof. */
+  readonly nonValueNames = new Set<any>();
+  /** Names already reported as undeclared, so each is reported once. */
+  readonly undeclaredNames = new Set<string>();
   /** Names already reported by a rule that reports each name once. */
   readonly reported = new Set<string>();
 
@@ -805,6 +809,105 @@ const missingReturn: Rule = {
  * The table. Order is the order the diagnostics come out in for one node, and
  * nothing else depends on it.
  */
+/**
+ * The objects a hosted C library declares that a reader does not, and that a
+ * program is entitled to use after including the right header. PLIVET has no
+ * headers to read, so it has to know these by name.
+ */
+const LIBRARY_OBJECTS = new Set(['stdin', 'stdout', 'stderr', 'errno']);
+
+/** A name spelled the way C spells a macro. */
+const MACRO_CASE = /^[A-Z_][A-Z0-9_]*$/;
+
+/**
+ * A name used as a value that nothing declares.
+ *
+ * C has no implicit declaration of objects, so `printf(f)` where nothing
+ * declares `f` is a program a compiler refuses. PLIVET ran it instead: the
+ * engine evaluated the unknown name to nothing, printed nothing, and returned
+ * null, which tells a reader their program worked and produced no output.
+ *
+ * Four things are deliberately not reported, because each is a name a valid
+ * program uses without declaring it in its own source:
+ *
+ * - A callee. A name this source never declares is exactly what a library
+ *   function looks like from the tree; `LinkerCheck` makes the same exception
+ *   and gives the same reason.
+ * - The operand of `sizeof`, which names a type rather than an object.
+ * - A function used as a value, which `Op op = add;` does. Those are collected
+ *   before the walk, so a function may be named above its definition.
+ * - A member selector. The right of `.` or `->` names a field, and fields are
+ *   not in any lexical scope.
+ * - A name spelled as a macro - `NULL`, `EOF`, `INT_MAX`. PLIVET has no
+ *   headers to expand, so those reach the tree as bare identifiers. Reporting
+ *   one would refuse a program that is not wrong, and the convention that
+ *   macros are upper case is strong enough to spend on that.
+ */
+const undeclaredIdentifier: Rule = {
+  name: 'undeclared-identifier',
+  severity: 'error',
+  enter(node, pass) {
+    if (
+      node instanceof UniBinOp &&
+      (node.operator === '.' || node.operator === '->') &&
+      node.right instanceof UniIdent
+    ) {
+      // Marked here as well as by `uninitialized-read`: this rule runs in a
+      // pass of its own over the whole program, where that rule is not
+      // present to mark them. Adding the same node twice costs nothing.
+      pass.memberSelectors.add(node.right);
+      return;
+    }
+    if (node instanceof UniMethodCall && node.methodName instanceof UniIdent) {
+      pass.nonValueNames.add(node.methodName);
+      return;
+    }
+    // `sizeof(int)` and `sizeof(struct Pair)` reach the tree as a unary
+    // operator over an identifier, and that identifier names a type. It is
+    // the one place a type is spelled where a value would otherwise be.
+    if (
+      node instanceof UniUnaryOp &&
+      node.operator === 'sizeof' &&
+      node.expr instanceof UniIdent
+    ) {
+      pass.nonValueNames.add(node.expr);
+      return;
+    }
+    if (
+      !(node instanceof UniIdent) ||
+      pass.memberSelectors.has(node) ||
+      pass.nonValueNames.has(node)
+    ) {
+      return;
+    }
+    const name = node.name;
+    if (
+      typeof name !== 'string' ||
+      name === '' ||
+      pass.declared(name) !== null ||
+      // Declared somewhere in this program as a function, whether or not the
+      // walk has reached it yet.
+      pass.returnTypes.has(name) ||
+      LIBRARY_OBJECTS.has(name) ||
+      MACRO_CASE.test(name) ||
+      pass.undeclaredNames.has(name)
+    ) {
+      return;
+    }
+    const range = rangeOf(node);
+    if (range === null) {
+      return;
+    }
+    pass.undeclaredNames.add(name);
+    pass.report(
+      this,
+      range,
+      `${name} is not declared. C has no implicit declaration of objects, ` +
+        `so a name has to be declared before it is used.`
+    );
+  },
+};
+
 const RULES: Rule[] = [
   scanfAddress,
   assignmentAsCondition,
@@ -812,6 +915,18 @@ const RULES: Rule[] = [
   uninitializedRead,
   missingReturn,
 ];
+
+/**
+ * The rules that have to read the whole program rather than one file.
+ *
+ * Whether a name is declared cannot be answered from one translation unit:
+ * `main.c` uses what `tour.h` declares, and asking the question per file
+ * reported ten names in the default program that are declared perfectly well
+ * one file over. These run over the linked source, and `server.ts` maps their
+ * coordinates back to the file the reader is looking at, exactly as it does
+ * for the linker rules.
+ */
+const PROGRAM_RULES: Rule[] = [undeclaredIdentifier];
 
 const declaredFrom = (
   declaration: any,
@@ -843,6 +958,25 @@ export function teachingDiagnostics(
   root: UniNode,
   source: string
 ): LintDiagnostic[] {
+  return runRules(RULES, root, source);
+}
+
+/**
+ * The rules that need the linked program: today, whether a name is declared.
+ * Coordinates are the program's, and `server.ts` maps them back to a file.
+ */
+export function programDiagnostics(
+  root: UniNode,
+  source: string
+): LintDiagnostic[] {
+  return runRules(PROGRAM_RULES, root, source);
+}
+
+function runRules(
+  active: Rule[],
+  root: UniNode,
+  source: string
+): LintDiagnostic[] {
   const pass = new LintPass(source);
   collectReturnTypes(root, pass);
 
@@ -862,7 +996,7 @@ export function teachingDiagnostics(
       pass.pushScope();
       declareParameters(node, pass);
     }
-    for (const rule of RULES) {
+    for (const rule of active) {
       if (typeof rule.enter !== 'undefined') {
         rule.enter(node, pass);
       }
@@ -890,7 +1024,7 @@ export function teachingDiagnostics(
         visit(node[field], node);
       }
     }
-    for (const rule of RULES) {
+    for (const rule of active) {
       if (typeof rule.leave !== 'undefined') {
         rule.leave(node, pass);
       }

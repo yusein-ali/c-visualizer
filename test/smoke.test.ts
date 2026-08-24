@@ -83,6 +83,10 @@ jest.mock('../src/ui/graph', () => ({
     }
     setScale(): void {}
     setDark(): void {}
+    setDiagnostics(): void {}
+    setDiagnosticActivity(): void {}
+    setRunStatus(): void {}
+    setDebugState(): void {}
     destroy(): void {}
   },
 }));

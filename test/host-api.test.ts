@@ -9,6 +9,10 @@ jest.mock('../src/ui/graph', () => ({
     setScale(): void {}
     setDark(): void {}
     setFocus(): void {}
+    setDiagnostics(): void {}
+    setDiagnosticActivity(): void {}
+    setRunStatus(): void {}
+    setDebugState(): void {}
     destroy(): void {}
   },
 }));
@@ -158,7 +162,10 @@ describe('the host integration API', () => {
 
     await expect(plivet.requestDiagnostics('gcc')).resolves.toBe(true);
     expect(diagnostics(editorView(plivet))).toEqual([
-      { message: 'unused value', source: 'plivet/-Wunused-value' },
+      {
+        message: 'unused value',
+        source: 'c-visualizer:build/-Wunused-value',
+      },
     ]);
 
     plivet.clearDiagnostics('gcc');

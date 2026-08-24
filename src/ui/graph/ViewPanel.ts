@@ -76,6 +76,10 @@ export function viewPanel(
   sectionTitle.className = 'plivet-graph__config-title';
   sectionTitle.textContent = strings.graphViewSections;
 
+  const diagnostics = checkbox(strings.graphViewDiagnostics, (shown) => {
+    view.showDiagnostics(shown);
+    onChange();
+  });
   const statement = checkbox(strings.graphViewStatement, (shown) => {
     view.showStatement(shown);
     onChange();
@@ -102,6 +106,7 @@ export function viewPanel(
   });
   sections.append(
     sectionTitle,
+    diagnostics.label,
     statement.label,
     callStack.label,
     expression.label,
@@ -120,6 +125,7 @@ export function viewPanel(
     for (const [region, box] of boxes) {
       box.checked = drawn(region);
     }
+    diagnostics.input.checked = view.areDiagnosticsShown();
     statement.input.checked = view.isStatementShown();
     callStack.input.checked = view.isCallStackShown();
     expression.input.checked = view.isExpressionShown();

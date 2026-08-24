@@ -24,7 +24,7 @@ describe('the canvas view panel', () => {
       drawing(MEMORY_REGIONS)
     );
 
-    expect(boxesOf(root)).toHaveLength(MEMORY_REGIONS.length + 6);
+    expect(boxesOf(root)).toHaveLength(MEMORY_REGIONS.length + 7);
     MEMORY_REGIONS.forEach((region: MemoryRegion) => {
       expect(boxFor(root, memoryRegionName(region)).checked).toBe(true);
     });

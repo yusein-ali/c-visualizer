@@ -299,7 +299,11 @@ const node = (segment: MemorySegmentGeometry, part: Part): dia.Element =>
     z: 1,
   });
 
-export function memoryNodeOf(segment: MemorySegmentGeometry): dia.Element {
+export function memoryNodeOf(
+  segment: MemorySegmentGeometry,
+  options: { collapsible?: boolean } = {}
+): dia.Element {
+  const collapsible = options.collapsible !== false;
   const part: Part = { markup: [], attrs: {} };
   const wrappedTitle = segment.titleHeight >= MEMORY_WRAPPED_TITLE_HEIGHT;
   const titleTextY = wrappedTitle ? 16 : segment.titleHeight / 2;
@@ -316,10 +320,12 @@ export function memoryNodeOf(segment: MemorySegmentGeometry): dia.Element {
     rx: 6,
     ry: 6,
   });
-  const collapse = {
-    'data-collapse-target': segment.key,
-    class: 'plivet-collapse-cell',
-  };
+  const collapse = collapsible
+    ? {
+        'data-collapse-target': segment.key,
+        class: 'plivet-collapse-cell',
+      }
+    : undefined;
   push(
     part,
     'rect',
@@ -358,7 +364,11 @@ export function memoryNodeOf(segment: MemorySegmentGeometry): dia.Element {
   push(part, 'text', 'titleToggle', {
     x: MEMORY_PADDING_X + 4 + MEMORY_TITLE_TOGGLE_WIDTH / 2,
     y: titleTextY,
-    text: segment.collapsed ? SEGMENT_CLOSED : SEGMENT_OPEN,
+    text: collapsible
+      ? segment.collapsed
+        ? SEGMENT_CLOSED
+        : SEGMENT_OPEN
+      : '',
     fill: TITLE_ADDRESS,
     fontFamily: SANS,
     fontSize: MEMORY_FONT_SIZE - 3,
