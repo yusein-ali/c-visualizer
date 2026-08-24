@@ -24,21 +24,66 @@ const scope = self as unknown as {
 };
 
 const server = new Server();
+let fileVersion = 0;
+let reportedFiles = new Map<string, ArrayBuffer>();
+
+/** The interpreter currently returns a Uint8Array after flushing a file. */
+const copyContents = (contents: ArrayBuffer): ArrayBuffer => {
+  const value = contents as ArrayBuffer | ArrayBufferView;
+  const bytes =
+    value instanceof ArrayBuffer
+      ? new Uint8Array(value)
+      : new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  return bytes.slice().buffer;
+};
+
+const sameFiles = (
+  left: ReadonlyMap<string, ArrayBuffer>,
+  right: ReadonlyMap<string, ArrayBuffer>
+): boolean =>
+  left.size === right.size &&
+  Array.from(left).every(
+    ([filename, contents]) => right.get(filename) === contents
+  );
+
+/** Sends only a set whose entries the interpreter created or replaced. */
+const reportFiles = (): void => {
+  const current = server.fileSnapshot();
+  if (sameFiles(reportedFiles, current)) {
+    return;
+  }
+  reportedFiles = current;
+  scope.postMessage({
+    kind: 'files',
+    version: fileVersion,
+    files: new Map(
+      Array.from(current, ([filename, contents]) => [
+        filename,
+        copyContents(contents),
+      ])
+    ),
+  });
+};
 
 // A run stops at the end of the program, at a read or at a breakpoint, long
 // after the `StepAll` that started it was answered. It is reported on its own.
-server.onRunEvent = (event, response) =>
+server.onRunEvent = (event, response) => {
+  reportFiles();
   scope.postMessage({ kind: 'run', event, response });
+};
 
 scope.onmessage = async (event: MessageEvent<ToWorker>) => {
   const message = event.data;
   if (message.kind === 'files') {
     server.setFiles(message.files);
+    fileVersion = message.version;
+    reportedFiles = server.fileSnapshot();
     return;
   }
   const { id, request } = message;
   try {
     const response = await server.send(request);
+    reportFiles();
     scope.postMessage({ kind: 'response', id, response });
   } catch (thrown) {
     scope.postMessage({

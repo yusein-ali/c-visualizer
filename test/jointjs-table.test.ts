@@ -108,7 +108,7 @@ describe('MemoryNode', () => {
     });
   });
 
-  it('makes the fold triangle the only thing a click can land on', () => {
+  it('makes the aggregate name band and fold triangle expandable', () => {
     const node = memoryNodeOf(segment());
     const markup = node.get('markup') as {
       selector: string;
@@ -119,6 +119,8 @@ describe('MemoryNode', () => {
     );
 
     expect(clickable.map((item) => item.selector)).toEqual([
+      'cell-0-1-body',
+      'cell-0-1-text',
       'fold-0-body',
       'fold-0-text',
     ]);
@@ -143,6 +145,20 @@ describe('MemoryNode', () => {
     // The name and the addresses let the click through to the bar under them.
     expect(attr(node, 'titleText').pointerEvents).toBe('none');
     expect(attr(node, 'titleToggle').text).toBe('\u25bc');
+  });
+
+  it('can embed the table without repeating its surrounding section title', () => {
+    const node = memoryNodeOf(segment(), {
+      collapsible: false,
+      title: false,
+    });
+    const attrs = node.get('attrs') as Record<string, unknown>;
+
+    expect(node.position()).toEqual({ x: 24, y: 24 });
+    expect(node.size()).toEqual({ width: 300, height: 66 });
+    expect(Object.keys(attrs)).not.toContain('titleText');
+    expect(attr(node, 'headerBody').y).toBe(0);
+    expect(attr(node, 'cell-0-0-body').y).toBe(24);
   });
 
   it('draws a collapsed segment as the title bar and nothing else', () => {

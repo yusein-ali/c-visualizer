@@ -203,6 +203,17 @@ function entryRow(
     const column = segment.columns[position];
     const isAddress = column.key === 'address';
     const isValue = column.key === 'value';
+    // An aggregate advertises its disclosure beside its name, so its complete
+    // name band is the target. Requiring the pointer to land on the 16-pixel
+    // triangle made ordinary clicks look ignored, especially after scaling.
+    const cellMarks =
+      column.key === 'name' && typeof row.fold !== 'undefined'
+        ? {
+            ...marks,
+            'data-fold-target': encodeURIComponent(row.fold.target),
+            class: `${marks?.class ?? ''} plivet-fold-cell`.trim(),
+          }
+        : marks;
     // The address belongs to the whole object, so its cell spans both bands.
     push(
       part,
@@ -221,7 +232,7 @@ function entryRow(
         stroke: GRID,
         strokeWidth: 1,
       },
-      marks
+      cellMarks
     );
     push(
       part,
@@ -245,7 +256,7 @@ function entryRow(
         dominantBaseline: 'central',
         pointerEvents: 'none',
       },
-      marks
+      cellMarks
     );
   });
 
@@ -301,9 +312,22 @@ const node = (segment: MemorySegmentGeometry, part: Part): dia.Element =>
 
 export function memoryNodeOf(
   segment: MemorySegmentGeometry,
-  options: { collapsible?: boolean } = {}
+  options: { collapsible?: boolean; title?: boolean } = {}
 ): dia.Element {
   const collapsible = options.collapsible !== false;
+  const titled = options.title !== false;
+  if (!titled) {
+    const titleHeight = segment.titleHeight;
+    segment = {
+      ...segment,
+      height: segment.height - titleHeight,
+      titleHeight: 0,
+      rows: segment.rows.map((row) => ({
+        ...row,
+        y: row.y - titleHeight,
+      })),
+    };
+  }
   const part: Part = { markup: [], attrs: {} };
   const wrappedTitle = segment.titleHeight >= MEMORY_WRAPPED_TITLE_HEIGHT;
   const titleTextY = wrappedTitle ? 16 : segment.titleHeight / 2;
@@ -320,86 +344,89 @@ export function memoryNodeOf(
     rx: 6,
     ry: 6,
   });
-  const collapse = collapsible
-    ? {
-        'data-collapse-target': segment.key,
-        class: 'plivet-collapse-cell',
-      }
-    : undefined;
-  push(
-    part,
-    'rect',
-    'titleBody',
-    {
-      x: 0,
-      y: 0,
-      width: segment.width,
-      height: segment.titleHeight,
-      fill: TITLE_FILL,
-      stroke: 'none',
-      rx: 6,
-      ry: 6,
-    },
-    collapse
-  );
-  // The title bar is rounded at the top and square where the table begins; a
-  // second rect squares off its lower half without a clip path. A collapsed
-  // segment is nothing but the bar, so it keeps all four corners.
-  if (!segment.collapsed) {
+  const collapse =
+    collapsible && titled
+      ? {
+          'data-collapse-target': segment.key,
+          class: 'plivet-collapse-cell',
+        }
+      : undefined;
+  if (titled) {
     push(
       part,
       'rect',
-      'titleFoot',
+      'titleBody',
       {
         x: 0,
-        y: segment.titleHeight / 2,
+        y: 0,
         width: segment.width,
-        height: segment.titleHeight / 2,
+        height: segment.titleHeight,
         fill: TITLE_FILL,
         stroke: 'none',
+        rx: 6,
+        ry: 6,
       },
       collapse
     );
+    // The title bar is rounded at the top and square where the table begins; a
+    // second rect squares off its lower half without a clip path. A collapsed
+    // segment is nothing but the bar, so it keeps all four corners.
+    if (!segment.collapsed) {
+      push(
+        part,
+        'rect',
+        'titleFoot',
+        {
+          x: 0,
+          y: segment.titleHeight / 2,
+          width: segment.width,
+          height: segment.titleHeight / 2,
+          fill: TITLE_FILL,
+          stroke: 'none',
+        },
+        collapse
+      );
+    }
+    push(part, 'text', 'titleToggle', {
+      x: MEMORY_PADDING_X + 4 + MEMORY_TITLE_TOGGLE_WIDTH / 2,
+      y: titleTextY,
+      text: collapsible
+        ? segment.collapsed
+          ? SEGMENT_CLOSED
+          : SEGMENT_OPEN
+        : '',
+      fill: TITLE_ADDRESS,
+      fontFamily: SANS,
+      fontSize: MEMORY_FONT_SIZE - 3,
+      textAnchor: 'middle',
+      dominantBaseline: 'central',
+      // The bar under it takes the click, so the whole bar is one target.
+      pointerEvents: 'none',
+    });
+    push(part, 'text', 'titleText', {
+      x: MEMORY_PADDING_X + 4 + MEMORY_TITLE_TOGGLE_WIDTH,
+      y: titleTextY,
+      text: segment.name,
+      fill: TITLE_TEXT,
+      fontFamily: SANS,
+      fontSize: MEMORY_FONT_SIZE + 1,
+      fontWeight: 'bold',
+      textAnchor: 'start',
+      dominantBaseline: 'central',
+      pointerEvents: 'none',
+    });
+    push(part, 'text', 'titleAddress', {
+      x: segment.width - MEMORY_PADDING_X - 4,
+      y: titleAddressY,
+      text: segment.addressLabel,
+      fill: TITLE_ADDRESS,
+      fontFamily: MONOSPACE,
+      fontSize: MEMORY_FONT_SIZE,
+      textAnchor: 'end',
+      dominantBaseline: 'central',
+      pointerEvents: 'none',
+    });
   }
-  push(part, 'text', 'titleToggle', {
-    x: MEMORY_PADDING_X + 4 + MEMORY_TITLE_TOGGLE_WIDTH / 2,
-    y: titleTextY,
-    text: collapsible
-      ? segment.collapsed
-        ? SEGMENT_CLOSED
-        : SEGMENT_OPEN
-      : '',
-    fill: TITLE_ADDRESS,
-    fontFamily: SANS,
-    fontSize: MEMORY_FONT_SIZE - 3,
-    textAnchor: 'middle',
-    dominantBaseline: 'central',
-    // The bar under it takes the click, so the whole bar is one target.
-    pointerEvents: 'none',
-  });
-  push(part, 'text', 'titleText', {
-    x: MEMORY_PADDING_X + 4 + MEMORY_TITLE_TOGGLE_WIDTH,
-    y: titleTextY,
-    text: segment.name,
-    fill: TITLE_TEXT,
-    fontFamily: SANS,
-    fontSize: MEMORY_FONT_SIZE + 1,
-    fontWeight: 'bold',
-    textAnchor: 'start',
-    dominantBaseline: 'central',
-    pointerEvents: 'none',
-  });
-  push(part, 'text', 'titleAddress', {
-    x: segment.width - MEMORY_PADDING_X - 4,
-    y: titleAddressY,
-    text: segment.addressLabel,
-    fill: TITLE_ADDRESS,
-    fontFamily: MONOSPACE,
-    fontSize: MEMORY_FONT_SIZE,
-    textAnchor: 'end',
-    dominantBaseline: 'central',
-    pointerEvents: 'none',
-  });
   if (segment.collapsed) {
     return node(segment, part);
   }

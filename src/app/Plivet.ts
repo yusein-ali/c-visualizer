@@ -204,7 +204,6 @@ export class Plivet {
     });
 
     this.controls = new ControlBar(this.shell.controls, {
-      statusParent: this.shell.status,
       onDebug: (command) => this.signalDebug(command),
       onZoom: (command: ZOOM_COMMAND) => bus.signal('zoom', command),
       onTheme: (dark) => bus.signal('changeTheme', dark ? 'dark' : 'light'),
@@ -278,13 +277,14 @@ export class Plivet {
             onDelete: (filename: string) =>
               this.files?.setFiles(client.delete(filename)),
           });
+    client.onFilesChanged = (files) => this.files?.setFiles(files);
 
     this.help = new HowToDialog(this.shell.root);
 
     bus.slot('changeTheme', (theme: Theme) => this.setTheme(theme));
-    bus.slot('changeState', (debugState: DEBUG_STATE, step: number) => {
+    bus.slot('changeState', (debugState: DEBUG_STATE) => {
       this.debugState = debugState;
-      this.controls.setDebugState(debugState, step);
+      this.controls.setDebugState(debugState);
       // The canvas clears its state views while nothing is running, and its
       // status line says what the debugger is doing while something is.
       this.graph.setDebugState(debugState);

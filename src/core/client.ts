@@ -27,9 +27,14 @@ export class InterpreterClient {
    * element, so they are read here and sent across when they change.
    */
   private readonly files = new Map<string, ArrayBuffer>();
+  /** Changes whenever the page uploads or removes a file. */
+  private fileVersion = 0;
 
   /** Where a run that stopped on its own is reported. */
   public onRunEvent: ((event: RUN_EVENT, response: Response) => void) | null =
+    null;
+  /** Where files written by the running program are reported. */
+  public onFilesChanged: ((files: Map<string, ArrayBuffer>) => void) | null =
     null;
 
   public send(request: Request): Promise<Response> {
@@ -46,13 +51,23 @@ export class InterpreterClient {
         this.files.set(file.name, await file.arrayBuffer())
       )
     );
-    this.post({ kind: 'files', files: this.files });
+    this.fileVersion += 1;
+    this.post({
+      kind: 'files',
+      files: this.files,
+      version: this.fileVersion,
+    });
     return this.files;
   }
 
   public delete(filename: string): Map<string, ArrayBuffer> {
     this.files.delete(filename);
-    this.post({ kind: 'files', files: this.files });
+    this.fileVersion += 1;
+    this.post({
+      kind: 'files',
+      files: this.files,
+      version: this.fileVersion,
+    });
     return this.files;
   }
 
@@ -68,6 +83,7 @@ export class InterpreterClient {
       this.worker = null;
     }
     this.onRunEvent = null;
+    this.onFilesChanged = null;
     // Commands still in flight are dropped rather than failed. Their answers
     // were going to widgets that are being taken down with them, and the one
     // thing a failed command does is put an alert in front of a reader who
@@ -92,12 +108,30 @@ export class InterpreterClient {
     this.worker = worker;
     // A session started before this point uploaded its files to nobody.
     if (0 < this.files.size) {
-      worker.postMessage({ kind: 'files', files: this.files });
+      worker.postMessage({
+        kind: 'files',
+        files: this.files,
+        version: this.fileVersion,
+      });
     }
     return worker;
   }
 
   private receive(message: FromWorker): void {
+    if (message.kind === 'files') {
+      // An upload or removal can cross an already-sent Worker answer. Its
+      // version makes that stale answer harmless instead of losing the newer
+      // page-side choice.
+      if (message.version !== this.fileVersion) {
+        return;
+      }
+      this.files.clear();
+      for (const [filename, contents] of message.files) {
+        this.files.set(filename, contents);
+      }
+      this.onFilesChanged?.(this.files);
+      return;
+    }
     if (message.kind === 'run') {
       if (this.onRunEvent !== null) {
         this.onRunEvent(message.event, message.response);

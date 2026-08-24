@@ -4,16 +4,16 @@ import { download } from './download';
 import { iconFor } from '../controls/icons';
 
 /**
- * The upload panel: what a running program can `fopen`.
+ * The data-file panel: what a running program can `fopen` and what it wrote.
  *
  * It was `FileForm` and `FileItem`, a Bootstrap panel around a
  * `react-download-link`. That package's whole content is what `download()`
  * in `download.ts` does - build a Blob, name a URL after it, click a link,
  * release the URL - so it left `package.json` with the framework.
  *
- * The panel holds no files of its own. The uploaded set lives in the
- * interpreter client, which is the only thing that can hand it to a program;
- * this class is told what that set contains.
+ * The panel holds no files of its own. The set lives in the interpreter
+ * client, which sends uploads to the program and receives files that program
+ * creates or changes; this class is told what that set contains.
  */
 
 export interface FilePanelOptions {
@@ -58,7 +58,7 @@ export class FilePanel {
     this.setFiles(null);
   }
 
-  /** The uploaded set, as the interpreter client holds it. */
+  /** The data-file set, as the interpreter client holds it. */
   setFiles(files: Map<string, ArrayBuffer> | null): void {
     this.list.textContent = '';
 

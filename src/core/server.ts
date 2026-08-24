@@ -549,6 +549,18 @@ export class Server {
     }
   }
 
+  /**
+   * A shallow view of the Worker's virtual filesystem.
+   *
+   * The interpreter replaces an entry when `fopen` creates it and when
+   * `fflush`/`fclose` commits it. Keeping the byte buffers themselves lets the
+   * Worker detect those changes without copying every uploaded file after
+   * every debugger step.
+   */
+  public fileSnapshot(): Map<string, ArrayBuffer> {
+    return new Map(this.files);
+  }
+
   public async send(request: Request): Promise<Response> {
     const { controlEvent, stdinText } = request;
     const requestedExecution = executionSourceOf(request);

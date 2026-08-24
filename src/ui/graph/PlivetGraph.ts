@@ -100,9 +100,10 @@ const FOCUS_CLASS = 'plivet-object--focus';
 
 /**
  * The canvas is read from cause to state. Statement and Call stack share its
- * first row; Expression expansion spans both columns beneath them, Variables
- * bridges the source expression and the complete Memory map, and the write
- * history is the final DOM section under the paper. Each major section has one
+ * first row; Expression expansion spans both columns beneath them, the
+ * complete Memory map follows at full width, and Variables and the write
+ * history share the last row - the names in scope now on the left, the stores
+ * that gave them their values on the right. Each major section has one
  * disclosure heading and one switch in the shared View panel.
  */
 const HEADING_HEIGHT = 26;
@@ -297,6 +298,8 @@ export class PlivetGraph {
   /** Nothing has happened for long enough to stop reporting what did. */
   private diagnosticsIdle = false;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  /** One coalesced redraw after disclosure input, never one rebuild per hit. */
+  private disclosureFrame: number | null = null;
   /** The status sentence as it stands on the canvas now. */
   private drawnStatus = '';
   /**
@@ -374,7 +377,10 @@ export class PlivetGraph {
         color: 'var(--plivet-graph-canvas, #ffffff)',
       },
     });
-    this.paper.on('element:pointerclick', (_view, event) => {
+    this.paper.on('element:pointerdown', (_view, event) => {
+      if (event.button !== 0) {
+        return;
+      }
       const target = event.target as Element | null;
       // Aggregate rows, memory segments and whole canvas sections all fold in
       // the place where the reader sees them.
@@ -389,9 +395,8 @@ export class PlivetGraph {
       }
       const finding = hit.getAttribute('data-diagnostic-index');
       if (finding !== null) {
-        // A finding is a place in the source rather than anything on the
-        // canvas: the row is followed, and the drawing does not change.
-        this.followDiagnostic(Number(finding));
+        // Navigation remains a completed click; only disclosures act on
+        // pointer-down so their target cannot disappear before pointer-up.
         return;
       }
       const group = hit.getAttribute('data-fold-target');
@@ -420,7 +425,15 @@ export class PlivetGraph {
       } else {
         return;
       }
-      this.render(this.model);
+      this.scheduleDisclosureRender();
+    });
+    this.paper.on('element:pointerclick', (_view, event) => {
+      const target = event.target as Element | null;
+      const hit = target?.closest('[data-diagnostic-index]');
+      const finding = hit?.getAttribute('data-diagnostic-index');
+      if (finding !== null && typeof finding !== 'undefined') {
+        this.followDiagnostic(Number(finding));
+      }
     });
 
     // Hover is read off the DOM rather than through the paper's own element
@@ -587,43 +600,34 @@ export class PlivetGraph {
 
     // The compact current-scope table follows the complete implementation
     // memory map, so the names a reader cares about remain beside the storage
-    // they describe without covering the map itself.
-    if (this.view.areVariablesShown()) {
-      cells.push(...this.variableTableCells(model, ORIGIN_X, nextY));
-      nextY =
-        Math.max(this.contentHeight, nextY + HEADING_HEIGHT) + SECTION_GAP;
-    }
-
-    if (this.view.areMutationsShown()) {
-      const mutationY = Math.max(nextY, this.contentHeight + SECTION_GAP);
-      cells.push(
-        this.sectionHeading(
-          strings.viewMutations,
-          ORIGIN_X,
-          mutationY,
-          'mutations',
-          this.fullCanvasWidth()
-        )
-      );
-      if (!this.collapsed.has('mutations')) {
-        const tableWidth = this.fullCanvasWidth();
-        const table = mutationTableCells(
-          model.mutations,
-          ORIGIN_X,
-          mutationY + HEADING_HEIGHT + HEADING_GAP,
-          tableWidth,
-          this.folds
-        );
-        cells.push(...table.cells);
-        this.contentWidth = Math.max(
-          this.contentWidth,
-          ORIGIN_X + table.width + ORIGIN_X
-        );
-        this.contentHeight = Math.max(
-          this.contentHeight,
-          mutationY + HEADING_HEIGHT + HEADING_GAP + table.height + ORIGIN_X
+    // they describe without covering the map itself. It names very few objects
+    // and each write is one line, so the two share the last row the way
+    // Statement and Call stack share the first: the current values on the
+    // left, the writes that produced them on the right.
+    const variablesShown = this.view.areVariablesShown();
+    const mutationsShown = this.view.areMutationsShown();
+    if (variablesShown || mutationsShown) {
+      const columnWidth =
+        variablesShown && mutationsShown
+          ? this.topColumnWidth()
+          : this.fullCanvasWidth();
+      if (variablesShown) {
+        cells.push(
+          ...this.variableTableCells(model, ORIGIN_X, nextY, columnWidth)
         );
       }
+      if (mutationsShown) {
+        cells.push(
+          ...this.mutationSectionCells(
+            model,
+            variablesShown ? ORIGIN_X + columnWidth + COLUMN_GAP : ORIGIN_X,
+            nextY,
+            columnWidth
+          )
+        );
+      }
+      nextY =
+        Math.max(this.contentHeight, nextY + HEADING_HEIGHT) + SECTION_GAP;
     }
     this.panel.refresh();
     this.paper.freeze();
@@ -738,6 +742,10 @@ export class PlivetGraph {
   }
 
   destroy(): void {
+    if (this.disclosureFrame !== null) {
+      cancelAnimationFrame(this.disclosureFrame);
+      this.disclosureFrame = null;
+    }
     if (this.idleTimer !== null) {
       clearTimeout(this.idleTimer);
       this.idleTimer = null;
@@ -811,7 +819,21 @@ export class PlivetGraph {
         this.heldCollapsed.add(section);
       }
     }
-    this.render(this.model);
+  }
+
+  /**
+   * Let a burst of disclosure input finish before replacing the SVG scene.
+   * The old targets remain present for the rest of the frame, and all state
+   * changes made in that frame are represented by one expensive rebuild.
+   */
+  private scheduleDisclosureRender(): void {
+    if (this.disclosureFrame !== null) {
+      return;
+    }
+    this.disclosureFrame = requestAnimationFrame(() => {
+      this.disclosureFrame = null;
+      this.render(this.model);
+    });
   }
 
   /** Whether the findings band is on the canvas at the moment. */
@@ -1260,7 +1282,8 @@ export class PlivetGraph {
   private variableTableCells(
     model: StepModel,
     originX: number,
-    originY: number
+    originY: number,
+    tableWidth: number
   ): dia.Cell[] {
     const cells: dia.Cell[] = [
       this.sectionHeading(
@@ -1268,14 +1291,13 @@ export class PlivetGraph {
         originX,
         originY,
         'variables',
-        this.fullCanvasWidth()
+        tableWidth
       ),
     ];
     if (this.collapsed.has('variables')) {
       return cells;
     }
 
-    const tableWidth = this.fullCanvasWidth();
     let y = originY + HEADING_HEIGHT + HEADING_GAP;
     cells.push(
       this.cardCell(
@@ -1326,10 +1348,10 @@ export class PlivetGraph {
             y,
             collapsed: false,
           },
-          { collapsible: false }
+          { collapsible: false, title: false }
         )
       );
-      y += segment.height;
+      y += segment.height - segment.titleHeight;
     }
 
     this.contentWidth = Math.max(
@@ -1337,6 +1359,45 @@ export class PlivetGraph {
       originX + tableWidth + ORIGIN_X
     );
     this.contentHeight = Math.max(this.contentHeight, y + ORIGIN_X);
+    return cells;
+  }
+
+  /** Every store the run has made, grouped by the object it wrote to. */
+  private mutationSectionCells(
+    model: StepModel,
+    originX: number,
+    originY: number,
+    tableWidth: number
+  ): dia.Cell[] {
+    const cells: dia.Cell[] = [
+      this.sectionHeading(
+        strings.viewMutations,
+        originX,
+        originY,
+        'mutations',
+        tableWidth
+      ),
+    ];
+    if (this.collapsed.has('mutations')) {
+      return cells;
+    }
+
+    const table = mutationTableCells(
+      model.mutations,
+      originX,
+      originY + HEADING_HEIGHT + HEADING_GAP,
+      tableWidth,
+      this.folds
+    );
+    cells.push(...table.cells);
+    this.contentWidth = Math.max(
+      this.contentWidth,
+      originX + table.width + ORIGIN_X
+    );
+    this.contentHeight = Math.max(
+      this.contentHeight,
+      originY + HEADING_HEIGHT + HEADING_GAP + table.height + ORIGIN_X
+    );
     return cells;
   }
 

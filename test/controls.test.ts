@@ -30,7 +30,6 @@ const mount = () => {
     files: inGroup('files'),
     debug: inGroup('debug'),
     zoom: inGroup('zoom'),
-    status: parent.querySelector('.plivet-controls__status') as HTMLElement,
     toolbar: parent.querySelector(
       '.plivet-controls__group--debug'
     ) as HTMLElement,
@@ -144,10 +143,10 @@ describe('the debug controls', () => {
       false,
     ]);
 
-    bar.setDebugState('Debugging', 4);
+    bar.setDebugState('Debugging');
     expect(debug.every((button) => !button.disabled)).toBe(true);
 
-    bar.setDebugState('EOF', 9);
+    bar.setDebugState('EOF');
     expect(debug.map((button) => button.disabled)).toEqual([
       false,
       false,
@@ -166,7 +165,7 @@ describe('the debug controls', () => {
     debug[6].click();
     expect(commands).toEqual(['Start', 'Exec']);
 
-    bar.setDebugState('Debugging', 1);
+    bar.setDebugState('Debugging');
     debug[5].click();
     debug[6].click();
     expect(commands.slice(2)).toEqual(['Step', 'StepAll']);
@@ -176,7 +175,7 @@ describe('the debug controls', () => {
     const { bar, debug } = mount();
 
     expect(debug[6].title).toBe(strings.debugExec);
-    bar.setDebugState('First', 0);
+    bar.setDebugState('First');
     expect(debug[6].title).toBe(strings.debugStepAll);
     // The title is the button's accessible name: the icon inside it is
     // decorative, and there is no text.
@@ -185,25 +184,15 @@ describe('the debug controls', () => {
 
   it('sends Step Over as its own debug command', () => {
     const { bar, debug, commands } = mount();
-    bar.setDebugState('Debugging', 2);
+    bar.setDebugState('Debugging');
 
     expect(debug[4].title).toBe(strings.debugStepOver);
     debug[4].click();
     expect(commands).toEqual(['StepOver']);
   });
 
-  it('counts steps only while there are steps to count', () => {
-    const { bar, status } = mount();
-
-    expect(status.textContent).toBe(`${strings.debugStatus}: Stop`);
-    bar.setDebugState('Debugging', 12);
-    expect(status.textContent).toBe(`${strings.debugStatus}: Step 12`);
-    bar.setDebugState('EOF', 12);
-    expect(status.textContent).toBe(`${strings.debugStatus}: EOF`);
-  });
-
-  it('answers for every debug state', () => {
-    const { bar, status } = mount();
+  it('does not repeat the canvas debug status in the control bar', () => {
+    const { bar, parent } = mount();
     const states: DEBUG_STATE[] = [
       'Stop',
       'First',
@@ -213,9 +202,10 @@ describe('the debug controls', () => {
       'EOF',
     ];
     for (const state of states) {
-      bar.setDebugState(state, 1);
-      expect(status.textContent).not.toBe('');
+      bar.setDebugState(state);
     }
+    expect(parent.querySelector('.plivet-controls__status')).toBeNull();
+    expect(parent.textContent).not.toContain('DebugStatus');
   });
 });
 

@@ -26,7 +26,6 @@ const strings = {
   preprocessedTitle: 'Source after preprocessing',
   preprocessedHint:
     'Compare the written source with the preprocessing tokens left after macro replacement and conditional inclusion. This view is read-only.',
-  debugStatus: 'DebugStatus',
   debugToolbar: 'Debug toolbar',
   debuggerPanels: 'Debugger panels',
   breakpointsTitle: 'Breakpoints',
@@ -46,7 +45,6 @@ const strings = {
   remove: 'Remove',
   moveDebugToolbar:
     'Move debug toolbar. Use arrow keys to move it and Enter to reset it.',
-  step: 'Step',
   theme: 'theme',
   themeLight: 'Light theme',
   themeDark: 'Dark theme',
@@ -244,7 +242,7 @@ const strings = {
       items: [
         'Loading more than one source file adds tabs. The filled triangle marks the entry source file; choose a hollow triangle to select another. Save downloads the active tab as a C source file.',
         'Open can also restore a valid c-visualizer session supplied by an embedding page, including its source, cursor, breakpoints, and pinned values.',
-        'File Upload is for data files that the running C program accesses with functions such as fopen. Uploaded data files can be downloaded or removed and are separate from source files.',
+        'Program Files contains data files that the running C program accesses with functions such as fopen. Uploads and files created by the program can be downloaded or removed and are separate from source files. Close or flush an output stream before downloading it.',
       ],
     },
     {
@@ -272,8 +270,8 @@ const strings = {
       ],
     },
   ],
-  fileUpload: 'File Upload',
-  uploadFile: 'The uploaded file will be displayed here.',
+  fileUpload: 'Program Files',
+  uploadFile: 'Uploaded and program-created files will be displayed here.',
   downloadFile: 'download',
   removeFile: 'remove',
   consoleTitle: 'Standard streams',

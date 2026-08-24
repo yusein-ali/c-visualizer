@@ -196,22 +196,6 @@
 	font: inherit;
 }
 
-/*
- * The step counter. `aria-live` is what makes stepping audible: the number is
- * the only thing on the page that says a step happened at all.
- */
-.plivet-controls__status {
-	margin-left: auto;
-	color: inherit;
-}
-
-.plivet-controls__status--detached {
-	display: block;
-	margin: 0;
-	padding: 0.2rem 0.25rem;
-	font-size: 0.875rem;
-}
-
 /* The picker behind the Open button: reachable, and never drawn. */
 .plivet-controls__file {
 	display: none;

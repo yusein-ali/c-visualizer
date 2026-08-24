@@ -28,21 +28,37 @@ class InlineWorker {
   onerror: ((event: { message: string }) => void) | null = null;
   private readonly server = new Server();
   private stopped = false;
+  private fileVersion = 0;
+  private reportedFiles = new Map<string, ArrayBuffer>();
 
   constructor() {
-    this.server.onRunEvent = (event: RUN_EVENT, response: Response) =>
+    this.server.onRunEvent = (event: RUN_EVENT, response: Response) => {
+      this.reportFiles();
       this.send({ kind: 'run', event, response });
+    };
   }
 
   postMessage(message: ToWorker): void {
     if (message.kind === 'files') {
-      this.server.setFiles(message.files);
+      this.server.setFiles(
+        new Map(
+          Array.from(message.files, ([filename, contents]) => [
+            filename,
+            contents.slice(0),
+          ])
+        )
+      );
+      this.fileVersion = message.version;
+      this.reportedFiles = this.server.fileSnapshot();
       return;
     }
     const { id, request } = message;
     this.server
       .send(request)
-      .then((response) => this.send({ kind: 'response', id, response }))
+      .then((response) => {
+        this.reportFiles();
+        this.send({ kind: 'response', id, response });
+      })
       .catch((thrown: unknown) =>
         this.send({
           kind: 'failed',
@@ -63,6 +79,37 @@ class InlineWorker {
       return;
     }
     this.onmessage({ data: message } as MessageEvent<FromWorker>);
+  }
+
+  private reportFiles(): void {
+    const current = this.server.fileSnapshot();
+    const unchanged =
+      current.size === this.reportedFiles.size &&
+      Array.from(current).every(
+        ([filename, contents]) => this.reportedFiles.get(filename) === contents
+      );
+    if (unchanged) {
+      return;
+    }
+    this.reportedFiles = current;
+    this.send({
+      kind: 'files',
+      version: this.fileVersion,
+      files: new Map(
+        Array.from(current, ([filename, contents]) => {
+          const value = contents as ArrayBuffer | ArrayBufferView;
+          const bytes =
+            value instanceof ArrayBuffer
+              ? new Uint8Array(value)
+              : new Uint8Array(
+                  value.buffer,
+                  value.byteOffset,
+                  value.byteLength
+                );
+          return [filename, bytes.slice().buffer];
+        })
+      ),
+    });
   }
 }
 
@@ -101,6 +148,16 @@ int main(void) {
 }
 `;
 
+const FILE_PROGRAM = `#include <stdio.h>
+
+int main(void) {
+  FILE *output = fopen("result.txt", "w");
+  fputs("created by C\\n", output);
+  fclose(output);
+  return 0;
+}
+`;
+
 /**
  * The debug buttons, in the order `ControlBar` builds them. The arrow and the
  * double arrow are what a reader presses: with no session they carry `Start`
@@ -118,9 +175,6 @@ const buttonsOf = (parent: HTMLElement) =>
       '.plivet-controls__group--debug .plivet-controls__button'
     )
   );
-
-const statusOf = (parent: HTMLElement) =>
-  parent.querySelector('.plivet-controls__status')!.textContent;
 
 const outputOf = (parent: HTMLElement) =>
   parent.querySelector('.plivet-console-output')!.textContent;
@@ -194,18 +248,12 @@ describe('a PLIVET on a page', () => {
     shell.dispatchEvent(
       new KeyboardEvent('keydown', { bubbles: true, key: 'F6' })
     );
-    await until(
-      'F6 to start the session',
-      () => statusOf(parent) === 'DebugStatus: First'
-    );
+    await until('F6 to start the session', () => drawn.length === 1);
 
     shell.dispatchEvent(
       new KeyboardEvent('keydown', { bubbles: true, key: 'F7' })
     );
-    await until(
-      'F7 to step over',
-      () => statusOf(parent) === 'DebugStatus: Step 1'
-    );
+    await until('F7 to step over', () => drawn.length === 2);
   });
 
   it('runs or continues with F5', async () => {
@@ -214,16 +262,13 @@ describe('a PLIVET on a page', () => {
       new KeyboardEvent('keydown', { bubbles: true, key: 'F5' })
     );
 
-    await until(
-      'F5 to run to EOF',
-      () => statusOf(parent) === 'DebugStatus: EOF'
-    );
+    await until('F5 to run to EOF', () => outputOf(parent).includes('counted'));
     expect(outputOf(parent)).toContain('counted 42');
   });
 
   it('opens stopped, offering the two buttons that begin a session', () => {
     const buttons = buttonsOf(parent);
-    expect(statusOf(parent)).toBe('DebugStatus: Stop');
+    expect(parent.querySelector('.plivet-controls__status')).toBeNull();
     expect(buttons.map((button) => button.disabled)).toEqual([
       true,
       true,
@@ -239,15 +284,12 @@ describe('a PLIVET on a page', () => {
   it('steps once, and says so everywhere at once', async () => {
     const buttons = buttonsOf(parent);
     buttons[STEP].click();
-    await until(
-      'the session to start',
-      () => statusOf(parent) === 'DebugStatus: First'
-    );
+    await until('the session to start', () => drawn.length === 1);
 
     buttons[STEP].click();
-    await until('the step', () => statusOf(parent) === 'DebugStatus: Step 1');
+    await until('the step', () => drawn.length === 2);
 
-    // The counter, the canvas and the editor all answer the same step.
+    // The canvas and editor both answer the step without a duplicate strip.
     const model = drawn[drawn.length - 1];
     expect(model.variables.map((variable) => variable.name)).toContain('n');
     expect(model.codeRange).not.toBeNull();
@@ -259,28 +301,19 @@ describe('a PLIVET on a page', () => {
   it('updates the statement type as execution moves to a new construct', async () => {
     const buttons = buttonsOf(parent);
     buttons[STEP].click();
-    await until(
-      'the object declaration',
-      () => statusOf(parent) === 'DebugStatus: First'
-    );
+    await until('the object declaration', () => explained.length === 1);
     expect(explained[explained.length - 1].statement!.title).toBe(
       'object declaration'
     );
 
     buttons[STEP].click();
-    await until(
-      'the assignment',
-      () => statusOf(parent) === 'DebugStatus: Step 1'
-    );
+    await until('the assignment', () => explained.length === 2);
     expect(explained[explained.length - 1].statement!.title).toBe(
       'assignment expression'
     );
 
     buttons[STEP].click();
-    await until(
-      'the function call',
-      () => statusOf(parent) === 'DebugStatus: Step 2'
-    );
+    await until('the function call', () => explained.length === 3);
     expect(explained[explained.length - 1].statement!.title).toBe(
       'function call — printf'
     );
@@ -289,27 +322,44 @@ describe('a PLIVET on a page', () => {
   it('runs to the end of the program and prints what it printed', async () => {
     // One press: with no session the double arrow starts one and runs it.
     buttonsOf(parent)[RUN].click();
-    await until(
-      'the run to reach EOF',
-      () => statusOf(parent) === 'DebugStatus: EOF'
+    await until('the run to reach EOF', () =>
+      outputOf(parent).includes('counted 42')
     );
 
     expect(outputOf(parent)).toContain('counted 42');
   });
 
+  it('lists a file created by the program for download', async () => {
+    plivet.destroy();
+    parent.textContent = '';
+    plivet = new Plivet(parent, { sourceCode: FILE_PROGRAM });
+
+    buttonsOf(parent)[RUN].click();
+    await until(
+      'the file-producing run to reach EOF',
+      () => parent.querySelector('.plivet-files__name') !== null
+    );
+
+    expect(
+      Array.from(parent.querySelectorAll('.plivet-files__name')).map(
+        (name) => name.textContent
+      )
+    ).toEqual(['result.txt']);
+    expect(
+      parent.querySelector('.plivet-files__button')?.getAttribute('aria-label')
+    ).toBe('download result.txt');
+  });
+
   it('gives the document back when the session is stopped', async () => {
     const buttons = buttonsOf(parent);
     buttons[STEP].click();
-    await until(
-      'the session to start',
-      () => statusOf(parent) === 'DebugStatus: First'
-    );
+    await until('the session to start', () => drawn.length === 1);
     expect(buttons[RESTART].disabled).toBe(false);
 
     buttons[STOP].click();
     await until(
       'the session to stop',
-      () => statusOf(parent) === 'DebugStatus: Stop'
+      () => !parent.querySelector('.cm-editor')!.hasAttribute('read-only')
     );
 
     expect(parent.querySelector('.cm-editor')!.hasAttribute('read-only')).toBe(

@@ -17,7 +17,7 @@ export type IconName =
   | 'rewind'
   | 'stepBack'
   | 'stepOver'
-  | 'stepForward'
+  | 'stepInto'
   | 'run'
   | 'zoomOut'
   | 'zoomReset'
@@ -49,7 +49,13 @@ const paths: Record<IconName, string> = {
   // A curved arrow crossing a call without entering the frame beneath it.
   stepOver:
     'M2 8a6 6 0 0 1 10-4.5V1l3.5 3.5L12 8V5.4A4.5 4.5 0 0 0 3.5 8zM7 11a2 2 0 1 0 4 0 2 2 0 1 0-4 0z',
-  stepForward: 'M5 2.5v11L12.5 8z',
+  // Step into: an arrow driven down into the statement it enters, over the
+  // dot that marks the frame beneath - the mirror of the arc `stepOver`
+  // draws across that same dot. It was the plain right-pointing triangle,
+  // which is the picture `run` is built from twice over, so the button that
+  // takes one statement and the button that takes them all read as the same
+  // control at a glance.
+  stepInto: 'M7 1h2v4h-2zM4 5h8L8 9.5zM8 10.4a2 2 0 1 0 0 4 2 2 0 1 0 0-4z',
   run: 'M2 3v10l5.5-5zM8 3v10l5.5-5z',
   // The editor's text size: a magnifier with a minus, nothing, or a plus.
   zoomOut: `${RING}${HANDLE}M4 6h5v1H4z`,

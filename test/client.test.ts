@@ -134,6 +134,49 @@ describe('the interpreter client', () => {
     ).toBe(false);
   });
 
+  it('receives files created by its own Worker', () => {
+    const one = new InterpreterClient();
+    const other = new InterpreterClient();
+    const oneFiles: Map<string, ArrayBuffer>[] = [];
+    const otherFiles: Map<string, ArrayBuffer>[] = [];
+    one.onFilesChanged = (files) => oneFiles.push(new Map(files));
+    other.onFilesChanged = (files) => otherFiles.push(new Map(files));
+    void one.send(request);
+    void other.send(request);
+
+    FakeWorker.spawned[0].answer({
+      kind: 'files',
+      version: 0,
+      files: new Map([['result.txt', new Uint8Array([79, 75]).buffer]]),
+    });
+
+    expect(Array.from(oneFiles[0].keys())).toEqual(['result.txt']);
+    expect(Array.from(new Uint8Array(oneFiles[0].get('result.txt')!))).toEqual([
+      79, 75,
+    ]);
+    expect(otherFiles).toHaveLength(0);
+  });
+
+  it('rejects a runtime file update older than its latest upload', async () => {
+    const client = new InterpreterClient();
+    const changes: Map<string, ArrayBuffer>[] = [];
+    client.onFilesChanged = (files) => changes.push(new Map(files));
+    void client.send(request);
+    const upload = {
+      name: 'new-input.txt',
+      arrayBuffer: async () => new ArrayBuffer(1),
+    };
+    await client.upload([upload] as unknown as FileList);
+
+    FakeWorker.spawned[0].answer({
+      kind: 'files',
+      version: 0,
+      files: new Map([['stale-output.txt', new ArrayBuffer(1)]]),
+    });
+
+    expect(changes).toHaveLength(0);
+  });
+
   it('terminates its own Worker and leaves the other running', async () => {
     const one = new InterpreterClient();
     const other = new InterpreterClient();

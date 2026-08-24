@@ -60,7 +60,6 @@ describe('the shell', () => {
     for (const mount of [
       shell.controls,
       shell.editor,
-      shell.status,
       shell.debugger,
       shell.files,
       shell.main,
@@ -69,11 +68,12 @@ describe('the shell', () => {
     }
   });
 
-  it('places the debug status immediately below the editor', () => {
+  it('places the editor splitter directly below the editor', () => {
     const parent = parentOf();
     const shell = new PlivetShell(parent);
 
-    expect(shell.editor.nextElementSibling).toBe(shell.status);
+    expect(shell.editor.nextElementSibling).toBe(handlesOf(parent).editor);
+    expect(parent.querySelector('.plivet__status')).toBeNull();
   });
 
   it('carries the theme on the root, where the widgets inherit it', () => {

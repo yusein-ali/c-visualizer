@@ -11,8 +11,8 @@ import { IconName, iconFor } from './icons';
 
 /**
  * The debug controls: seven buttons, the two that open and save a program, the
- * three that size the editor's text, the theme switch, the button that opens
- * the instructions, and the step counter.
+ * three that size the editor's text, the theme switch, and the button that
+ * opens the instructions.
  *
  * It was `Menu`, `CtrlButtons`, `CtrlButton`, `ThemeButton` and
  * `HowToUseButton` - five React components holding, between them, one piece of
@@ -27,8 +27,6 @@ import { IconName, iconFor } from './icons';
 export type ZOOM_COMMAND = 'In' | 'Out' | 'Reset';
 
 export interface ControlBarOptions {
-  /** Optional mount for the status line when it belongs below the editor. */
-  statusParent?: HTMLElement;
   /** A debug command the user asked for. */
   onDebug?: (command: CONTROL_EVENT) => void;
   /** The editor's text size, which is what `zoom` has meant since Phase 8. */
@@ -69,7 +67,6 @@ export class ControlBar {
   private readonly buttons: DebugButton[] = [];
   private readonly debugToolbar: HTMLDivElement;
   private readonly dragHandle: HTMLButtonElement;
-  private readonly status: HTMLSpanElement;
   private readonly theme: HTMLSelectElement;
   private readonly fileInput: HTMLInputElement;
   /** The tab strip whose height keeps the toolbar below the file names. */
@@ -122,16 +119,6 @@ export class ControlBar {
     this.fileInput.setAttribute('aria-label', strings.openCode);
     this.fileInput.addEventListener('change', this.chosen);
 
-    this.status = document.createElement('span');
-    this.status.className = 'plivet-controls__status';
-    if (options.statusParent !== undefined) {
-      this.status.classList.add('plivet-controls__status--detached');
-    }
-    // The counter is the only thing on the page that says a step happened, so
-    // it is announced rather than merely displayed.
-    this.status.setAttribute('role', 'status');
-    this.status.setAttribute('aria-live', 'polite');
-
     this.theme = this.themeSwitch();
     this.dragHandle = this.toolbarHandle();
     this.debugToolbar = this.debugGroup();
@@ -149,21 +136,19 @@ export class ControlBar {
       this.divider(),
       help,
       this.divider(),
-      this.theme,
-      ...(options.statusParent === undefined ? [this.status] : [])
+      this.theme
     );
-    options.statusParent?.appendChild(this.status);
     parent.appendChild(this.root);
 
     this.setDark(options.dark === true);
-    this.setDebugState('Stop', 0);
+    this.setDebugState('Stop');
   }
 
   /**
-   * Which buttons work, what the two forward buttons mean, and what the step
-   * counter says. All three are a function of the debug state alone.
+   * Which buttons work and what the two forward buttons mean. Both are a
+   * function of the debug state alone; the canvas presents that state.
    */
-  setDebugState(debugState: DEBUG_STATE, step: number): void {
+  setDebugState(debugState: DEBUG_STATE): void {
     const enabled = enablementFor(debugState);
     for (const button of this.buttons) {
       if (button.slot === 'Step') {
@@ -175,9 +160,6 @@ export class ControlBar {
       button.element.title = stringFor(`debug${button.command}`);
       button.element.setAttribute('aria-label', button.element.title);
     }
-    const state =
-      debugState === 'Debugging' ? `${strings.step} ${step}` : debugState;
-    this.status.textContent = `${strings.debugStatus}: ${state}`;
   }
 
   setDark(dark: boolean): void {
@@ -199,7 +181,6 @@ export class ControlBar {
   destroy(): void {
     this.toolbarTabsObserver?.disconnect();
     this.fileInput.removeEventListener('change', this.chosen);
-    this.status.remove();
     this.root.remove();
   }
 
@@ -297,7 +278,7 @@ export class ControlBar {
       this.debugButton('BackAll', 'BackAll', 'rewind', 'move'),
       this.debugButton('StepBack', 'StepBack', 'stepBack', 'move'),
       this.debugButton('StepOver', 'StepOver', 'stepOver', 'move'),
-      this.debugButton('Step', 'Step', 'stepForward', 'move'),
+      this.debugButton('Step', 'Step', 'stepInto', 'move'),
       this.debugButton('StepAll', 'StepAll', 'run', 'move')
     );
     if (this.options.build === true) {
