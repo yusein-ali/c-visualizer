@@ -51,6 +51,7 @@ export {
 export type { EditableRegion } from './protected';
 export type { LineCoverage } from './coverage';
 export { excludedRegionFolding } from './folding';
+export { insertNewlineKeepingLineStart, newlineKeymap } from './newline';
 export { expansionListField } from './expansions';
 export {
   setWatchRecords,

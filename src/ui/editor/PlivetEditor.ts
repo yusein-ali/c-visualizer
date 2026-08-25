@@ -29,6 +29,7 @@ import { autocompletion, CompletionSource } from '@codemirror/autocomplete';
 import { cpp, cppLanguage } from '@codemirror/lang-cpp';
 import { DebugExtensions, DebugExtensionOptions } from './debugExtensions';
 import { excludedRegionFolding } from './folding';
+import { newlineKeymap } from './newline';
 import { unprotected } from './protected';
 import strings from '../../strings';
 import { ThemeControl } from './theme';
@@ -154,6 +155,9 @@ export class PlivetEditor {
       highlightActiveLine(),
       highlightActiveLineGutter(),
       history(),
+      // Enter, revealed so that the start of the new line stays on screen.
+      // It stands above `defaultKeymap`, whose own Enter it replaces.
+      newlineKeymap,
       // `defaultKeymap` carries `selectParentSyntax` on Mod-i, which is a
       // direct lesson in nesting: press it and the selection grows to the
       // expression, the statement, the block, the function.
