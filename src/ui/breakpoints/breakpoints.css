@@ -1,8 +1,14 @@
+/*
+ * The other panel of the debugger dock, and it grows the same way the console
+ * beside it does: `--plivet-breakpoints-max-height` is the host's word on how
+ * far, so a dock whose two tabs are set to one height does not jump when the
+ * reader switches between them. Unset, this is the 32vh it always was.
+ */
 .plivet-breakpoints {
 	--plivet-breakpoints-danger: var(--plivet-danger, var(--bs-danger, #b42318));
 	box-sizing: border-box;
 	min-height: 9rem;
-	max-height: 32vh;
+	max-height: var(--plivet-breakpoints-max-height, 32vh);
 	overflow: auto;
 	background: var(--plivet-surface, var(--bs-body-bg, #fff));
 	color: var(--plivet-ink, var(--bs-body-color, #222));

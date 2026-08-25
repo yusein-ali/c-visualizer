@@ -48,8 +48,15 @@
 	line-height: 1.4;
 }
 
+/*
+ * How much room the transcript may take is the host's to say, the way the
+ * editor's and the canvas' heights are: a page that mounts the console in the
+ * middle of its own content measures it against that content, not against the
+ * window. Unset - standalone, or embedded in a page that says nothing - these
+ * are the 18vh and the 32vh they have always been.
+ */
 .plivet-console[open] {
-	height: 18vh;
+	height: var(--plivet-console-height, 18vh);
 	overflow-y: auto;
 }
 
@@ -58,7 +65,7 @@
 	border: 0;
 	height: auto;
 	min-height: 9rem;
-	max-height: 32vh;
+	max-height: var(--plivet-console-max-height, 32vh);
 	overflow-y: auto;
 }
 

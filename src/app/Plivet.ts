@@ -99,6 +99,8 @@ export interface PlivetOptions {
   theme?: Theme;
   /** Optional capabilities. Source loading is the only one defaulting off. */
   features?: PlivetFeatures;
+  /** Whether to show the copyright and licence footer. Defaults to true. */
+  footer?: boolean;
   /**
    * What the canvas opens with drawn. The View panel still holds the switches,
    * so this is where the reader starts rather than what they are held to.
@@ -202,6 +204,7 @@ export class Plivet {
       fromYear: 2026,
       dark: isDark(this.theme),
       files: features.loadFile !== false,
+      footer: options.footer !== false,
       licenses: options.licenses,
     });
 
@@ -558,7 +561,8 @@ export class Plivet {
     this.onWindowClose?.(this.sourceSnapshot());
   };
 
-  private setTheme(theme: Theme): void {
+  /** Apply a theme selected by this instance or by its embedding host. */
+  setTheme(theme: Theme): void {
     this.theme = theme;
     this.shell.setDark(isDark(theme));
     this.controls.setDark(isDark(theme));

@@ -215,7 +215,7 @@ required scripts are loaded, so the host builds the instances from there:
 <script>
     CVisualizerReady.then((CVisualizer) => {
         document.querySelectorAll('.c-visualizer-block').forEach((element) => {
-            new CVisualizer(element, { theme: 'light' });
+            new CVisualizer(element, { theme: 'light', footer: false });
         });
     });
 </script>
@@ -289,6 +289,7 @@ virtual file system.
 | `entry`           | Which source file opens as the runnable entry. Headers are composed before it, followed by the remaining implementation files. Defaults to the first.                                                                                                                 |
 | `editableRegions` | `{ "from", "to" }` offsets the reader may type in. Everything outside them is fixed.                                                                                                                                                                                  |
 | `features`        | `preprocessor` shows preprocessed source; `loadSource` enables loading source/session files (off by default); `loadFile` controls the independent runtime data-file panel used by `fopen` (on by default).                                                            |
+| `footer`          | Whether to show the copyright and licence footer. Defaults to `true`; set it to `false` for an embedding that provides this information elsewhere.                                                                                                                    |
 | `support-build`   | Whether to construct the host-backed Build button. A programmatic host must also provide at least one `diagnosticProviders` callback; JSON cannot contain callbacks.                                                                                                  |
 | `licenses`        | Where the footer's third-party licence report is. The deployed bundle points at its own copy; a host that publishes one elsewhere names it here.                                                                                                                      |
 | `codeMirror`      | How the editor itself is built: `indent_unit`, `indent_with_tabs`, `electric_chars`, `match_brackets`, `line_numbers`, `autocomplete`, `font_size`, `light_theme`, `dark_theme`. A host that has editors of its own hands over the configuration it built those with. |
@@ -318,6 +319,30 @@ starts rather than what they are held to. A field written wrongly - a
 misspelled theme, a string where a boolean belongs - is dropped with a console
 warning and the rest of the configuration still applies, so one typo in a
 course page cannot leave a reader with a blank pane.
+
+#### Every option in one file
+
+[`visualizer.reference.json`](./visualizer.reference.json) is the table above
+written as a configuration: every key the parser reads, in one object. Each
+preference carries the value it has when nobody sets it - `theme` light,
+`loadSource` off, `loadFile` and `preprocessor` on, `footer` on, every view and
+every memory region visible - so a host that would rather delete the lines it
+does not want than assemble the ones it does starts from that file. It is also
+the list to check a configuration against when a setting appears to be ignored:
+a key that is not there is a key nothing reads, whatever it was meant to say.
+
+The rest of the file describes a program and a host rather than a preference,
+and is there to be replaced or removed rather than kept. `sourceCode`, `files`,
+`entry` and `editableRegions` hold a one-line `main.c` and an editable span the
+length of it, so a page that replaces the program but keeps the offsets locks
+the reader out of everything past the twenty-eighth character of it. `licenses`
+and `support-build` are the answers this repository's own deployment gives; a
+host that publishes no licence report, or that has no compiler behind Build,
+says something else. `codeMirror` is a filled-in example of the shape rather
+than a default - the editor left alone indents by two, not by the four written
+there - because the point of the field is that a host hands over the settings
+its own editors were built with.
+
 
 ### Host-managed build, diagnostics, and saving
 
@@ -377,7 +402,9 @@ file, `onSourcesChanged(callback)` subscribes to changes, and
 `updateFiles(files, entry)` replaces the editor's complete source set. A popup
 or other independently closing visualizer can pass `onWindowClose(snapshot)`
 to synchronously receive its final source during the window's `pagehide`
-lifecycle. The callbacks and provider registry belong to each visualizer
+lifecycle. An embedding page can keep an open instance aligned with its own
+appearance by calling `setTheme('light')` or `setTheme('dark')` when the host
+theme changes. The callbacks and provider registry belong to each visualizer
 instance, so two blocks on one page remain independent.
 
 During browser execution, all named source files are concatenated into one

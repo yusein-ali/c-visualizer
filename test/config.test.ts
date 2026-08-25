@@ -135,6 +135,12 @@ describe('what a configuration may say', () => {
     });
   });
 
+  it('configures whether the footer is shown', () => {
+    expect(parseConfig('{"footer": false}')).toEqual({ footer: false });
+    expect(parseConfig('{"footer": "no"}')).toEqual({});
+    expect(warnings).toHaveLength(1);
+  });
+
   it('opts into the host-backed Build button with its deployed key', () => {
     expect(parseConfig('{"support-build": true}')).toEqual({
       supportBuild: true,
@@ -275,6 +281,15 @@ describe('what the configuration decides', () => {
         `[aria-label="${strings.openCode}"]`
       )?.disabled
     ).toBe(true);
+
+    plivet.destroy();
+  });
+
+  it('leaves the footer out when the constructor disables it', () => {
+    const parent = parentOf();
+    const plivet = new Plivet(parent, { footer: false });
+
+    expect(parent.querySelector('.plivet__footer')).toBeNull();
 
     plivet.destroy();
   });

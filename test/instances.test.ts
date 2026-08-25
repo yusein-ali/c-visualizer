@@ -128,6 +128,25 @@ describe('two instances on one page', () => {
     b.destroy();
   });
 
+  it('accept a theme change from their embedding host', () => {
+    const parent = parentOf();
+    const plivet = new Plivet(parent);
+
+    plivet.setTheme('dark');
+
+    expect(isDark(parent)).toBe(true);
+    expect(parent.querySelector('.plivet-graph--dark')).not.toBeNull();
+    expect(themeSwitchOf(parent).value).toBe('dark');
+
+    plivet.setTheme('light');
+
+    expect(isDark(parent)).toBe(false);
+    expect(parent.querySelector('.plivet-graph--dark')).toBeNull();
+    expect(themeSwitchOf(parent).value).toBe('light');
+
+    plivet.destroy();
+  });
+
   it('leave the other one standing when destroyed', () => {
     const first = parentOf();
     const second = parentOf();

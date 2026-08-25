@@ -44,6 +44,8 @@ export interface PlivetShellOptions {
    * room back. Default: it is there.
    */
   files?: boolean;
+  /** Whether to append the copyright and licence footer. Default: true. */
+  footer?: boolean;
 }
 
 const REPOSITORY = 'https://github.com/yusein-ali/c-visualizer';
@@ -147,7 +149,7 @@ export class PlivetShell {
       this.side,
       columnSplit.element,
       column,
-      this.footer(options)
+      ...(options.footer === false ? [] : [this.footer(options)])
     );
     parent.appendChild(this.root);
 

@@ -1,0 +1,54 @@
+{
+  "theme": "light",
+  "sourceCode": "int main(void) { return 0; }",
+  "files": [
+    {
+      "path": "main.c",
+      "text": "int main(void) { return 0; }"
+    }
+  ],
+  "entry": "main.c",
+  "editableRegions": [
+    {
+      "from": 0,
+      "to": 28
+    }
+  ],
+  "support-build": true,
+  "footer": true,
+  "licenses": "./licenses.html",
+  "features": {
+    "preprocessor": true,
+    "loadSource": false,
+    "loadFile": true
+  },
+  "views": {
+    "diagnostics": true,
+    "statement": true,
+    "callStack": true,
+    "expression": true,
+    "variables": true,
+    "memory": true,
+    "mutations": true,
+    "regions": {
+      "text": true,
+      "readOnly": true,
+      "data": true,
+      "bss": true,
+      "heap": true,
+      "stack": true,
+      "registers": true
+    }
+  },
+  "codeMirror": {
+    "light_theme": "default",
+    "dark_theme": "one-dark",
+    "indent_unit": 4,
+    "indent_with_tabs": false,
+    "electric_chars": true,
+    "match_brackets": true,
+    "line_numbers": true,
+    "autocomplete": true,
+    "font_size": 14
+  }
+}

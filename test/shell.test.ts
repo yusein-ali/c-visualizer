@@ -94,6 +94,13 @@ describe('the shell', () => {
     expect(footer.textContent).toContain('c-visualizer v1.0.0');
     expect(footer.textContent).toContain(`2018 - ${thisYear}`);
   });
+
+  it('leaves the footer out when the embedding disables it', () => {
+    const parent = parentOf();
+    new PlivetShell(parent, { footer: false });
+
+    expect(parent.querySelector('.plivet__footer')).toBeNull();
+  });
 });
 
 describe('the instructions', () => {

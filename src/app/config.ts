@@ -318,6 +318,7 @@ export function parseConfig(text: string): PlivetOptions {
   const files = filesOf(parsed.files);
   const editableRegions = regionsOf(parsed.editableRegions);
   const features = featuresOf(parsed.features);
+  const footer = boolean(parsed.footer, 'footer');
   const licenses = string(parsed.licenses, 'licenses');
   const codeMirror = codeMirrorOf(
     parsed.codeMirror ?? parsed.codemirror ?? parsed.codemirror_config
@@ -344,6 +345,9 @@ export function parseConfig(text: string): PlivetOptions {
   }
   if (typeof features !== 'undefined') {
     options.features = features;
+  }
+  if (typeof footer !== 'undefined') {
+    options.footer = footer;
   }
   if (typeof codeMirror !== 'undefined') {
     options.codeMirror = codeMirror;
