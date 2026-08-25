@@ -1,4 +1,7 @@
 import type { SourceFile } from '../core';
+import type { CodeMirrorThemeName } from '../ui/editor/theme';
+
+export type { CodeMirrorThemeName } from '../ui/editor/theme';
 
 /**
  * One immutable view of the program a host can compile, save or submit.
@@ -88,6 +91,12 @@ export interface CodeMirrorConfig {
   /** The text size the editor opens at, in pixels. */
   fontSize?: number;
   font_size?: number;
+  /** Named theme used while the application is in light mode. */
+  lightTheme?: CodeMirrorThemeName;
+  light_theme?: CodeMirrorThemeName;
+  /** Named theme used while the application is in dark mode. */
+  darkTheme?: CodeMirrorThemeName;
+  dark_theme?: CodeMirrorThemeName;
   /** Whatever else the page's configuration carries, which is not read here. */
   [setting: string]: unknown;
 }
@@ -101,6 +110,8 @@ export interface CodeMirrorSettings {
   lineNumbers?: boolean;
   autocomplete?: boolean;
   fontSize?: number;
+  lightTheme?: CodeMirrorThemeName;
+  darkTheme?: CodeMirrorThemeName;
 }
 
 /**
@@ -131,6 +142,12 @@ export const codeMirrorCount = (value: unknown): number | undefined => {
   return count;
 };
 
+/** A serializable theme name understood by both course editors. */
+export const codeMirrorTheme = (
+  value: unknown
+): CodeMirrorThemeName | undefined =>
+  value === 'default' || value === 'one-dark' ? value : undefined;
+
 /**
  * What the editor is built with, out of what the host wrote.
  *
@@ -145,6 +162,8 @@ export const codeMirrorSettings = (
   const settings: CodeMirrorSettings = {};
   const indentUnit = codeMirrorCount(config.indentUnit ?? config.indent_unit);
   const fontSize = codeMirrorCount(config.fontSize ?? config.font_size);
+  const lightTheme = codeMirrorTheme(config.lightTheme ?? config.light_theme);
+  const darkTheme = codeMirrorTheme(config.darkTheme ?? config.dark_theme);
   const flags = {
     indentWithTabs: config.indentWithTabs ?? config.indent_with_tabs,
     electricChars: config.electricChars ?? config.electric_chars,
@@ -157,6 +176,12 @@ export const codeMirrorSettings = (
   }
   if (typeof fontSize !== 'undefined') {
     settings.fontSize = fontSize;
+  }
+  if (typeof lightTheme !== 'undefined') {
+    settings.lightTheme = lightTheme;
+  }
+  if (typeof darkTheme !== 'undefined') {
+    settings.darkTheme = darkTheme;
   }
   for (const [name, written] of Object.entries(flags)) {
     const flag = codeMirrorFlag(written);

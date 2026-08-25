@@ -130,6 +130,9 @@ describe('what a configuration may say', () => {
     expect(parseConfig('{"features": {"loadFile": false}}')).toEqual({
       features: { loadFile: false },
     });
+    expect(parseConfig('{"features": {"loadSource": true}}')).toEqual({
+      features: { loadSource: true },
+    });
   });
 
   it('opts into the host-backed Build button with its deployed key', () => {
@@ -247,10 +250,17 @@ describe('what the configuration decides', () => {
 
   it('opens without the upload panel, and without the room it took', () => {
     const parent = parentOf();
-    const plivet = new Plivet(parent, { features: { loadFile: false } });
+    const plivet = new Plivet(parent, {
+      features: { loadFile: false, loadSource: true },
+    });
 
     expect(parent.querySelector('.plivet-files')).toBeNull();
     expect(parent.querySelector('.plivet__files')).toBeNull();
+    expect(
+      parent.querySelector<HTMLButtonElement>(
+        `[aria-label="${strings.openCode}"]`
+      )?.disabled
+    ).toBe(false);
 
     plivet.destroy();
   });
@@ -259,6 +269,28 @@ describe('what the configuration decides', () => {
     const parent = parentOf();
     const plivet = new Plivet(parent);
 
+    expect(parent.querySelector('.plivet-files')).not.toBeNull();
+    expect(
+      parent.querySelector<HTMLButtonElement>(
+        `[aria-label="${strings.openCode}"]`
+      )?.disabled
+    ).toBe(true);
+
+    plivet.destroy();
+  });
+
+  it('enables source loading independently of the data-file panel', () => {
+    const parent = parentOf();
+    const plivet = new Plivet(parent, {
+      files: [{ path: 'main.c', text: 'int main(void) { return 0; }' }],
+      features: { loadSource: true },
+    });
+
+    expect(
+      parent.querySelector<HTMLButtonElement>(
+        `[aria-label="${strings.openCode}"]`
+      )?.disabled
+    ).toBe(false);
     expect(parent.querySelector('.plivet-files')).not.toBeNull();
 
     plivet.destroy();
@@ -295,6 +327,8 @@ describe('the CodeMirror configuration a host hands over', () => {
             line_numbers: false,
             autocomplete: false,
             font_size: 16,
+            light_theme: 'default',
+            dark_theme: 'one-dark',
           },
         })
       )
@@ -307,6 +341,8 @@ describe('the CodeMirror configuration a host hands over', () => {
         lineNumbers: false,
         autocomplete: false,
         fontSize: 16,
+        lightTheme: 'default',
+        darkTheme: 'one-dark',
       },
     });
     expect(warnings).toEqual([]);
@@ -343,13 +379,14 @@ describe('the CodeMirror configuration a host hands over', () => {
           indent_unit: 'four',
           font_size: 0,
           line_numbers: 'sometimes',
+          light_theme: 'solarized',
           match_brackets: true,
         },
       })
     );
 
     expect(options).toEqual({ codeMirror: { matchBrackets: true } });
-    expect(warnings).toHaveLength(3);
+    expect(warnings).toHaveLength(4);
   });
 
   it('refuses a configuration that is not an object', () => {
@@ -364,10 +401,17 @@ describe('the CodeMirror configuration a host hands over', () => {
       codeMirrorSettings(
         JSON.parse(
           '{"indent_unit": "4", "indent_with_tabs": "false",' +
-            ' "line_numbers": "true"}'
+            ' "line_numbers": "true", "light_theme": "default",' +
+            ' "dark_theme": "one-dark"}'
         )
       )
-    ).toEqual({ indentUnit: 4, indentWithTabs: false, lineNumbers: true });
+    ).toEqual({
+      indentUnit: 4,
+      indentWithTabs: false,
+      lineNumbers: true,
+      lightTheme: 'default',
+      darkTheme: 'one-dark',
+    });
   });
 
   it('leaves out what a host did not name, or named as nothing it can be', () => {

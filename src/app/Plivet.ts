@@ -47,17 +47,19 @@ import type {
 } from './host';
 
 /**
- * The parts of PLIVET a page may switch off before it opens.
+ * The optional parts of PLIVET a page chooses before it opens.
  *
  * They are features rather than view options because they are not about what
  * the canvas draws: each one is a whole capability - a dialog, a panel - that
- * a course page either wants in front of a reader or does not. A field left
- * out is on, so the standalone page, which passes none of these, is PLIVET
- * entire.
+ * a course page either wants in front of a reader or does not. Preprocessor
+ * and runtime data-file loading default on; replacing source through Load
+ * defaults off and must be enabled explicitly.
  */
 export interface PlivetFeatures {
   /** The button that shows the text the compiler sees after the preprocessor. */
   preprocessor?: boolean;
+  /** Allow Load to replace the editor with a source file or saved session. */
+  loadSource?: boolean;
   /**
    * The upload panel under the console: the data files a running program can
    * `fopen`. A page whose exercises read no files leaves it out.
@@ -95,7 +97,7 @@ export interface PlivetOptions {
   entry?: string;
   /** Which theme to open in. The switch in the control bar changes it after. */
   theme?: Theme;
-  /** What the page has switched off. Everything not named here is on. */
+  /** Optional capabilities. Source loading is the only one defaulting off. */
   features?: PlivetFeatures;
   /**
    * What the canvas opens with drawn. The View panel still holds the switches,
@@ -211,6 +213,7 @@ export class Plivet {
       onPreprocessed: () => void this.showPreprocessed(),
       onOpenFile: (file: File) => void this.openFile(file),
       onSaveCode: () => this.saveCode(),
+      load: features.loadSource === true,
       onBuild:
         options.supportBuild === true
           ? () => {

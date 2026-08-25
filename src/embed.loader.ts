@@ -30,9 +30,14 @@ const hasCodeMirror = (): boolean => {
   return (
     typeof found === 'object' &&
     found !== null &&
-    ['autocomplete', 'commands', 'language', 'state', 'view'].every(
-      (name) => typeof found[name] === 'object' && found[name] !== null
-    )
+    [
+      'autocomplete',
+      'commands',
+      'highlight',
+      'language',
+      'state',
+      'view',
+    ].every((name) => typeof found[name] === 'object' && found[name] !== null)
   );
 };
 

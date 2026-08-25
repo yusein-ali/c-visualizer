@@ -29,6 +29,7 @@ describe('opening a program', () => {
     const { host } = mounted();
     const opened: File[] = [];
     const bar = new ControlBar(host, {
+      load: true,
       onOpenFile: (file) => opened.push(file),
     });
     const input = bar.root.querySelector<HTMLInputElement>(
@@ -51,7 +52,7 @@ describe('opening a program', () => {
 
   it('opens the picker from a button of the bar’s own shape', () => {
     const { host } = mounted();
-    const bar = new ControlBar(host, {});
+    const bar = new ControlBar(host, { load: true });
     const input = bar.root.querySelector<HTMLInputElement>(
       '.plivet-controls__file'
     )!;
@@ -65,10 +66,41 @@ describe('opening a program', () => {
     host.remove();
   });
 
+  it('keeps Load dormant by default', () => {
+    const { host } = mounted();
+    const opened: File[] = [];
+    const bar = new ControlBar(host, {
+      onOpenFile: (file) => opened.push(file),
+    });
+    const input = bar.root.querySelector<HTMLInputElement>(
+      '.plivet-controls__file'
+    )!;
+    const load = buttonNamed(bar.root, strings.openCode);
+    let clicked = 0;
+    input.click = () => {
+      clicked += 1;
+    };
+
+    expect(load.disabled).toBe(true);
+    expect(input.disabled).toBe(true);
+    load.click();
+    Object.defineProperty(input, 'files', {
+      value: [new File(['int main(){}'], 'replacement.c')],
+      writable: true,
+    });
+    input.dispatchEvent(new Event('change'));
+    expect(clicked).toBe(0);
+    expect(opened).toEqual([]);
+
+    bar.destroy();
+    host.remove();
+  });
+
   it('says nothing when the picker was dismissed', () => {
     const { host } = mounted();
     const opened: File[] = [];
     const bar = new ControlBar(host, {
+      load: true,
       onOpenFile: (file) => opened.push(file),
     });
     const input = bar.root.querySelector<HTMLInputElement>(

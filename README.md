@@ -189,9 +189,9 @@ element for c-visualizer to mount into:
 against the standalone page keep working.
 
 The loader checks `window.CodeMirror` first. A host may provide compatible
-`autocomplete`, `commands`, `language`, `state`, and `view` module namespaces;
-PLIVET then constructs its own editor from those modules and does not download
-`codemirror-fallback.js`. It does not expect the host to construct an editor.
+`autocomplete`, `commands`, `highlight`, `language`, `state`, and `view` module
+namespaces; PLIVET then constructs its own editor from those modules and does
+not download `codemirror-fallback.js`. It does not expect the host to construct an editor.
 Where those namespaces are absent, the loader fetches the bundled fallback.
 
 The loader, application, and fallback have fixed names because the loader
@@ -244,6 +244,11 @@ new CVisualizer(document.getElementById('root'), { theme: 'dark' });
 The public `CVisualizer` and `CVisualizerOptions` exports are aliases of the
 existing `Plivet` and `PlivetOptions` API.
 
+Source loading and runtime data-file loading are separate features.
+`features.loadSource` enables the toolbar Load action and defaults to `false`;
+`features.loadFile` controls the data-file panel used by programs calling
+`fopen` and defaults to `true`.
+
 ### Configuring the standalone page
 
 A page that only includes the bundle - a course page, a Moodle block, anything
@@ -257,7 +262,11 @@ builds anything:
     id="c-visualizer-config"
     config='{
     "theme": "dark",
-    "features": { "preprocessor": false, "loadFile": false },
+    "features": {
+      "preprocessor": false,
+      "loadSource": true,
+      "loadFile": false
+    },
     "views": { "expression": false, "regions": { "registers": false } }
   }'
 ></div>
@@ -272,18 +281,18 @@ tour as three tabs: `main.c`, `tour.h`, and `tour.c`. It pauses for one integer
 through `scanf`, then writes and reads `c-visualizer.txt` in the browser-side
 virtual file system.
 
-| Field             | What it says                                                                                                                                                                                                                                           |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `theme`           | `"light"` or `"dark"`. The switch in the control bar still changes it afterwards.                                                                                                                                                                      |
-| `sourceCode`      | The program the editor opens with.                                                                                                                                                                                                                     |
-| `files`           | `{ "path", "text" }` objects, drawn as tabs over the editor.                                                                                                                                                                                           |
-| `entry`           | Which source file opens as the runnable entry. Headers are composed before it, followed by the remaining implementation files. Defaults to the first.                                                                                                  |
-| `editableRegions` | `{ "from", "to" }` offsets the reader may type in. Everything outside them is fixed.                                                                                                                                                                   |
-| `features`        | `preprocessor` - the button showing the preprocessed source; `loadFile` - the upload panel of data files a program can `fopen`.                                                                                                                        |
-| `support-build`   | Whether to construct the host-backed Build button. A programmatic host must also provide at least one `diagnosticProviders` callback; JSON cannot contain callbacks.                                                                                   |
-| `licenses`        | Where the footer's third-party licence report is. The deployed bundle points at its own copy; a host that publishes one elsewhere names it here.                                                                                                       |
-| `codeMirror`      | How the editor itself is built: `indent_unit`, `indent_with_tabs`, `electric_chars`, `match_brackets`, `line_numbers`, `autocomplete`, `font_size`. A host that has editors of its own hands over the configuration it built those with.               |
-| `views`           | Which canvas sections start visible: `diagnostics`, `statement`, `callStack`, `expression`, `variables`, `memory`, `mutations`, and `regions` for each implementation-memory region (`text`, `readOnly`, `data`, `bss`, `heap`, `stack`, `registers`). |
+| Field             | What it says                                                                                                                                                                                                                                                          |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `theme`           | `"light"` or `"dark"`. The switch in the control bar still changes it afterwards.                                                                                                                                                                                     |
+| `sourceCode`      | The program the editor opens with.                                                                                                                                                                                                                                    |
+| `files`           | `{ "path", "text" }` objects, drawn as tabs over the editor.                                                                                                                                                                                                          |
+| `entry`           | Which source file opens as the runnable entry. Headers are composed before it, followed by the remaining implementation files. Defaults to the first.                                                                                                                 |
+| `editableRegions` | `{ "from", "to" }` offsets the reader may type in. Everything outside them is fixed.                                                                                                                                                                                  |
+| `features`        | `preprocessor` shows preprocessed source; `loadSource` enables loading source/session files (off by default); `loadFile` controls the independent runtime data-file panel used by `fopen` (on by default).                                                            |
+| `support-build`   | Whether to construct the host-backed Build button. A programmatic host must also provide at least one `diagnosticProviders` callback; JSON cannot contain callbacks.                                                                                                  |
+| `licenses`        | Where the footer's third-party licence report is. The deployed bundle points at its own copy; a host that publishes one elsewhere names it here.                                                                                                                      |
+| `codeMirror`      | How the editor itself is built: `indent_unit`, `indent_with_tabs`, `electric_chars`, `match_brackets`, `line_numbers`, `autocomplete`, `font_size`, `light_theme`, `dark_theme`. A host that has editors of its own hands over the configuration it built those with. |
+| `views`           | Which canvas sections start visible: `diagnostics`, `statement`, `callStack`, `expression`, `variables`, `memory`, `mutations`, and `regions` for each implementation-memory region (`text`, `readOnly`, `data`, `bss`, `heap`, `stack`, `registers`).                |
 
 `codeMirror` is the one field written for a host that already has editors on
 the page. A course chapter holds a block's editors and the window this opens
@@ -298,7 +307,10 @@ the `language_configs` of a page with editors in several languages, is ignored
 in silence rather than warned about: what arrives is a page's whole
 configuration, and most of it was never about this editor. The configuration
 may also be written under the `codemirror` or `codemirror_config` key it has on
-the page it came from.
+the page it came from. `light_theme` and `dark_theme` are the serializable
+names `default` and `one-dark`. Both the host editor and c-visualizer resolve
+those names locally, which keeps their syntax palette consistent without
+putting CodeMirror extension objects into course JSON.
 
 Everything is optional, and a feature or a view left out is on. The View panel
 over the canvas still holds every switch, so `views` says where a reader

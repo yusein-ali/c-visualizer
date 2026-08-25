@@ -35,6 +35,7 @@ export type { SourceFile } from './core';
 export type {
   CodeMirrorConfig,
   CodeMirrorSettings,
+  CodeMirrorThemeName,
   DiagnosticOptions,
   DiagnosticProvider,
   ExternalDiagnostic,

@@ -4,6 +4,9 @@ import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { oneDarkHighlightStyle } from '@codemirror/theme-one-dark';
 import { tags } from '@lezer/highlight';
 
+/** A serializable CodeMirror colour theme bundled by both course editors. */
+export type CodeMirrorThemeName = 'default' | 'one-dark';
+
 /**
  * Colours are named through CSS custom properties rather than written into the
  * theme, and the fallback chain is deliberate:
@@ -27,32 +30,50 @@ interface Palette {
   color: string;
   bg: string;
   border: string;
+  caret: string;
+  focusBorder: string;
   gutterBg: string;
   gutterColor: string;
   selectionBg: string;
   activeLineBg: string;
+  matchingBg: string;
+  matchingBorder: string;
+  nonmatchingBg: string;
+  nonmatchingBorder: string;
 }
 
 const lightPalette: Palette = {
   color: '#212529',
   bg: '#ffffff',
   border: '#e3e3e3',
+  caret: 'currentColor',
+  focusBorder: '#86b7fe',
   gutterBg: '#f8f9fa',
   gutterColor: '#6c757d',
   selectionBg: 'rgba(13, 110, 253, 0.25)',
   activeLineBg: 'rgba(0, 0, 0, 0.04)',
+  matchingBg: 'rgba(50, 140, 130, 0.24)',
+  matchingBorder: 'rgba(50, 140, 130, 0.45)',
+  nonmatchingBg: 'rgba(187, 85, 85, 0.24)',
+  nonmatchingBorder: 'rgba(187, 85, 85, 0.45)',
 };
 
-// The console's dark literals, so the two boxes match when nothing else has an
-// opinion about either.
+// The same literals as interactive-code's dark editor, including in a popup
+// where no surrounding course element supplies custom properties.
 const darkPalette: Palette = {
-  color: '#f8f8f2',
-  bg: '#272822',
-  border: '#3e3d32',
-  gutterBg: '#2f3129',
-  gutterColor: '#90908a',
-  selectionBg: 'rgba(13, 110, 253, 0.45)',
+  color: '#dee2e6',
+  bg: '#1f2327',
+  border: '#495057',
+  caret: '#ffffff',
+  focusBorder: '#6ea8fe',
+  gutterBg: '#252a2f',
+  gutterColor: '#adb5bd',
+  selectionBg: 'rgba(110, 168, 254, 0.35)',
   activeLineBg: 'rgba(255, 255, 255, 0.06)',
+  matchingBg: 'rgba(117, 183, 152, 0.28)',
+  matchingBorder: 'rgba(117, 183, 152, 0.55)',
+  nonmatchingBg: 'rgba(234, 134, 143, 0.28)',
+  nonmatchingBorder: 'rgba(234, 134, 143, 0.55)',
 };
 
 const colour = (name: string, bootstrap: string, fallback: string) =>
@@ -68,20 +89,20 @@ const chromeFor = (palette: Palette) => ({
     border: `1px solid ${colour('border', 'border-color', palette.border)}`,
   },
   '&.cm-focused': {
-    outline: `1px solid ${plain('focus-border', '#86b7fe')}`,
+    outline: `1px solid ${plain('focus-border', palette.focusBorder)}`,
   },
   '.cm-scroller': {
     fontFamily:
       'var(--plivet-editor-font, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace)',
   },
   '.cm-content': {
-    caretColor: colour('caret', 'body-color', palette.color),
+    caretColor: plain('caret', palette.caret),
   },
   '.cm-cursor, .cm-dropCursor': {
-    borderLeftColor: colour('caret', 'body-color', palette.color),
+    borderLeftColor: plain('caret', palette.caret),
   },
   '&.cm-focused .cm-cursor': {
-    borderLeftColor: colour('caret', 'body-color', palette.color),
+    borderLeftColor: plain('caret', palette.caret),
   },
   '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection':
     {
@@ -100,27 +121,19 @@ const chromeFor = (palette: Palette) => ({
     color: colour('color', 'body-color', palette.color),
   },
   '.cm-matchingBracket': {
-    backgroundColor: plain('matching-bg', 'rgba(50, 140, 130, 0.24)'),
-    outline: `1px solid ${plain(
-      'matching-border',
-      'rgba(50, 140, 130, 0.45)'
-    )}`,
+    backgroundColor: plain('matching-bg', palette.matchingBg),
+    outline: `1px solid ${plain('matching-border', palette.matchingBorder)}`,
   },
   '.cm-nonmatchingBracket': {
-    backgroundColor: plain('nonmatching-bg', 'rgba(187, 85, 85, 0.24)'),
+    backgroundColor: plain('nonmatching-bg', palette.nonmatchingBg),
     outline: `1px solid ${plain(
       'nonmatching-border',
-      'rgba(187, 85, 85, 0.45)'
+      palette.nonmatchingBorder
     )}`,
   },
 });
 
-/**
- * The frame and the tokens change together. The generic CodeMirror light
- * style leaves ordinary names, function calls and operators unstyled, which
- * makes C lose most of its structure. Keep a complete light palette here and
- * use One Dark's equally complete palette on the dark background.
- */
+/** The course's default light syntax palette. */
 const lightHighlightStyle = HighlightStyle.define([
   { tag: tags.meta, color: '#6a737d' },
   {
@@ -158,14 +171,10 @@ const lightHighlightStyle = HighlightStyle.define([
   { tag: tags.invalid, color: '#cd3131', textDecoration: 'underline wavy' },
 ]);
 
-const light: Extension = [
-  EditorView.theme(chromeFor(lightPalette), { dark: false }),
-  syntaxHighlighting(lightHighlightStyle),
-];
-const dark: Extension = [
-  EditorView.theme(chromeFor(darkPalette), { dark: true }),
-  syntaxHighlighting(oneDarkHighlightStyle),
-];
+const highlightTheme = (name: CodeMirrorThemeName): Extension =>
+  syntaxHighlighting(
+    name === 'one-dark' ? oneDarkHighlightStyle : lightHighlightStyle
+  );
 
 /**
  * The theme is reconfigured rather than rebuilt, because a course page can
@@ -176,16 +185,30 @@ export class ThemeControl {
   private readonly compartment = new Compartment();
   private readonly fontCompartment = new Compartment();
 
+  constructor(
+    private readonly lightTheme: CodeMirrorThemeName = 'default',
+    private readonly darkTheme: CodeMirrorThemeName = 'one-dark'
+  ) {}
+
+  private style(isDark: boolean): Extension {
+    return [
+      EditorView.theme(chromeFor(isDark ? darkPalette : lightPalette), {
+        dark: isDark,
+      }),
+      highlightTheme(isDark ? this.darkTheme : this.lightTheme),
+    ];
+  }
+
   extension(isDark: boolean, fontSize: number): Extension {
     return [
-      this.compartment.of(isDark ? dark : light),
+      this.compartment.of(this.style(isDark)),
       this.fontCompartment.of(ThemeControl.fontTheme(fontSize)),
     ];
   }
 
   setDark(view: EditorView, isDark: boolean): void {
     view.dispatch({
-      effects: this.compartment.reconfigure(isDark ? dark : light),
+      effects: this.compartment.reconfigure(this.style(isDark)),
     });
   }
 

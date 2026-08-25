@@ -125,6 +125,7 @@ const application = deployed(
       '@codemirror/language': ['CodeMirror', 'language'],
       '@codemirror/state': ['CodeMirror', 'state'],
       '@codemirror/view': ['CodeMirror', 'view'],
+      '@lezer/highlight': ['CodeMirror', 'highlight'],
     },
   }
 );

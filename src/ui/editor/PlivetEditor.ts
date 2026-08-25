@@ -32,7 +32,7 @@ import { excludedRegionFolding } from './folding';
 import { newlineKeymap } from './newline';
 import { unprotected } from './protected';
 import strings from '../../strings';
-import { ThemeControl } from './theme';
+import { CodeMirrorThemeName, ThemeControl } from './theme';
 
 /**
  * The editor PLIVET builds when it owns the page.
@@ -57,6 +57,10 @@ export interface PlivetEditorOptions extends DebugExtensionOptions {
   onChange?: (code: string) => void;
   dark?: boolean;
   fontSize?: number;
+  /** Named syntax theme used while the application is in light mode. */
+  lightTheme?: CodeMirrorThemeName;
+  /** Named syntax theme used while the application is in dark mode. */
+  darkTheme?: CodeMirrorThemeName;
   /** `indent_unit`: columns per indent level. */
   indentUnit?: number;
   /** `indent_with_tabs`: indent with a tab character rather than spaces. */
@@ -90,6 +94,8 @@ const defaults = {
   autocomplete: true,
   dark: false,
   fontSize: 14,
+  lightTheme: 'default' as CodeMirrorThemeName,
+  darkTheme: 'one-dark' as CodeMirrorThemeName,
 };
 
 /** True only when the C/C++ syntax tree contains a definition of `main`. */
@@ -119,10 +125,11 @@ export class PlivetEditor {
   readonly view: EditorView;
   readonly debug: DebugExtensions;
 
-  private readonly theme = new ThemeControl();
+  private readonly theme: ThemeControl;
 
   constructor(parent: HTMLElement, options: PlivetEditorOptions = {}) {
     const config = { ...defaults, ...options };
+    this.theme = new ThemeControl(config.lightTheme, config.darkTheme);
     this.debug = new DebugExtensions(options);
 
     const extensions: Extension[] = [

@@ -11,10 +11,11 @@
  *     Sphinx extension, for instance.
  *
  * Nothing under this directory may import from `src/app/`, and the
- * modules that make up the debugger may only import from the five CodeMirror
+ * modules that make up the debugger may only import from the CodeMirror
  * packages the interactive-code page already loads as globals:
  * `@codemirror/state`, `view`, `language`, `commands` and `autocomplete`, plus
- * `@codemirror/lint`, which PLIVET brings itself. `@codemirror/lang-cpp` is
+ * `@lezer/highlight`; `@codemirror/lint` is brought by PLIVET itself.
+ * `@codemirror/lang-cpp` is
  * imported by `PlivetEditor` alone, because an embedded editor gets its
  * language from the host.
  */

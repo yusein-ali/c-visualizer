@@ -1,7 +1,7 @@
 import type { MemoryRegion, SourceFile, ViewSelection } from '../core';
 import type { EditableRegion } from '../ui/editor';
 import type { PlivetFeatures, PlivetOptions } from './Plivet';
-import type { CodeMirrorConfig } from './host';
+import { codeMirrorTheme, type CodeMirrorConfig } from './host';
 import { codeMirrorCount, codeMirrorFlag } from './host';
 import type { Theme } from './theme';
 
@@ -107,12 +107,16 @@ const featuresOf = (value: unknown): PlivetFeatures | undefined => {
   }
   const features: PlivetFeatures = {};
   const preprocessor = boolean(value.preprocessor, 'features.preprocessor');
+  const loadSource = boolean(value.loadSource, 'features.loadSource');
   const loadFile = boolean(value.loadFile, 'features.loadFile');
   if (typeof preprocessor !== 'undefined') {
     features.preprocessor = preprocessor;
   }
   if (typeof loadFile !== 'undefined') {
     features.loadFile = loadFile;
+  }
+  if (typeof loadSource !== 'undefined') {
+    features.loadSource = loadSource;
   }
   return features;
 };
@@ -185,6 +189,11 @@ const CODEMIRROR_FLAGS: Record<string, string> = {
   autocomplete: 'autocomplete',
 };
 
+const CODEMIRROR_THEMES: Record<string, string> = {
+  lightTheme: 'light_theme',
+  darkTheme: 'dark_theme',
+};
+
 const codeMirrorOf = (value: unknown): CodeMirrorConfig | undefined => {
   if (typeof value === 'undefined') {
     return undefined;
@@ -217,6 +226,18 @@ const codeMirrorOf = (value: unknown): CodeMirrorConfig | undefined => {
       continue;
     }
     config[name] = flag;
+  }
+  for (const [name, written] of Object.entries(CODEMIRROR_THEMES)) {
+    const setting = value[name] ?? value[written];
+    if (typeof setting === 'undefined') {
+      continue;
+    }
+    const theme = codeMirrorTheme(setting);
+    if (typeof theme === 'undefined') {
+      warn(`codeMirror.${written} must be "default" or "one-dark"`);
+      continue;
+    }
+    config[name] = theme;
   }
   return config;
 };

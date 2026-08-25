@@ -186,7 +186,7 @@ const strings = {
     {
       title: 'Write and understand the program',
       items: [
-        'Write C in the editor or choose Load to add a C source file. After you pause typing, the editor checks the entry source and marks syntax errors, runtime diagnostics, and teaching suggestions; some suggestions include a one-click fix.',
+        'Write C in the editor or, when source loading is enabled, choose Load to add a C source file. After you pause typing, the editor checks the entry source and marks syntax errors, runtime diagnostics, and teaching suggestions; some suggestions include a one-click fix.',
         'Completions offer C language constructs, identifiers declared in the program, and common library functions.',
         'Use the fold gutter to collapse compound statements. Macro replacements, preprocessing directives, and source excluded by conditional inclusion are marked in the editor; choose Preprocessed to compare the written source with the preprocessing result.',
         'In an exercise, only the regions chosen by its author may be editable. c-visualizer keeps the rest of the program fixed.',
@@ -240,8 +240,8 @@ const strings = {
     {
       title: 'Work with files',
       items: [
-        'Loading more than one source file adds tabs. The filled triangle marks the entry source file; choose a hollow triangle to select another. Save downloads the active tab as a C source file.',
-        'Open can also restore a valid c-visualizer session supplied by an embedding page, including its source, cursor, breakpoints, and pinned values.',
+        'When enabled, loading more than one source file adds tabs. The filled triangle marks the entry source file; choose a hollow triangle to select another. Save downloads the active tab as a C source file.',
+        'Load can also restore a valid c-visualizer session supplied by an embedding page, including its source, cursor, breakpoints, and pinned values.',
         'Program Files contains data files that the running C program accesses with functions such as fopen. Uploads and files created by the program can be downloaded or removed and are separate from source files. Close or flush an output stream before downloading it.',
       ],
     },

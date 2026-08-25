@@ -44,6 +44,8 @@ export interface ControlBarOptions {
   preprocessor?: boolean;
   /** A file the reader chose to open: a program, or a saved session. */
   onOpenFile?: (file: File) => void;
+  /** Whether Load may replace the current source. Default: enabled. */
+  load?: boolean;
   /** Write the program out. What it is called is the caller's business. */
   onSaveCode?: () => void;
   /** Compile every source file through the diagnostic providers of the host. */
@@ -127,6 +129,7 @@ export class ControlBar {
     this.fileInput.accept = '.c,.h,.txt,.json';
     this.fileInput.className = 'plivet-controls__file';
     this.fileInput.setAttribute('aria-label', strings.openCode);
+    this.fileInput.disabled = options.load !== true;
     this.fileInput.addEventListener('change', this.chosen);
 
     this.theme = this.themeSwitch();
@@ -352,6 +355,9 @@ export class ControlBar {
    * thing the upload panel does for the same reason.
    */
   private readonly chosen = () => {
+    if (this.fileInput.disabled) {
+      return;
+    }
     const files = this.fileInput.files;
     if (files === null || files.length === 0) {
       return;
@@ -389,14 +395,20 @@ export class ControlBar {
    */
   private fileGroup(): HTMLDivElement {
     const group = this.group('files');
-    group.append(
-      this.fileButton('save', strings.saveCode, strings.saveCodeHint, () =>
-        this.options.onSaveCode?.()
-      ),
-      this.fileButton('open', strings.openCode, strings.openCodeHint, () =>
-        this.fileInput.click()
-      )
+    const save = this.fileButton(
+      'save',
+      strings.saveCode,
+      strings.saveCodeHint,
+      () => this.options.onSaveCode?.()
     );
+    const load = this.fileButton(
+      'open',
+      strings.openCode,
+      strings.openCodeHint,
+      () => this.fileInput.click()
+    );
+    load.disabled = this.options.load !== true;
+    group.append(save, load);
     return group;
   }
 

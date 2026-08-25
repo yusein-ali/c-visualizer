@@ -60,4 +60,23 @@ describe('C syntax highlighting', () => {
 
     editor.destroy();
   });
+
+  it('resolves the configured light and dark theme names', () => {
+    const parent = document.createElement('div');
+    document.body.appendChild(parent);
+    const editor = new PlivetEditor(parent, {
+      doc: 'int main(void) { return 0; }',
+      lightTheme: 'one-dark',
+      darkTheme: 'default',
+    });
+
+    const lightClass = highlightingFor(editor.view.state, [tags.keyword]);
+    editor.setDark(true);
+    const darkClass = highlightingFor(editor.view.state, [tags.keyword]);
+    expect(lightClass).not.toBeNull();
+    expect(darkClass).not.toBeNull();
+    expect(darkClass).not.toBe(lightClass);
+
+    editor.destroy();
+  });
 });
