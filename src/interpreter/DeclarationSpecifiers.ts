@@ -72,15 +72,7 @@ const SIGN_SPECIFIERS = ['signed', 'unsigned'];
  * success over a program that had not declared its variable. Ordered widest
  * first, which is how `reducedSpecifiers` chooses the word to keep.
  */
-const BASE_TYPES = [
-  'double',
-  'float',
-  'long',
-  'short',
-  'char',
-  '_Bool',
-  'int',
-];
+const BASE_TYPES = ['double', 'float', 'long', 'short', 'char', '_Bool', 'int'];
 
 /** One type specifier word, where it is written. */
 interface TypeWord {
@@ -112,7 +104,9 @@ const reducedSpecifiers = (words: TypeWord[]): TypeWord[] | null => {
   const signedness = signs.filter((word) => word.name === 'unsigned');
   if (
     bases.length === 0 ||
-    (bases.length === 1 && signs.length === signedness.length && signs.length <= 1)
+    (bases.length === 1 &&
+      signs.length === signedness.length &&
+      signs.length <= 1)
   ) {
     return null;
   }
@@ -410,7 +404,10 @@ export class DeclarationSpecifiers {
   private typeSpellingBefore(variableStart: number): string | null {
     for (let at = this.typeSpellings.length - 1; at >= 0; at -= 1) {
       const spelling = this.typeSpellings[at];
-      if (spelling.end <= variableStart && this.namesNothing(spelling.end, variableStart)) {
+      if (
+        spelling.end <= variableStart &&
+        this.namesNothing(spelling.end, variableStart)
+      ) {
         return spelling.text;
       }
     }

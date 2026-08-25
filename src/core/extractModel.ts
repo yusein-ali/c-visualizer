@@ -86,8 +86,7 @@ function qualifiedDisplayType(
   // said `long long`, and the canvas has no business repeating the
   // compromise. Absent for every type that reached the mapper as written.
   const baseType =
-    declaration.declaredType ??
-    displayType.replace(/\s*\*+\s*$/, '').trim();
+    declaration.declaredType ?? displayType.replace(/\s*\*+\s*$/, '').trim();
   let baseQualifiers =
     declaration.baseQualifiers === undefined
       ? declaration.qualifiers

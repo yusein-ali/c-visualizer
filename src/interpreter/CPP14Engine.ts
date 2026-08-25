@@ -1338,10 +1338,7 @@ export class PlivetCPP14Engine extends CPP14Engine {
     }
     const bitwise = BITWISE[op];
     if (typeof bitwise !== 'undefined') {
-      return bitwise(
-        Number(l?.valueOf?.() ?? l),
-        Number(r?.valueOf?.() ?? r)
-      );
+      return bitwise(Number(l?.valueOf?.() ?? l), Number(r?.valueOf?.() ?? r));
     }
     return super.execBinOpImple(op, l, r);
   }

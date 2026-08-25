@@ -142,11 +142,14 @@ describe('a type specifier of more than one word', () => {
       'unsigned long long a = 1;',
       'unsigned long      a = 1;',
     ],
-  ])('reduces %s without moving a source position', (_name, source, expected) => {
-    const rewritten = new DeclarationSpecifiers().rewrite(source);
-    expect(rewritten).toHaveLength(source.length);
-    expect(rewritten).toBe(expected);
-  });
+  ])(
+    'reduces %s without moving a source position',
+    (_name, source, expected) => {
+      const rewritten = new DeclarationSpecifiers().rewrite(source);
+      expect(rewritten).toHaveLength(source.length);
+      expect(rewritten).toBe(expected);
+    }
+  );
 
   it.each([
     ['int', 'int a = 1;'],
