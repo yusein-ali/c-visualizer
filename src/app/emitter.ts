@@ -1,6 +1,7 @@
 import type { CONTROL_EVENT, DEBUG_STATE, StepModel } from '../core';
 import type { StatementExplanation } from '../ui/records';
 import type {
+  DebugPosition,
   DiagnosticActivity,
   DiagnosticEntry,
   MemoryNavigationTarget,
@@ -32,7 +33,17 @@ export type event =
 export interface EventPayloads {
   debug: [command: CONTROL_EVENT, stdinText?: string];
   changeTheme: [theme: Theme];
-  changeState: [debugState: DEBUG_STATE, step: number];
+  /**
+   * What the debugger is doing, and - when it is standing still somewhere a
+   * reader can be sent - where. The position travels with the state because
+   * it is the same announcement: `Debugging` on its own says the session is
+   * paused without saying what it is paused on.
+   */
+  changeState: [
+    debugState: DEBUG_STATE,
+    step: number,
+    position?: DebugPosition | null,
+  ];
   changeOutput: [output: string];
   /** The editor's text size, not the visualization's scale. */
   zoom: [command: ZOOM_COMMAND];

@@ -92,4 +92,14 @@ describe('the upload panel', () => {
     panel.clearSelection();
     expect(input.value).toBe('');
   });
+
+  it('expands to reveal a file created by the program', () => {
+    const panel = new FilePanel(parentOf());
+    expect(panel.root.open).toBe(false);
+
+    panel.setFiles(new Map([['result.txt', bytes(2)]]));
+    panel.expand();
+
+    expect(panel.root.open).toBe(true);
+  });
 });

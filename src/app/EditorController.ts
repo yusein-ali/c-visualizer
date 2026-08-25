@@ -5,6 +5,7 @@ import {
   InterpreterClient,
   LintDiagnosticModel,
   Response,
+  RUN_EVENT,
   RuntimeDiagnosticModel,
   DEBUG_STATE,
   CodeRangeModel,
@@ -49,6 +50,7 @@ import { Bus } from './emitter';
 import { TabBar } from '../ui/tabs';
 import type { ZOOM_COMMAND } from '../ui/controls';
 import type {
+  DebugPosition,
   DiagnosticEntry,
   MemoryNavigationTarget,
   RunStatus,
@@ -279,6 +281,12 @@ export class EditorController {
   private readonly statement: HoverTextSource;
   private readonly completions: ProgramCompletions;
   private isDebugging = false;
+  /**
+   * Whether the stop the canvas is showing is one a mark made, rather than a
+   * step the reader took. Set from the interpreter's own run event and
+   * cleared by every press that answers directly.
+   */
+  private stoppedAtBreakpoint = false;
   private fontSize: number;
   /**
    * The size the text returns to, which is the size it opened at: a host that
@@ -439,7 +447,12 @@ export class EditorController {
     // breakpoint, long after `StepAll` returned. The interpreter reports that
     // directly rather than through the bus: `src/core` may not know the
     // application exists.
-    this.client.onRunEvent = (_event, response: Response) => {
+    this.client.onRunEvent = (event: RUN_EVENT, response: Response) => {
+      // Why the run stopped is knowable only here. A step that happens to
+      // land on a marked line is not a breakpoint hit, so this is recorded
+      // from what the interpreter reports rather than worked out afterwards
+      // by looking the stopped line up in the breakpoint table.
+      this.stoppedAtBreakpoint = event === 'Breakpoint';
       this.recieve(response);
     };
     // The other direction: the canvas says which object the pointer is over,
@@ -1016,6 +1029,10 @@ export class EditorController {
     this.client
       .send(request)
       .then((response: Response) => {
+        // The answer to a press: a step the reader took, or the `Executing`
+        // that a run answers with before it has stopped anywhere. Neither is
+        // a breakpoint, whatever the last run ended on.
+        this.stoppedAtBreakpoint = false;
         this.recieve(response);
       })
       .catch((e) => {
@@ -1237,7 +1254,12 @@ export class EditorController {
       this.signalBreakpointsChanged();
       // Running suspends redraw, not the controls: Stop and Restart must be
       // enabled while the Worker is advancing through a long call or run.
-      this.bus.signal('changeState', debugState, step);
+      this.bus.signal(
+        'changeState',
+        debugState,
+        step,
+        this.debugPosition(debugState, location)
+      );
       if (debugState === 'Executing') {
         return;
       }
@@ -1252,6 +1274,29 @@ export class EditorController {
       console.log(e);
       alert(e);
     }
+  }
+
+  /**
+   * Where a paused session is, for whoever reports what the debugger is doing.
+   *
+   * `location` is the interpreter's range already mapped back onto a visible
+   * tab, which is the same file and line the editor highlights - so the
+   * status line and the marked line cannot disagree. A stopped session has
+   * nowhere to be, and a step the interpreter could not map back has nowhere
+   * to send anyone, so both answer null.
+   */
+  private debugPosition(
+    debugState: DEBUG_STATE,
+    location: SourceLocation | undefined
+  ): DebugPosition | null {
+    if (debugState === 'Stop' || typeof location === 'undefined') {
+      return null;
+    }
+    return {
+      path: location.path,
+      line: location.range.begin.y,
+      atBreakpoint: this.stoppedAtBreakpoint,
+    };
   }
 
   /**

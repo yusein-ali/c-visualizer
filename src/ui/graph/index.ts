@@ -12,18 +12,23 @@ export { mutationTableCells } from './mutationTable';
 export {
   activityIsPending,
   diagnosticColumns,
+  diagnosticStatus,
   diagnosticStatusCell,
   diagnosticStatusText,
   diagnosticsTableCells,
+  sameDebugPosition,
   sameDiagnostics,
   sortedDiagnostics,
 } from './diagnosticsTable';
 export type {
+  DebugPosition,
   DiagnosticActivity,
   DiagnosticEntry,
+  DiagnosticStatus,
   InvalidStatementRunStatus,
   RejectedRunStatus,
   RunStatus,
+  StatusTone,
 } from './diagnosticsTable';
 export { callStackRows } from './callStack';
 export type { CallStackRow } from './callStack';

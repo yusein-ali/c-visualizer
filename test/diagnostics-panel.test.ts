@@ -3,19 +3,30 @@ import { Plivet } from '../src';
 import type { ExternalDiagnostic } from '../src';
 import { Bus } from '../src/app/emitter';
 import { EditorController } from '../src/app/EditorController';
-import type { InterpreterClient, Request, Response } from '../src/core';
+import type {
+  DEBUG_STATE,
+  InterpreterClient,
+  Request,
+  Response,
+  RUN_EVENT,
+} from '../src/core';
 import { emptyStepModel } from '../src/core';
 import {
   diagnosticColumns,
+  diagnosticStatus,
+  diagnosticStatusCell,
   diagnosticStatusText,
   diagnosticsTableCells,
   sameDiagnostics,
   sortedDiagnostics,
 } from '../src/ui/graph/diagnosticsTable';
 import type {
+  DebugPosition,
   DiagnosticActivity,
   DiagnosticEntry,
+  DiagnosticStatus,
   RunStatus,
+  StatusTone,
 } from '../src/ui/graph/diagnosticsTable';
 import strings from '../src/strings';
 
@@ -32,8 +43,15 @@ const captured: {
   entries: DiagnosticEntry[][];
   activity: DiagnosticActivity[];
   states: string[];
+  positions: (DebugPosition | null)[];
   runStatuses: RunStatus[];
-} = { entries: [], activity: [], states: [], runStatuses: [] };
+} = {
+  entries: [],
+  activity: [],
+  states: [],
+  positions: [],
+  runStatuses: [],
+};
 
 jest.mock('../src/ui/graph', () => ({
   PlivetGraph: class {
@@ -51,8 +69,9 @@ jest.mock('../src/ui/graph', () => ({
     setRunStatus(status: RunStatus): void {
       captured.runStatuses.push(status);
     }
-    setDebugState(state: string): void {
+    setDebugState(state: string, position: DebugPosition | null): void {
       captured.states.push(state);
+      captured.positions.push(position ?? null);
     }
   },
 }));
@@ -104,7 +123,7 @@ describe('the status line over the findings', () => {
 
   it('reports the run while one is under way', () => {
     expect(diagnosticStatusText('buildComplete', 'Debugging', false)).toBe(
-      `${strings.diagnosticsDebugging}: Debugging`
+      strings.diagnosticsDebugSingleStep
     );
   });
 
@@ -160,6 +179,191 @@ describe('the status line over the findings', () => {
         message: 'anything',
       })
     ).toBe(strings.diagnosticsLocalRunning);
+  });
+});
+
+describe('what the status line says a live session is doing', () => {
+  const at = (line: number, atBreakpoint: boolean): DebugPosition => ({
+    path: 'main.c',
+    line,
+    atBreakpoint,
+  });
+
+  it('names the line a step stopped on', () => {
+    expect(
+      diagnosticStatusText(
+        'buildComplete',
+        'Debugging',
+        false,
+        null,
+        at(7, false)
+      )
+    ).toBe('Single step debugging: main.c:7');
+    // The armed session, before the reader has taken a step, is sitting on a
+    // statement the same way: it is one press from moving, not running.
+    expect(diagnosticStatusText(null, 'First', false, null, at(3, false))).toBe(
+      'Single step debugging: main.c:3'
+    );
+  });
+
+  it('says a mark stopped the run, and where', () => {
+    expect(
+      diagnosticStatusText(null, 'Debugging', false, null, at(12, true))
+    ).toBe('Stopped at breakpoint: main.c:12');
+  });
+
+  it('reports a run and a wait without a line, which neither has', () => {
+    // Executing is between statements, and a program blocked on a read is
+    // waiting on the reader rather than on anything they can be sent to.
+    expect(
+      diagnosticStatusText(null, 'Executing', false, null, at(7, false))
+    ).toBe(strings.diagnosticsDebugRunning);
+    expect(diagnosticStatusText(null, 'stdin', false, null, at(7, false))).toBe(
+      strings.diagnosticsDebugWaitingInput
+    );
+  });
+
+  it('says the program has ended, rather than naming the state EOF', () => {
+    expect(diagnosticStatusText(null, 'EOF', false, null, at(9, false))).toBe(
+      'Program finished'
+    );
+  });
+
+  it('still says it is stopped with no line to name', () => {
+    // A step the interpreter could not map back to a visible tab. There is
+    // nowhere to send the reader, which is no reason to answer them in the
+    // interpreter's vocabulary instead.
+    expect(diagnosticStatusText(null, 'Debugging', false)).toBe(
+      strings.diagnosticsDebugSingleStep
+    );
+  });
+
+  it('keeps a refusal above the position it never reached', () => {
+    expect(
+      diagnosticStatusText(null, 'Stop', false, 'rejected', at(1, false))
+    ).toBe(strings.diagnosticsRunRejected);
+  });
+});
+
+describe('the wash the status band is drawn on', () => {
+  const at = (line: number): DebugPosition => ({
+    path: 'main.c',
+    line,
+    atBreakpoint: false,
+  });
+
+  it('colours a refused run and a run that failed as errors', () => {
+    expect(diagnosticStatus(null, 'Stop', false, 'rejected').tone).toBe(
+      'error'
+    );
+    expect(diagnosticStatus(null, 'EOF', false, 'stoppedOnError').tone).toBe(
+      'error'
+    );
+    expect(
+      diagnosticStatus(null, 'EOF', false, {
+        kind: 'invalidStatement',
+        path: 'main.c',
+        line: 12,
+      }).tone
+    ).toBe('error');
+  });
+
+  it('colours the two ways a run is taken away from the machine', () => {
+    // What the reader is watching for: the mark that stopped the run, and the
+    // read that is waiting on them to type. Neither is a failure, so neither
+    // is the error wash, but both are the moment they have to do something.
+    expect(
+      diagnosticStatus(null, 'Debugging', false, null, {
+        path: 'main.c',
+        line: 12,
+        atBreakpoint: true,
+      }).tone
+    ).toBe('break');
+    expect(diagnosticStatus(null, 'stdin', false).tone).toBe('input');
+  });
+
+  it('gives running a colour, so that stopping is a change of one', () => {
+    expect(diagnosticStatus(null, 'Executing', false).tone).toBe('running');
+  });
+
+  it('leaves every ordinary report alone, a finished program included', () => {
+    // Reaching the end of main is not the program asking for anything, and
+    // neither is a reader already in the middle of stepping.
+    const ordinary: DiagnosticStatus[] = [
+      diagnosticStatus(null, 'EOF', false),
+      diagnosticStatus(null, 'Debugging', false, null, at(7)),
+      diagnosticStatus('buildStarted', 'Stop', false),
+      diagnosticStatus('localComplete', 'Stop', false),
+      diagnosticStatus(null, 'Stop', true),
+    ];
+
+    expect(ordinary.map((status) => status.tone)).toEqual(
+      ordinary.map(() => 'normal')
+    );
+  });
+
+  it('draws each tone in its own hue, outline included', () => {
+    const hueOf = (tone: StatusTone) => {
+      const drawn = diagnosticStatusCell('status', 0, 0, 300, tone);
+      return [
+        String(drawn.attr('body/fill')),
+        String(drawn.attr('body/stroke')),
+        String(drawn.attr('label/fill')),
+      ];
+    };
+
+    expect(hueOf('running')).toEqual([
+      expect.stringContaining('--plivet-graph-status-running,'),
+      expect.stringContaining('--plivet-graph-status-running-line'),
+      expect.stringContaining('--plivet-graph-status-running-text'),
+    ]);
+    expect(hueOf('break')).toEqual([
+      expect.stringContaining('--plivet-graph-status-break,'),
+      expect.stringContaining('--plivet-graph-status-break-line'),
+      expect.stringContaining('--plivet-graph-status-break-text'),
+    ]);
+    expect(hueOf('input')).toEqual([
+      expect.stringContaining('--plivet-graph-status-input,'),
+      expect.stringContaining('--plivet-graph-status-input-line'),
+      expect.stringContaining('--plivet-graph-status-input-text'),
+    ]);
+  });
+
+  it('does not colour a run the line has stopped reporting', () => {
+    // A build under way outranks the refusal, so the sentence is the build's
+    // and the band has to be the build's too.
+    expect(diagnosticStatus('buildStarted', 'Stop', false, 'rejected')).toEqual(
+      {
+        text: strings.diagnosticsBuildStarted,
+        tone: 'normal',
+      }
+    );
+  });
+
+  it('says the same thing in text, whatever the wash', () => {
+    // The colour is a second reading of the sentence, never the only one.
+    expect(diagnosticStatus(null, 'Stop', false, 'rejected').text).toBe(
+      diagnosticStatusText(null, 'Stop', false, 'rejected')
+    );
+  });
+
+  it('draws the error band in the palette the findings table uses', () => {
+    const broken = diagnosticStatusCell('halted', 0, 0, 300, 'error');
+    const ordinary = diagnosticStatusCell('idle', 0, 0, 300);
+
+    expect(String(broken.attr('body/fill'))).toContain('--plivet-graph-error');
+    expect(String(broken.attr('label/fill'))).toContain(
+      '--plivet-graph-error-text'
+    );
+    expect(String(broken.attr('body/stroke'))).toContain(
+      '--plivet-graph-error-line'
+    );
+    expect(String(ordinary.attr('body/fill'))).toContain(
+      '--plivet-graph-caption'
+    );
+    expect(String(ordinary.attr('body/stroke'))).toContain(
+      '--plivet-graph-grid'
+    );
   });
 });
 
@@ -264,6 +468,7 @@ describe('what reaches the findings band', () => {
     captured.entries = [];
     captured.activity = [];
     captured.states = [];
+    captured.positions = [];
     captured.runStatuses = [];
     jest.spyOn(console, 'log').mockImplementation(() => undefined);
     jest.spyOn(window, 'alert').mockImplementation(() => undefined);
@@ -718,6 +923,123 @@ describe('a start the parser refused', () => {
       path: 'main.c',
       line: 4,
     });
+    controller.destroy();
+  });
+});
+
+/**
+ * The stop the status line reports, and how it learns which kind it was.
+ *
+ * A press answers through the promise; a run answers later through
+ * `onRunEvent`, which is the only place the difference between stepping onto
+ * a marked line and being stopped by the mark is visible.
+ */
+describe('where a live session tells the canvas it has stopped', () => {
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  const stoppedAt = (debugState: DEBUG_STATE, line: number): Response =>
+    ({
+      output: '',
+      sourcecode: FILES[0].text,
+      debugState,
+      step: line,
+      errors: [],
+      model: emptyStepModel(),
+      location: {
+        path: 'main.c',
+        range: { begin: { x: 2, y: line }, end: { x: 17, y: line } },
+      },
+      expansions: [],
+      constructs: [],
+      lints: [],
+    }) as Response;
+
+  /** A client the test answers for: presses by promise, runs by hand. */
+  const drivenClient = () => {
+    const client = {
+      onRunEvent: null as
+        | ((event: RUN_EVENT, response: Response) => void)
+        | null,
+      reply: stoppedAt('Debugging', 1),
+      send: (): Promise<Response> => Promise.resolve(client.reply),
+    };
+    return client;
+  };
+
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it('marks a breakpoint stop as one, and a press as a step', async () => {
+    const bus = new Bus();
+    const announced: [DEBUG_STATE, DebugPosition | null][] = [];
+    bus.slot('changeState', (state, _step, position) =>
+      announced.push([state, position ?? null])
+    );
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const client = drivenClient();
+    const controller = new EditorController(host, {
+      bus,
+      client: client as unknown as InterpreterClient,
+      files: FILES,
+      entry: 'main.c',
+    });
+
+    client.reply = stoppedAt('Debugging', 7);
+    controller.send('Step');
+    await flush();
+
+    expect(announced[announced.length - 1]).toEqual([
+      'Debugging',
+      { path: 'main.c', line: 7, atBreakpoint: false },
+    ]);
+
+    // A run: the press answers Executing, and where it stopped arrives later.
+    client.reply = stoppedAt('Executing', 7);
+    controller.send('StepAll');
+    await flush();
+    expect(announced[announced.length - 1][0]).toBe('Executing');
+    client.onRunEvent!('Breakpoint', stoppedAt('Debugging', 12));
+
+    expect(announced[announced.length - 1]).toEqual([
+      'Debugging',
+      { path: 'main.c', line: 12, atBreakpoint: true },
+    ]);
+
+    // The next press is a step again, from the very line the mark is on.
+    client.reply = stoppedAt('Debugging', 12);
+    controller.send('Step');
+    await flush();
+
+    expect(announced[announced.length - 1]).toEqual([
+      'Debugging',
+      { path: 'main.c', line: 12, atBreakpoint: false },
+    ]);
+    controller.destroy();
+  });
+
+  it('has nowhere to report for a stopped session', async () => {
+    const bus = new Bus();
+    const announced: (DebugPosition | null)[] = [];
+    bus.slot('changeState', (_state, _step, position) =>
+      announced.push(position ?? null)
+    );
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const client = drivenClient();
+    const controller = new EditorController(host, {
+      bus,
+      client: client as unknown as InterpreterClient,
+      files: FILES,
+      entry: 'main.c',
+    });
+
+    client.reply = { ...stoppedAt('Debugging', 4), debugState: 'Stop' };
+    controller.send('Stop');
+    await flush();
+
+    expect(announced[announced.length - 1]).toBeNull();
     controller.destroy();
   });
 });

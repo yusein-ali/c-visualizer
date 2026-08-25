@@ -104,7 +104,16 @@ const strings = {
   diagnosticsLocalComplete: 'Local validation complete',
   diagnosticsBuildStarted: 'Build started',
   diagnosticsBuildComplete: 'Build complete',
-  diagnosticsDebugging: 'Debug status',
+  // What the debugger is doing, said the way a reader would ask it: whether
+  // the program is moving, whether it is waiting on them, where it is sitting
+  // when it is doing neither, and that it has ended. None of these is the
+  // interpreter's own name for the state, which is what the line used to
+  // print - 'Debug status: stdin' answers a question nobody asked.
+  diagnosticsDebugRunning: 'Running',
+  diagnosticsDebugWaitingInput: 'Waiting for user input',
+  diagnosticsDebugSingleStep: 'Single step debugging',
+  diagnosticsDebugAtBreakpoint: 'Stopped at breakpoint',
+  diagnosticsDebugFinished: 'Program finished',
   diagnosticsRunRejected: 'Run rejected because the program has errors',
   diagnosticsRunRejectedAt: 'Run rejected at',
   labelUnsupported:

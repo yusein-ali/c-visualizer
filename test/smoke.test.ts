@@ -333,6 +333,8 @@ describe('a PLIVET on a page', () => {
     plivet.destroy();
     parent.textContent = '';
     plivet = new Plivet(parent, { sourceCode: FILE_PROGRAM });
+    const files = parent.querySelector<HTMLDetailsElement>('.plivet-files')!;
+    expect(files.open).toBe(false);
 
     buttonsOf(parent)[RUN].click();
     await until(
@@ -348,6 +350,7 @@ describe('a PLIVET on a page', () => {
     expect(
       parent.querySelector('.plivet-files__button')?.getAttribute('aria-label')
     ).toBe('download result.txt');
+    expect(files.open).toBe(true);
   });
 
   it('gives the document back when the session is stopped', async () => {

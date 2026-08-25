@@ -26,6 +26,7 @@ import { BreakpointTable } from '../ui/breakpoints';
 import type { BreakpointEntry } from '../ui/breakpoints';
 import { PlivetGraph } from '../ui/graph';
 import type {
+  DebugPosition,
   DiagnosticActivity,
   DiagnosticEntry,
   RunStatus,
@@ -283,18 +284,31 @@ export class Plivet {
             onDelete: (filename: string) =>
               this.files?.setFiles(client.delete(filename)),
           });
-    client.onFilesChanged = (files) => this.files?.setFiles(files);
+    client.onFilesChanged = (files, created) => {
+      this.files?.setFiles(files);
+      if (created) {
+        this.files?.expand();
+      }
+    };
 
     this.help = new HowToDialog(this.shell.root);
 
     bus.slot('changeTheme', (theme: Theme) => this.setTheme(theme));
-    bus.slot('changeState', (debugState: DEBUG_STATE) => {
-      this.debugState = debugState;
-      this.controls.setDebugState(debugState);
-      // The canvas clears its state views while nothing is running, and its
-      // status line says what the debugger is doing while something is.
-      this.graph.setDebugState(debugState);
-    });
+    bus.slot(
+      'changeState',
+      (
+        debugState: DEBUG_STATE,
+        _step: number,
+        position?: DebugPosition | null
+      ) => {
+        this.debugState = debugState;
+        this.controls.setDebugState(debugState);
+        // The canvas clears its state views while nothing is running, and its
+        // status line says what the debugger is doing while something is -
+        // which line it has stopped on, and whether a mark stopped it there.
+        this.graph.setDebugState(debugState, position ?? null);
+      }
+    );
     bus.slot('diagnostics', (entries: DiagnosticEntry[]) =>
       this.graph.setDiagnostics(entries)
     );

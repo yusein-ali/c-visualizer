@@ -83,6 +83,11 @@ export class FilePanel {
     this.input.value = '';
   }
 
+  /** Opens the panel so a newly created program file is immediately visible. */
+  expand(): void {
+    this.root.open = true;
+  }
+
   destroy(): void {
     this.input.removeEventListener('change', this.selected);
     this.root.remove();

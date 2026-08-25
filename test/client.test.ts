@@ -138,7 +138,11 @@ describe('the interpreter client', () => {
     const other = new InterpreterClient();
     const oneFiles: Map<string, ArrayBuffer>[] = [];
     const otherFiles: Map<string, ArrayBuffer>[] = [];
-    one.onFilesChanged = (files) => oneFiles.push(new Map(files));
+    const created: boolean[] = [];
+    one.onFilesChanged = (files, hasCreatedFile) => {
+      oneFiles.push(new Map(files));
+      created.push(hasCreatedFile);
+    };
     other.onFilesChanged = (files) => otherFiles.push(new Map(files));
     void one.send(request);
     void other.send(request);
@@ -153,7 +157,30 @@ describe('the interpreter client', () => {
     expect(Array.from(new Uint8Array(oneFiles[0].get('result.txt')!))).toEqual([
       79, 75,
     ]);
+    expect(created).toEqual([true]);
     expect(otherFiles).toHaveLength(0);
+  });
+
+  it('distinguishes a rewritten program file from a newly created one', () => {
+    const client = new InterpreterClient();
+    const created: boolean[] = [];
+    client.onFilesChanged = (_files, hasCreatedFile) =>
+      created.push(hasCreatedFile);
+    void client.send(request);
+    const worker = FakeWorker.spawned[0];
+
+    worker.answer({
+      kind: 'files',
+      version: 0,
+      files: new Map([['result.txt', new ArrayBuffer(1)]]),
+    });
+    worker.answer({
+      kind: 'files',
+      version: 0,
+      files: new Map([['result.txt', new ArrayBuffer(2)]]),
+    });
+
+    expect(created).toEqual([true, false]);
   });
 
   it('rejects a runtime file update older than its latest upload', async () => {

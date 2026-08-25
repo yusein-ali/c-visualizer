@@ -34,8 +34,9 @@ export class InterpreterClient {
   public onRunEvent: ((event: RUN_EVENT, response: Response) => void) | null =
     null;
   /** Where files written by the running program are reported. */
-  public onFilesChanged: ((files: Map<string, ArrayBuffer>) => void) | null =
-    null;
+  public onFilesChanged:
+    | ((files: Map<string, ArrayBuffer>, created: boolean) => void)
+    | null = null;
 
   public send(request: Request): Promise<Response> {
     const id = (this.nextId += 1);
@@ -125,11 +126,14 @@ export class InterpreterClient {
       if (message.version !== this.fileVersion) {
         return;
       }
+      const created = Array.from(message.files.keys()).some(
+        (filename) => !this.files.has(filename)
+      );
       this.files.clear();
       for (const [filename, contents] of message.files) {
         this.files.set(filename, contents);
       }
-      this.onFilesChanged?.(this.files);
+      this.onFilesChanged?.(this.files, created);
       return;
     }
     if (message.kind === 'run') {

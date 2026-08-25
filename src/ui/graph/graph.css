@@ -186,8 +186,25 @@
      sentence, and the severity is what the eye should reach first. */
 	--plivet-graph-error: #fdecea;
 	--plivet-graph-error-text: #8c1d18;
+	/* The outline the status band takes when a run has failed. The wash alone
+     is a tint the width of the canvas, which reads as a background rather
+     than as an alarm until something draws its edge. */
+	--plivet-graph-error-line: #d7857f;
 	--plivet-graph-warning: #fff8e1;
 	--plivet-graph-warning-text: #5c5130;
+	/* The status band's own hues, one per thing the debugger can be doing.
+     Blue while the machine has the program, amber where a breakpoint took it
+     back, green where it is waiting to be typed at. Stopping is meant to be a
+     change of colour, which is why running has one of its own. */
+	--plivet-graph-status-running: #e8f2ff;
+	--plivet-graph-status-running-line: #4f81bd;
+	--plivet-graph-status-running-text: #234b73;
+	--plivet-graph-status-break: #fff3bf;
+	--plivet-graph-status-break-line: #d9a400;
+	--plivet-graph-status-break-text: #6b5200;
+	--plivet-graph-status-input: #e4f5ea;
+	--plivet-graph-status-input-line: #3f9e64;
+	--plivet-graph-status-input-text: #1d5c38;
 }
 
 .plivet-graph--dark {
@@ -237,8 +254,18 @@
 	--plivet-graph-stack-border: #73808c;
 	--plivet-graph-error: #4a2320;
 	--plivet-graph-error-text: #ffc7c0;
+	--plivet-graph-error-line: #a35a52;
 	--plivet-graph-warning: #493e20;
 	--plivet-graph-warning-text: #f1dda0;
+	--plivet-graph-status-running: #263f59;
+	--plivet-graph-status-running-line: #6fa8dc;
+	--plivet-graph-status-running-text: #dbeeff;
+	--plivet-graph-status-break: #574a1c;
+	--plivet-graph-status-break-line: #e0bc3a;
+	--plivet-graph-status-break-text: #f7e7a8;
+	--plivet-graph-status-input: #1f4030;
+	--plivet-graph-status-input-line: #5cbf88;
+	--plivet-graph-status-input-text: #c6ecd5;
 
 	color-scheme: dark;
 }

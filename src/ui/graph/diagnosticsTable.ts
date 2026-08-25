@@ -71,6 +71,40 @@ export interface RejectedRunStatus {
   message: string;
 }
 
+/**
+ * Where a live session is sitting, and what put it there.
+ *
+ * The status line used to print the interpreter's own state name - `stdin`,
+ * `First` - which names the machine rather than the thing a reader is asking
+ * about. What they are asking is whether the program is moving, whether it is
+ * waiting on them, and, when it is doing neither, which line it stopped on
+ * and whether it stopped there because they marked it.
+ *
+ * `atBreakpoint` is not `line` looked up in the breakpoint table: a step can
+ * land on a marked line without the mark being what stopped it. Only the
+ * interpreter knows which of the two happened, and it says so.
+ */
+export interface DebugPosition {
+  /** The file the session is stopped in, as the tab strip names it. */
+  path: string;
+  /** One-based, as the source editor displays it. */
+  line: number;
+  /** A mark stopped the run here, rather than a step the reader took. */
+  atBreakpoint: boolean;
+}
+
+/** Whether two positions name the same stop, for skipping a redraw. */
+export const sameDebugPosition = (
+  one: DebugPosition | null,
+  other: DebugPosition | null
+): boolean =>
+  one === other ||
+  (one !== null &&
+    other !== null &&
+    one.path === other.path &&
+    one.line === other.line &&
+    one.atBreakpoint === other.atBreakpoint);
+
 /** Why the latest run did not proceed normally, or null after a reset. */
 export type RunStatus =
   | 'rejected'
@@ -97,39 +131,128 @@ export const activityIsPending = (
 ): boolean => activity === 'localRunning' || activity === 'buildStarted';
 
 /**
- * The one sentence above the table.
+ * How the band reads, which is what a reader takes from it before they have
+ * read a word of it.
+ *
+ * The sentence in the strip changes seven times in a session and a reader
+ * learns to skim it, so what the colour is for is the moment the program has
+ * stopped being a thing they watch and become a thing they must act on. Three
+ * of these are that moment: the run was broken by a mark they set, the
+ * program is blocked waiting for them to type, or it failed.
+ *
+ * `running` is the opposite signal - nothing is wanted, the machine has it -
+ * and it is here so that stopping is a change of colour rather than the
+ * appearance of one. Everything else is `normal`: the checkers reporting, an
+ * idle line, a program that ran to its end, and single-stepping, which is a
+ * reader already in the middle of acting.
+ *
+ * Colour is never the only carrier. The sentence still names the state, the
+ * file and the line, so a reader who cannot tell these washes apart loses
+ * nothing but the glance.
+ */
+export type StatusTone = 'normal' | 'running' | 'break' | 'input' | 'error';
+
+export interface DiagnosticStatus {
+  text: string;
+  tone: StatusTone;
+}
+
+/**
+ * What a live session is doing, in the reader's terms rather than the
+ * interpreter's.
+ *
+ * `EOF` is the end of the program, which is a thing a reader understands and
+ * `EOF` is not: the session is still live - the memory it finished with is
+ * still on the canvas - but nothing is going to move again without a restart.
+ * It is `normal` rather than a colour of its own because a program that ran
+ * to its end is not asking the reader for anything.
+ *
+ * The position is what separates the two ways of standing still, so a stop
+ * the interpreter could not map back to a visible tab says that it is stopped
+ * and stops there. Naming the state instead would put the interpreter's own
+ * vocabulary back on the line this exists to keep it off.
+ */
+const debugStatus = (
+  debugState: DEBUG_STATE,
+  position: DebugPosition | null
+): DiagnosticStatus => {
+  if (debugState === 'Executing') {
+    return { text: strings.diagnosticsDebugRunning, tone: 'running' };
+  }
+  if (debugState === 'stdin') {
+    return { text: strings.diagnosticsDebugWaitingInput, tone: 'input' };
+  }
+  if (debugState === 'EOF') {
+    return { text: strings.diagnosticsDebugFinished, tone: 'normal' };
+  }
+  const atBreakpoint = position !== null && position.atBreakpoint;
+  const label = atBreakpoint
+    ? strings.diagnosticsDebugAtBreakpoint
+    : strings.diagnosticsDebugSingleStep;
+  return {
+    text:
+      position === null ? label : `${label}: ${position.path}:${position.line}`,
+    tone: atBreakpoint ? 'break' : 'normal',
+  };
+};
+
+/** What a refused or terminated run says, in one sentence. */
+const runStatusMessage = (runStatus: Exclude<RunStatus, null>): string => {
+  if (typeof runStatus === 'string') {
+    return runStatusText[runStatus];
+  }
+  return runStatus.kind === 'rejected'
+    ? `${strings.diagnosticsRunRejectedAt} ${runStatus.path}:${runStatus.line}: ${runStatus.message}`
+    : `${strings.diagnosticsRunStoppedAt} ${runStatus.path}:${runStatus.line} ${strings.diagnosticsRunInvalidStatement}`;
+};
+
+/**
+ * The one sentence above the table, and the wash it is written on.
  *
  * Work in progress outranks everything: a reader waiting on a build is asking
  * about the build. A run outranks a finished check for the same reason - the
  * debugger is the thing that is moving. What is left is the last checker to
  * finish, until nothing has happened for long enough that saying so would be
  * reporting history rather than state, and the line goes idle.
+ *
+ * The tone comes out of the same resolution as the sentence rather than being
+ * worked out again beside it, which is what stops a band from being coloured
+ * for a run that the line above it is no longer reporting.
  */
+export const diagnosticStatus = (
+  activity: DiagnosticActivity | null,
+  debugState: DEBUG_STATE,
+  idle: boolean,
+  runStatus: RunStatus = null,
+  position: DebugPosition | null = null
+): DiagnosticStatus => {
+  if (activity !== null && activityIsPending(activity)) {
+    return { text: activityText[activity], tone: 'normal' };
+  }
+  // A run that failed: refused before it started, or killed part-way by a
+  // fatal error. Distinct from the two ordinary ways a run stops - a mark and
+  // a read - which are the program doing what it was asked to.
+  if (runStatus !== null) {
+    return { text: runStatusMessage(runStatus), tone: 'error' };
+  }
+  if (debugState !== 'Stop') {
+    return debugStatus(debugState, position);
+  }
+  if (idle || activity === null) {
+    return { text: strings.diagnosticsIdle, tone: 'normal' };
+  }
+  return { text: activityText[activity], tone: 'normal' };
+};
+
+/** The sentence alone, for callers with nothing to colour. */
 export const diagnosticStatusText = (
   activity: DiagnosticActivity | null,
   debugState: DEBUG_STATE,
   idle: boolean,
-  runStatus: RunStatus = null
-): string => {
-  if (activity !== null && activityIsPending(activity)) {
-    return activityText[activity];
-  }
-  if (runStatus !== null) {
-    if (typeof runStatus === 'string') {
-      return runStatusText[runStatus];
-    }
-    return runStatus.kind === 'rejected'
-      ? `${strings.diagnosticsRunRejectedAt} ${runStatus.path}:${runStatus.line}: ${runStatus.message}`
-      : `${strings.diagnosticsRunStoppedAt} ${runStatus.path}:${runStatus.line} ${strings.diagnosticsRunInvalidStatement}`;
-  }
-  if (debugState !== 'Stop') {
-    return `${strings.diagnosticsDebugging}: ${debugState}`;
-  }
-  if (idle || activity === null) {
-    return strings.diagnosticsIdle;
-  }
-  return activityText[activity];
-};
+  runStatus: RunStatus = null,
+  position: DebugPosition | null = null
+): string =>
+  diagnosticStatus(activity, debugState, idle, runStatus, position).text;
 
 const severityText: Record<DiagnosticEntry['severity'], string> = {
   error: strings.diagnosticsSeverityError,
@@ -219,12 +342,13 @@ const cell = (
   options: {
     fill?: string;
     ink?: string;
+    stroke?: string;
     header?: boolean;
     code?: boolean;
     index?: number;
   } = {}
 ): dia.Element => {
-  const { fill, ink, header = false, code = false, index } = options;
+  const { fill, ink, stroke, header = false, code = false, index } = options;
   const element = new shapes.standard.Rectangle({ z: 4 });
   element.position(x, y);
   element.resize(width, height);
@@ -242,7 +366,7 @@ const cell = (
         (header
           ? 'var(--plivet-graph-header, #eef2f6)'
           : 'var(--plivet-graph-surface, #ffffff)'),
-      stroke: 'var(--plivet-graph-grid, #cfd8e1)',
+      stroke: stroke ?? 'var(--plivet-graph-grid, #cfd8e1)',
       ...marks,
     },
     label: {
@@ -263,17 +387,65 @@ const cell = (
   return element;
 };
 
+/**
+ * The wash each tone is drawn in.
+ *
+ * Four hues, far enough apart to be told apart at a glance and in a
+ * screenshot: blue while the machine has it, amber where a mark stopped it,
+ * green where it is waiting to be typed at, red where it failed. The error
+ * row reuses the findings table's own error colours, because a halted run and
+ * the finding that explains it are one answer read downwards and two reds
+ * would make them look like two systems.
+ *
+ * Each is a wash with its own outline. A tint the width of the canvas with no
+ * edge reads as a background rather than as a state.
+ */
+const TONE_PALETTE: Record<
+  StatusTone,
+  { fill: string; ink: string; stroke?: string }
+> = {
+  normal: {
+    fill: 'var(--plivet-graph-caption, #f7f9fb)',
+    ink: 'var(--plivet-graph-caption-text, #6b7b8c)',
+  },
+  running: {
+    fill: 'var(--plivet-graph-status-running, #e8f2ff)',
+    ink: 'var(--plivet-graph-status-running-text, #234b73)',
+    stroke: 'var(--plivet-graph-status-running-line, #4f81bd)',
+  },
+  break: {
+    fill: 'var(--plivet-graph-status-break, #fff3bf)',
+    ink: 'var(--plivet-graph-status-break-text, #6b5200)',
+    stroke: 'var(--plivet-graph-status-break-line, #d9a400)',
+  },
+  input: {
+    fill: 'var(--plivet-graph-status-input, #e4f5ea)',
+    ink: 'var(--plivet-graph-status-input-text, #1d5c38)',
+    stroke: 'var(--plivet-graph-status-input-line, #3f9e64)',
+  },
+  error: {
+    fill: 'var(--plivet-graph-error, #fdecea)',
+    ink: 'var(--plivet-graph-error-text, #8c1d18)',
+    stroke: 'var(--plivet-graph-error-line, #d7857f)',
+  },
+};
+
 /** The status sentence, in a band the width of the table above its header. */
 export function diagnosticStatusCell(
   text: string,
   originX: number,
   originY: number,
-  tableWidth: number
+  tableWidth: number,
+  tone: StatusTone = 'normal'
 ): dia.Element {
-  return cell(text, originX, originY, tableWidth, STATUS_HEIGHT, {
-    fill: 'var(--plivet-graph-caption, #f7f9fb)',
-    ink: 'var(--plivet-graph-caption-text, #6b7b8c)',
-  });
+  return cell(
+    text,
+    originX,
+    originY,
+    tableWidth,
+    STATUS_HEIGHT,
+    TONE_PALETTE[tone]
+  );
 }
 
 /**

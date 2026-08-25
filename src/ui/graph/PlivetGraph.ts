@@ -32,14 +32,17 @@ import { MemoryNode, memoryNodeOf } from './MemoryNode';
 import { StackTable, stackTableOf } from './StackTable';
 import { mutationTableCells } from './mutationTable';
 import {
+  DebugPosition,
   DiagnosticActivity,
   DiagnosticEntry,
+  DiagnosticStatus,
   RunStatus,
   STATUS_HEIGHT,
   activityIsPending,
+  diagnosticStatus,
   diagnosticStatusCell,
-  diagnosticStatusText,
   diagnosticsTableCells,
+  sameDebugPosition,
   sameDiagnostics,
   sortedDiagnostics,
 } from './diagnosticsTable';
@@ -295,13 +298,15 @@ export class PlivetGraph {
   /** Why the latest run was refused or terminated, independently of Stop. */
   private runStatus: RunStatus = null;
   private debugState: DEBUG_STATE = 'Stop';
+  /** Where the session is stopped, for the status line to name. */
+  private debugPosition: DebugPosition | null = null;
   /** Nothing has happened for long enough to stop reporting what did. */
   private diagnosticsIdle = false;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   /** One coalesced redraw after disclosure input, never one rebuild per hit. */
   private disclosureFrame: number | null = null;
-  /** The status sentence as it stands on the canvas now. */
-  private drawnStatus = '';
+  /** The status sentence as it stands on the canvas now, and its wash. */
+  private drawnStatus: DiagnosticStatus = { text: '', tone: 'normal' };
   /**
    * What the reader had collapsed before a stop collapsed everything for
    * them, and null while nothing is being held. A run puts it back, so the
@@ -501,7 +506,7 @@ export class PlivetGraph {
       nextY += SECTION_GAP;
     } else {
       this.drawnDiagnostics = [];
-      this.drawnStatus = '';
+      this.drawnStatus = { text: '', tone: 'normal' };
     }
 
     // Statement and Call stack are peers: the first names the operation and
@@ -691,8 +696,19 @@ export class PlivetGraph {
    * the findings open. A start puts back exactly what the reader had, which
    * is what makes this a clearing rather than a preference of its own.
    */
-  setDebugState(state: DEBUG_STATE): void {
+  setDebugState(
+    state: DEBUG_STATE,
+    position: DebugPosition | null = null
+  ): void {
+    const moved = !sameDebugPosition(position, this.debugPosition);
+    if (state === this.debugState && !moved) {
+      return;
+    }
+    this.debugPosition = position;
+    // Consecutive steps are all one state: what changed is the line the
+    // status line names, and nothing on the canvas below it turns on that.
     if (state === this.debugState) {
+      this.refreshStatus();
       return;
     }
     this.debugState = state;
@@ -854,13 +870,17 @@ export class PlivetGraph {
     if (!this.view.areDiagnosticsShown()) {
       return;
     }
-    const status = diagnosticStatusText(
+    const status = diagnosticStatus(
       this.activity,
       this.debugState,
       this.diagnosticsIdle,
-      this.runStatus
+      this.runStatus,
+      this.debugPosition
     );
-    if (status === this.drawnStatus) {
+    if (
+      status.text === this.drawnStatus.text &&
+      status.tone === this.drawnStatus.tone
+    ) {
       return;
     }
     this.render(this.model);
@@ -937,15 +957,22 @@ export class PlivetGraph {
    */
   private statusCell(originX: number, originY: number): dia.Cell {
     const width = this.fullCanvasWidth();
-    this.drawnStatus = diagnosticStatusText(
+    this.drawnStatus = diagnosticStatus(
       this.activity,
       this.debugState,
       this.diagnosticsIdle,
-      this.runStatus
+      this.runStatus,
+      this.debugPosition
     );
     this.contentWidth = Math.max(this.contentWidth, originX + width + ORIGIN_X);
     this.contentHeight = Math.max(this.contentHeight, originY + STATUS_HEIGHT);
-    return diagnosticStatusCell(this.drawnStatus, originX, originY, width);
+    return diagnosticStatusCell(
+      this.drawnStatus.text,
+      originX,
+      originY,
+      width,
+      this.drawnStatus.tone
+    );
   }
 
   /** The findings themselves, under their own disclosure heading. */
