@@ -11,6 +11,7 @@ import {
 import { cSpelling, exactInteger } from '../interpreter/ExpressionTypes';
 import { basicSizeof } from '../interpreter/RecordTable';
 import { libraryTypedefIn } from '../interpreter/library/types';
+import { blockStaticFunctionOf } from '../interpreter/StateSnapshot';
 import { VariableModel } from './model';
 import type { MemoryRegion } from './model';
 
@@ -124,6 +125,18 @@ const isVariable = (element: any): boolean =>
  * thing this is, and the canvas beside it draws the whole array.
  */
 const SHOWN_MEMBERS = 8;
+
+/**
+ * The frame a variable belongs to as a name: the stack it is listed in, or,
+ * for a block-scope `static`, the function that declares it. That object is
+ * listed with the file-scope ones because it outlives every call, but only
+ * its function can name it, and its key carries the function so that two
+ * functions' `static int count;` are told apart and go-to-declaration looks
+ * inside the right one.
+ */
+export function ownerOf(variable: Variable, stackName: string): string {
+  return blockStaticFunctionOf(variable) ?? stackName;
+}
 
 /** The memory band an interpreter variable belongs to in PLIVET's model. */
 export function memoryRegionOf(
@@ -308,6 +321,12 @@ export function extractMemberValues(
  * declared in two frames means the one being executed, and reading the list
  * backwards is what finds it.
  *
+ * A block-scope `static` is listed with the file-scope objects, but a
+ * function that is not executing cannot name its statics, so those come
+ * first of all: reading backwards, `count` inside `first` is `first`'s own
+ * static, and in `main` it is the file-scope `count` rather than whichever
+ * function's static happened to be listed last.
+ *
  * A bare word never refers to a struct member - those are recorded under the
  * member name with the struct as their parent - so only the frame's own
  * variables are listed.
@@ -326,29 +345,39 @@ export function extractVariables(
     return [];
   }
   const variables: VariableModel[] = [];
+  const dormant: VariableModel[] = [];
   const resolve: Resolve = (type) => execState.getTypedef(type);
   const stacks = execState.getStacks();
   const activeStack = stacks
     .slice()
     .reverse()
     .find((stack) => stack.name !== 'GLOBAL');
+  // A recursive call's frame is `name.2`; a function name has no dot.
+  const activeFunction =
+    typeof activeStack === 'undefined'
+      ? null
+      : activeStack.name.replace(/\.\d+$/, '');
   for (const stack of stacks) {
     for (const variable of stack.getVariables()) {
       if (typeof variable.parentName !== 'undefined') {
         continue;
       }
       const type = displayTypeOf(variable);
+      const owner = ownerOf(variable, stack.name);
       const model: VariableModel = {
         name: variable.getName(),
         // The key `extractModel` builds this object's cells under. The two
         // passes are separate and have to agree on one thing, and this is it.
-        key: `${stack.name}-${variable.name}`,
+        key: `${owner}-${variable.name}`,
         type,
         value: valueOf(variable, type, resolve),
         address: displayAddressOf(variable),
         region: memoryRegionOf(variable, stack.name),
-        frame: stack.name,
-        active: stack === activeStack,
+        frame: owner,
+        active:
+          owner === stack.name
+            ? stack === activeStack
+            : owner === activeFunction,
       };
       const size = displaySizeOf(variable);
       if (size !== null) {
@@ -358,8 +387,8 @@ export function extractVariables(
       if (target !== undefined) {
         model.target = target;
       }
-      variables.push(model);
+      (owner !== stack.name && !model.active ? dormant : variables).push(model);
     }
   }
-  return variables;
+  return dormant.concat(variables);
 }

@@ -42,6 +42,7 @@ import {
 import { decodedText } from './Escapes';
 import { literalSpelling } from './LiteralSpelling';
 import { declarationInfoOf, displayTypeOf } from './RuntimeTypeInfo';
+import { blockStaticFunctionOf } from './StateSnapshot';
 
 /**
  * How a node's type is found once the frames can be read.
@@ -841,11 +842,24 @@ function typesIn(state: ExecState): TypeLookup {
       .slice()
       .reverse()
       .find((stack) => stack.name !== 'GLOBAL');
-    for (const stack of [global, active]) {
-      for (const variable of stack?.getVariables() ?? []) {
-        if (typeof variable.parentName === 'undefined') {
-          note(variable, variable.getName());
-        }
+    // Block-scope statics are listed with the globals, but only the executing
+    // function's can be named, and they hide a global of the same name. A
+    // recursive call's frame is `name.2`.
+    const activeFunction =
+      typeof active === 'undefined' ? null : active.name.replace(/\.\d+$/, '');
+    const globals = global?.getVariables() ?? [];
+    const named = [
+      ...globals.filter((variable) => blockStaticFunctionOf(variable) === null),
+      ...globals.filter(
+        (variable) =>
+          activeFunction !== null &&
+          blockStaticFunctionOf(variable) === activeFunction
+      ),
+      ...(active?.getVariables() ?? []),
+    ];
+    for (const variable of named) {
+      if (typeof variable.parentName === 'undefined') {
+        note(variable, variable.getName());
       }
     }
   } catch {

@@ -36,6 +36,39 @@ interface StateInternals {
   hasStack(name: string): boolean;
 }
 
+/**
+ * A scope that names objects living elsewhere: a block-scope `static` or
+ * `extern` declaration binds its name to an object filed under the global
+ * scope (`CPP14Engine.bindsExistingObject`). The object is drawn there, once,
+ * and not again in every frame that can name it.
+ */
+export interface AliasingScope {
+  plivetAliases?: Set<string>;
+}
+
+/**
+ * The scope a function's block-scope statics are filed in, under the global
+ * one (`CPP14Engine.declareBlockStatics`): which function declares them.
+ */
+export interface StaticScope {
+  plivetStaticsOf?: string;
+}
+
+/** A variable read from a `StaticScope`, carrying that function's name. */
+interface BlockStaticVariable {
+  plivetFunction?: string;
+}
+
+/**
+ * The function whose block-scope `static` this is, or null for any other
+ * object. Such an object is filed with the file-scope ones because it outlives
+ * every call, but its name belongs to the function that declares it.
+ */
+export function blockStaticFunctionOf(variable: Variable): string | null {
+  const owner = (variable as BlockStaticVariable).plivetFunction;
+  return typeof owner === 'string' ? owner : null;
+}
+
 /** `Array.prototype.divide`, which `unicoen.ts/dist/node_helper/Extension` adds. */
 interface Divisible {
   divide(size: number): unknown[];
@@ -92,9 +125,15 @@ function makeScope(state: StateInternals, scope: Scope): void {
       }
     }
   }
+  const aliases = (scope as AliasingScope).plivetAliases;
   for (const varName of Array.from(scope.variableAddress.keys())) {
     const type = scope.variableTypes.get(varName)!;
-    if (type === 'FUNCTION' || type === 'CLASS' || type === 'SYSTEM') {
+    if (
+      type === 'FUNCTION' ||
+      type === 'CLASS' ||
+      type === 'SYSTEM' ||
+      aliases?.has(varName) === true
+    ) {
       continue;
     }
     let address: any = scope.variableAddress.get(varName);
@@ -131,10 +170,12 @@ function makeScope(state: StateInternals, scope: Scope): void {
     if (!(list as unknown as Divisible).isEmpty()) {
       value = list;
     }
-    state.addVariable(
-      scope.name,
-      new Variable(type, varName, value, address, scope.depth)
-    );
+    const variable = new Variable(type, varName, value, address, scope.depth);
+    const owner = (scope as StaticScope).plivetStaticsOf;
+    if (typeof owner === 'string') {
+      (variable as BlockStaticVariable).plivetFunction = owner;
+    }
+    state.addVariable(scope.name, variable);
   }
   for (const child of scope.children) {
     makeScope(state, child);

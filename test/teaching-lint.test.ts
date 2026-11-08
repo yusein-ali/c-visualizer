@@ -323,6 +323,50 @@ int main(void) { return left; }
 `;
     expect(rules(code)).not.toContain('uninitialized-read');
   });
+
+  it('says nothing about a file-scope object, which static storage zeroes', () => {
+    // No `static` keyword: being outside every function is what gives it
+    // static storage. This read is the course's `total_calls++`.
+    const code = `int total_calls;
+int count(void) {
+  total_calls++;
+  return total_calls;
+}
+int main(void) { return count(); }
+`;
+    expect(rules(code)).not.toContain('uninitialized-read');
+  });
+
+  it('counts a store into a member as giving the object a value', () => {
+    const code = `#include <stdio.h>
+union Reading { int integer; float real; };
+struct Outer { struct { int x; } inner; };
+int main(void) {
+  union Reading reading;
+  struct Outer o;
+  reading.integer = 42;
+  o.inner.x = 1;
+  printf("%d %d\\n", reading.integer, o.inner.x);
+  return 0;
+}
+`;
+    expect(rules(code)).not.toContain('uninitialized-read');
+  });
+
+  it('still reports a member compound assignment and an arrow store', () => {
+    const code = `struct Pair { int left; };
+int main(void) {
+  struct Pair pair;
+  struct Pair *pointer;
+  pair.left += 1;
+  pointer->left = 2;
+  return pair.left;
+}
+`;
+    expect(only(code, 'uninitialized-read').map((found) => found.line)).toEqual(
+      [5, 6]
+    );
+  });
 });
 
 describe('a name used as a value that nothing declares', () => {

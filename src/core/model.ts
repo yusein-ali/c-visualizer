@@ -432,9 +432,15 @@ export interface VariableModel {
   address: number;
   /** The implementation-model memory band holding this object. */
   region: MemoryRegion;
-  /** The interpreter frame that owns it (`GLOBAL` for file-scope objects). */
+  /**
+   * The interpreter frame that owns it (`GLOBAL` for file-scope objects), or
+   * for a block-scope `static` the function that declares it.
+   */
   frame: string;
-  /** Whether its function frame is the one currently executing. */
+  /**
+   * Whether its function frame is the one currently executing - for a
+   * block-scope `static`, whether its function is.
+   */
   active: boolean;
   /**
    * How many bytes it occupies, as the display layout counts them. Absent for

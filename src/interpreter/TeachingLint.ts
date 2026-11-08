@@ -429,6 +429,11 @@ class LintPass {
     this.scopes.push(new Map());
   }
 
+  /** Whether the walk is outside every function. */
+  atFileScope(): boolean {
+    return this.scopes.length === 1;
+  }
+
   popScope(): void {
     if (1 < this.scopes.length) {
       this.scopes.pop();
@@ -761,6 +766,13 @@ const uninitializedRead: Rule = {
       pass.assigned.add(node.left);
       return;
     }
+    const written = memberWriteBase(node);
+    if (written !== null) {
+      // `reading.integer = 42` stores into the object; naming it to reach
+      // the member reads nothing.
+      pass.assigned.add(written);
+      return;
+    }
     // Taking the address of an object hands it to something that may fill it,
     // which is exactly what `scanf(\"%d\", &n)` does.
     if (node instanceof UniUnaryOp && node.operator === '&') {
@@ -802,14 +814,46 @@ const uninitializedRead: Rule = {
     );
   },
   leave(node, pass) {
-    if (isAssignment(node) && node.left instanceof UniIdent) {
-      const declared = pass.declared(node.left.name);
+    const target =
+      isAssignment(node) && node.left instanceof UniIdent
+        ? node.left
+        : memberWriteBase(node);
+    if (target !== null) {
+      const declared = pass.declared(target.name);
       if (declared !== null) {
         declared.initialised = true;
       }
     }
   },
 };
+
+/**
+ * The object a plain assignment to one of its members stores into: `u` in
+ * `u.integer = 42` and in `o.inner.x = 1`. Only `.` is followed - `p->x = 1`
+ * reads `p` to find the object - and only `=`, since `u.n += 1` reads the
+ * member first.
+ */
+function memberWriteBase(node: any): UniIdent | null {
+  if (!(node instanceof UniBinOp) || node.operator !== '=') {
+    return null;
+  }
+  let target: any = node.left;
+  if (
+    !(target instanceof UniBinOp) ||
+    target.operator !== '.' ||
+    !(target.right instanceof UniIdent)
+  ) {
+    return null;
+  }
+  while (
+    target instanceof UniBinOp &&
+    target.operator === '.' &&
+    target.right instanceof UniIdent
+  ) {
+    target = target.left;
+  }
+  return target instanceof UniIdent ? target : null;
+}
 
 /**
  * Reaching the closing brace of a non-`void` function is equivalent to a
@@ -1238,10 +1282,13 @@ function declareParameters(node: any, pass: LintPass): void {
 
 function declareVariables(node: any, pass: LintPass): void {
   const variables: any[] = Array.isArray(node.variables) ? node.variables : [];
+  // A declaration outside every function has static storage whether or not
+  // it says so: `int total_calls;` is as zero as `static int offset;`.
   const isStatic =
-    Array.isArray(node.modifiers) &&
-    (node.modifiers.indexOf('static') !== -1 ||
-      node.modifiers.indexOf('extern') !== -1);
+    pass.atFileScope() ||
+    (Array.isArray(node.modifiers) &&
+      (node.modifiers.indexOf('static') !== -1 ||
+        node.modifiers.indexOf('extern') !== -1));
   for (const variable of variables) {
     // Static storage is zero-initialised by the standard, so reading it before
     // an assignment is defined and says nothing worth warning about.

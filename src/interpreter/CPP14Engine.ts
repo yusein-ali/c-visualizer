@@ -95,7 +95,12 @@ import {
   installStdio,
 } from './library/stdio';
 import { OutputSpan, STDIO_CONSTANTS } from './stream';
-import { makeState, snapshotOf } from './StateSnapshot';
+import {
+  AliasingScope,
+  StaticScope,
+  makeState,
+  snapshotOf,
+} from './StateSnapshot';
 import { StructTable } from './StructTable';
 import { UnionTable } from './UnionTable';
 import {
@@ -576,6 +581,38 @@ interface PointerDeclarator {
   plivetPointers?: number;
 }
 
+/** A name a block declaration binds to an object it does not create. */
+interface BoundName {
+  name: string;
+  address: number;
+  type: string;
+}
+
+/** The identifier a declarator declares, without the `*`s the mapper left on it. */
+const declaredName = (name: string): string => name.replace(/^[*&]+/, '');
+
+/** Whether an initializer calls anything, which a constant one cannot. */
+const callsAnything = (node: any): boolean => {
+  if (node === null || typeof node !== 'object') {
+    return false;
+  }
+  if (Array.isArray(node)) {
+    return node.some(callsAnything);
+  }
+  if (node instanceof UniMethodCall) {
+    return true;
+  }
+  if (typeof node.fields === 'undefined') {
+    return false;
+  }
+  return (Array.from(node.fields.keys()) as string[]).some(
+    (field) =>
+      field !== 'comments' &&
+      field !== 'codeRange' &&
+      callsAnything(node[field])
+  );
+};
+
 /** The layout helpers of `Scope` that its declarations mark private. */
 interface ScopeInternals {
   setArray(value: unknown[], type: string, dims: number[]): number;
@@ -726,6 +763,17 @@ export class PlivetCPP14Engine extends CPP14Engine {
   private readonly readUnwritten = new Set<number>();
   /** Whether absent initializers currently need C's static-storage zero fill. */
   private zeroFillingStaticStorage = false;
+  /**
+   * Each function's block-scope `static` declarations, in source order, read
+   * from the program about to run; see `declareBlockStatics`.
+   */
+  private blockStaticSites: { function: string; sites: UniVariableDec[] }[] =
+    [];
+  /**
+   * The objects those declarations name, created once before `main`, keyed by
+   * the declaration that names them inside its function.
+   */
+  private readonly blockStatics = new Map<UniVariableDec, BoundName[]>();
   /** The binary operators being evaluated, innermost last; see `execBinOp`. */
   private readonly operations: {
     op: string;
@@ -1630,6 +1678,8 @@ export class PlivetCPP14Engine extends CPP14Engine {
     this.variadicFrames.length = 0;
     this.heapRequests.clear();
     this.recordBlocks.clear();
+    this.blockStatics.clear();
+    this.blockStaticSites = this.blockStaticDeclarationsIn(dec);
     this.constructs.reset(dec, this.entryPoint);
     const value = yield* super.executeStepByStep(dec);
     // Returning from `main` and calling `exit` both flush every open stream.
@@ -2188,6 +2238,218 @@ export class PlivetCPP14Engine extends CPP14Engine {
     this.installProgramArguments(global);
     // A program with no declaration outside its functions reaches here first.
     this.installTypedefs(global);
+    this.declareBlockStatics(global);
+  }
+
+  /**
+   * Gives every block-scope `static` its object before `main` starts, as C
+   * does: one object for the whole run, holding its initial value from the
+   * first step. Executed where it is written, the declaration made a new local
+   * on every call - `static int calls = 0; calls++;` counted 1, 1, 1 - at an
+   * address in the frame, and the object left the data segment whenever its
+   * function returned.
+   *
+   * A function's statics share a scope under the global one, so an
+   * initializer may take the address of an earlier one. A scope opened under
+   * the global one is named `GLOBAL` as well, which is what files these
+   * objects with the file-scope ones on the canvas; the scope also says which
+   * function declares them (`StaticScope`), which is whose name each one is.
+   * Two blocks of one function that both declare `static int i;` get a scope
+   * each.
+   *
+   * An initializer that calls a function or names a local is not a constant
+   * expression, and C refuses it; such a declaration is left to run where it
+   * is written, as it did before.
+   */
+  private declareBlockStatics(global: Scope): void {
+    for (const { function: owner, sites } of this.blockStaticSites) {
+      let holder: Scope | null = null;
+      for (const site of sites) {
+        if (site.variables.some((def) => callsAnything(def.value))) {
+          continue;
+        }
+        const before = site.variables.map((def) => declaredName(def.name));
+        if (
+          holder === null ||
+          before.some((name) => holder!.variableAddress.has(name))
+        ) {
+          holder = Scope.createLocal(global);
+          (holder as StaticScope).plivetStaticsOf = owner;
+        }
+        const names = new Set(holder.variableAddress.keys());
+        try {
+          const run = this.execVariableDec(site, holder);
+          let step = run.next();
+          while (step.done !== true) {
+            step = run.next();
+          }
+        } catch {
+          // Whatever the declaration managed to file is taken back out, so a
+          // half-made object is not drawn in the data segment.
+          for (const name of Array.from(holder.variableAddress.keys())) {
+            if (!names.has(name)) {
+              holder.variableAddress.delete(name);
+              holder.variableTypes.delete(name);
+            }
+          }
+          continue;
+        }
+        // The first execution moves a declarator's `*`s onto the type, so the
+        // names are read again now that it has run.
+        const bound: BoundName[] = [];
+        for (const def of site.variables) {
+          const name = declaredName(def.name);
+          const address = holder.variableAddress.get(name);
+          const type = holder.variableTypes.get(name);
+          if (typeof address === 'number' && typeof type === 'string') {
+            bound.push({ name, address, type });
+          }
+        }
+        this.blockStatics.set(site, bound);
+      }
+    }
+  }
+
+  /**
+   * Each function's block-scope declarations with static storage duration, in
+   * source order. A structure declared in a function is not entered: its
+   * members are not objects of the function.
+   */
+  private blockStaticDeclarationsIn(
+    program: UniProgram
+  ): { function: string; sites: UniVariableDec[] }[] {
+    const functions: { function: string; sites: UniVariableDec[] }[] = [];
+    const children = (node: any): unknown[] =>
+      (Array.from(node.fields.keys()) as string[])
+        .filter((field) => field !== 'comments' && field !== 'codeRange')
+        .map((field) => node[field]);
+    const walk = (node: any, found: UniVariableDec[] | null): void => {
+      if (node === null || typeof node !== 'object') {
+        return;
+      }
+      if (Array.isArray(node)) {
+        node.forEach((child) => walk(child, found));
+        return;
+      }
+      if (typeof node.fields === 'undefined' || node instanceof UniClassDec) {
+        return;
+      }
+      if (node instanceof UniFunctionDec) {
+        const own: UniVariableDec[] = [];
+        walk(node.block, own);
+        if (own.length > 0) {
+          functions.push({ function: node.name, sites: own });
+        }
+        return;
+      }
+      if (
+        found !== null &&
+        node instanceof UniVariableDec &&
+        this.hasStaticDuration(node)
+      ) {
+        found.push(node);
+        return;
+      }
+      children(node).forEach((child) => walk(child, found));
+    };
+    walk(program, null);
+    return functions;
+  }
+
+  /** Whether a declaration was written with a static-duration storage class. */
+  private hasStaticDuration(decVar: UniVariableDec): boolean {
+    if (
+      Array.isArray(decVar.modifiers) &&
+      decVar.modifiers.includes('typedef')
+    ) {
+      return false;
+    }
+    return this.storageClassesOf(decVar).some(
+      (item) =>
+        item === 'static' || item === '_Thread_local' || item === 'thread_local'
+    );
+  }
+
+  /** The storage-class specifiers a declaration was written with. */
+  private storageClassesOf(decVar: UniVariableDec): StorageClass[] {
+    const first = decVar.variables[0];
+    const written =
+      typeof first === 'undefined'
+        ? []
+        : decVar.variables.flatMap(
+            (def) =>
+              this.declarationSpecifiers.infoForVariable(
+                decVar.codeRange,
+                def.codeRange,
+                first.codeRange
+              )?.storageClasses ?? []
+          );
+    const modifiers = Array.isArray(decVar.modifiers) ? decVar.modifiers : [];
+    return this.uniqueStorageClasses(
+      written.concat(
+        modifiers.filter((item) => this.isStorageClass(item)) as StorageClass[]
+      )
+    );
+  }
+
+  /**
+   * A block declaration that names an object it does not create: a `static`
+   * given its object before `main` (`declareBlockStatics`), or an `extern`
+   * naming a file-scope object. The name is bound in the block to that object
+   * and nothing is allocated or initialized. Running the declaration instead
+   * is what restarted a `static` at every call, and what gave
+   * `extern int shared;` a zero-filled local the function then wrote to while
+   * the file-scope `shared` kept its value.
+   *
+   * The block lists the names it binds (`AliasingScope`), so the snapshot
+   * draws each of these objects once, where it lives.
+   */
+  private bindsExistingObject(decVar: UniVariableDec, scope: Scope): boolean {
+    const bound =
+      this.blockStatics.get(decVar) ?? this.externObjects(decVar, scope.global);
+    if (bound === null) {
+      return false;
+    }
+    const aliasing = scope as AliasingScope;
+    const aliases = aliasing.plivetAliases ?? new Set<string>();
+    aliasing.plivetAliases = aliases;
+    for (const { name, address, type } of bound) {
+      scope.variableAddress.set(name, address);
+      scope.variableTypes.set(name, type);
+      aliases.add(name);
+    }
+    return true;
+  }
+
+  /**
+   * The file-scope objects a block-scope `extern` declaration names, or null
+   * when it is not one or names something the program does not define as an
+   * object - which is left to run where it is written, as it did before.
+   */
+  private externObjects(
+    decVar: UniVariableDec,
+    global: Scope
+  ): BoundName[] | null {
+    const classes = this.storageClassesOf(decVar);
+    if (classes.indexOf('extern') === -1 || this.hasStaticDuration(decVar)) {
+      return null;
+    }
+    const bound: BoundName[] = [];
+    for (const def of decVar.variables) {
+      const name = declaredName(def.name);
+      const address = global.variableAddress.get(name);
+      const type = global.variableTypes.get(name);
+      if (
+        typeof address !== 'number' ||
+        typeof type !== 'string' ||
+        type === 'FUNCTION' ||
+        type === 'SYSTEM'
+      ) {
+        return null;
+      }
+      bound.push({ name, address, type });
+    }
+    return bound;
   }
 
   /**
@@ -2709,6 +2971,9 @@ export class PlivetCPP14Engine extends CPP14Engine {
       // `msg == NULL` held and every null pointer on the canvas pointed at
       // "hi". Nothing is ever filed at address 0.
       scope.global.address.codeAddress = Engine.structInfoSize;
+    }
+    if (scope !== scope.global && this.bindsExistingObject(decVar, scope)) {
+      return null;
     }
     const firstVariable = decVar.variables[0];
     const sourceInfo = decVar.variables.map((def) =>

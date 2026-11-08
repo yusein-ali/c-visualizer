@@ -55,6 +55,7 @@ import {
   formatAddress,
   heldText,
   memoryRegionOf,
+  ownerOf,
 } from './variables';
 
 /**
@@ -398,9 +399,11 @@ function stackModel(
 ): StackModel {
   const rows: CellModel[][] = [];
   for (const variable of stack.getVariables()) {
+    // Under the name `extractVariables` keys it by: a block-scope static is
+    // listed here but keyed by its function (`ownerOf`).
     const variableModel = variableRows(
       variable,
-      stack.name,
+      ownerOf(variable, stack.name),
       undefined,
       getTypedef,
       addresses
