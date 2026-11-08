@@ -114,6 +114,7 @@ export class PlivetConsole {
     this.field = document.createElement('textarea');
     this.field.className = 'plivet-console-input';
     this.field.rows = 1;
+    this.field.wrap = 'off';
     this.field.spellcheck = false;
     this.field.autocapitalize = 'off';
     this.field.setAttribute('autocomplete', 'off');

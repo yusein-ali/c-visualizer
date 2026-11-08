@@ -61,7 +61,7 @@
  */
 .plivet-console[open] {
 	height: var(--plivet-console-height, 18vh);
-	overflow-y: auto;
+	overflow: auto;
 }
 
 .plivet-console--embedded {
@@ -70,7 +70,7 @@
 	height: auto;
 	min-height: 9rem;
 	max-height: var(--plivet-console-max-height, 32vh);
-	overflow-y: auto;
+	overflow: auto;
 }
 
 .plivet-console--dark {
@@ -128,8 +128,11 @@
 	background: none;
 	color: inherit;
 	font: inherit;
-	white-space: pre-wrap;
-	overflow-wrap: break-word;
+	/* Preserve the program's lines; the console owns both scrollbars. */
+	white-space: pre;
+	overflow-wrap: normal;
+	word-break: normal;
+	overflow: visible;
 }
 
 /* What the program wrote to stderr, among what it wrote to stdout. */
@@ -182,7 +185,9 @@
 	border: 0;
 	outline: 0;
 	resize: none;
-	overflow-y: auto;
+	white-space: pre;
+	overflow-wrap: normal;
+	overflow: auto;
 	background-color: transparent;
 	color: inherit;
 	font: inherit;
