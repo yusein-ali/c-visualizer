@@ -146,7 +146,9 @@ const expandIncludes = (
       }
       const normalized = normalizedPath(found.path);
       if (stack.has(normalized)) {
-        return line;
+        // This local header is already being expanded, rather than omitted
+        // as an external header. Leave its line blank in the comparison.
+        return '';
       }
       const nested = new Set(stack);
       nested.add(normalized);
@@ -1101,15 +1103,42 @@ export function preprocess(code: string): string {
   return preprocessSource(code).code;
 }
 
-/** Preprocess one named entry file, expanding the local headers it includes. */
+/**
+ * Preprocess one named entry file, expanding the local headers it includes.
+ * The comparison view can label each omitted header at its include location;
+ * these display comments are added after preprocessing so they cannot affect
+ * macro expansion or conditional inclusion.
+ */
 export function preprocessFiles(
   files: PreprocessorFile[],
   entry: string,
-  fallback = ''
+  fallback = '',
+  omittedHeaderComment?: (header: string) => string
 ): string {
   const source =
     files.find((file) => normalizedPath(file.path) === normalizedPath(entry))
       ?.text ?? fallback;
   const root = normalizedPath(entry);
-  return preprocess(expandIncludes(source, entry, files, new Set([root])));
+  const result = preprocessSource(
+    expandIncludes(source, entry, files, new Set([root]))
+  );
+  if (typeof omittedHeaderComment === 'undefined') {
+    return result.code;
+  }
+  const lines = result.code.split('\n');
+  for (const expansion of result.expansions) {
+    if (
+      expansion.kind !== 'directive' ||
+      expansion.name !== '#include' ||
+      expansion.active !== true
+    ) {
+      continue;
+    }
+    const header = /^(?:<[^>]+>|"[^"]+")/.exec(expansion.text)?.[0];
+    if (typeof header !== 'undefined') {
+      lines[expansion.line - 1] =
+        '// ' + omittedHeaderComment(header).replace(/[\r\n]+/g, ' ');
+    }
+  }
+  return lines.join('\n');
 }

@@ -37,6 +37,8 @@ const strings = {
   preprocessedTitle: 'Source after preprocessing',
   preprocessedHint:
     'Compare the written source with the preprocessing tokens left after macro replacement and conditional inclusion. This view is read-only.',
+  preprocessedHeaderOmitted:
+    'The contents of {header} would normally be copied here by #include. The visualizer omits them to avoid code clutter.',
   debugToolbar: 'Debug toolbar',
   debuggerPanels: 'Debugger panels',
   breakpointsTitle: 'Breakpoints',

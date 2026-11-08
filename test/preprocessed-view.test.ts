@@ -1,5 +1,6 @@
 import { PreprocessedDialog } from '../src/ui/preprocessed';
-import { preprocess } from '../src/interpreter/preprocess';
+import { preprocess, preprocessFiles } from '../src/interpreter/preprocess';
+import strings from '../src/strings';
 
 /**
  * The before and the after, side by side.
@@ -19,6 +20,54 @@ const SOURCE = [
 ].join('\n');
 
 describe('the preprocessed source', () => {
+  it('explains each omitted header at its include location, including nested headers', () => {
+    const source = [
+      '#include <stdio.h>',
+      '#include "helpers.h"',
+      '#if 0',
+      '#include <math.h>',
+      '#endif',
+      '/*',
+      '#include <string.h>',
+      '*/',
+      'int main(void) { return VALUE; }',
+    ].join('\n');
+    const files = [
+      { path: 'main.c', text: source },
+      {
+        path: 'helpers.h',
+        text: '#include "helpers.h"\n#include "stdlib.h"\n#define VALUE 3',
+      },
+    ];
+    const after = preprocessFiles(files, 'main.c', source, (header) =>
+      strings.preprocessedHeaderOmitted.replace('{header}', header)
+    );
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const dialog = new PreprocessedDialog(host);
+    dialog.open(source, after);
+
+    const output = dialog.root.querySelectorAll('.cm-content')[1].textContent;
+    expect(output).toContain(
+      'The contents of <stdio.h> would normally be copied here by #include.'
+    );
+    expect(output).toContain(
+      'The contents of "stdlib.h" would normally be copied here by #include.'
+    );
+    expect(
+      after.match(/The visualizer omits them to avoid code clutter\./g)
+    ).toHaveLength(2);
+    expect(after.split('\n')[0]).toContain('<stdio.h>');
+    expect(after.split('\n')[2]).toContain('"stdlib.h"');
+    expect(after).not.toContain('The contents of "helpers.h"');
+    expect(after).not.toContain('The contents of <math.h>');
+    expect(after).not.toContain('The contents of <string.h>');
+    expect(after).toContain('int main(void) { return 3; }');
+    expect(preprocessFiles(files, 'main.c')).not.toContain('would normally');
+    dialog.destroy();
+    host.remove();
+  });
+
   it('shows what the macro became and what the conditional took out', () => {
     const after = preprocess(SOURCE);
     expect(after).toContain('((3) * 2)');

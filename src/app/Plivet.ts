@@ -714,7 +714,9 @@ export class Plivet {
     }
     this.preprocessed.open(
       source,
-      preprocessFiles(snapshot.files, snapshot.entry, source)
+      preprocessFiles(snapshot.files, snapshot.entry, source, (header) =>
+        strings.preprocessedHeaderOmitted.replace('{header}', header)
+      )
     );
   }
 
