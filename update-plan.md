@@ -176,6 +176,14 @@ follows the engine. Moving to LP64 is one constant in
 `src/interpreter/library/types.ts` plus the engine's own widths, and is not
 planned.
 
+Changed after the plan (2026-11-08): `long long` is no longer reduced to
+`long`. `DeclarationSpecifiers` writes it as one engine word
+(`ENGINE_LONG_LONG` in `ExpressionTypes.ts`), `basicSizeof` - installed as
+the engine's `sizeof` - gives it eight bytes, and values wrap at 64 bits, as
+on a 32-bit x86 or ARM target. Values are JavaScript numbers, exact up to
+2^53; `exactInteger` reads 2^63 and 2^64 back as `LLONG_MAX` and
+`ULLONG_MAX`. A `long` now wraps at its own four bytes.
+
 ### L3 `<ctype.h>` in full
 
 `isalpha isdigit isalnum isspace isupper islower ispunct isprint isgraph

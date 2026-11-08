@@ -11,6 +11,11 @@ import {
   matchParen,
   skipSpace,
 } from './scan';
+import {
+  cSpelling,
+  ENGINE_LONG_LONG,
+  ENGINE_UNSIGNED_LONG_LONG,
+} from './ExpressionTypes';
 import { LIBRARY_TYPEDEFS } from './library/types';
 
 /**
@@ -91,6 +96,9 @@ const TYPE_KEYWORDS = [
   'enum',
   // The library's scalar typedefs: `size_t (*measure)(const char *)`.
   ...Object.keys(LIBRARY_TYPEDEFS),
+  // `long long`, as `DeclarationSpecifiers` has written it by now.
+  ENGINE_LONG_LONG,
+  ENGINE_UNSIGNED_LONG_LONG,
 ];
 
 interface Declarator {
@@ -308,8 +316,11 @@ export class FunctionPointerTable {
 
     const runtimeType = `_fp${this.nextTypeId}`;
     this.nextTypeId += 1;
-    const returnType = normalizeSpace(baseText);
-    const parameters = normalizeSpace(code.slice(paramsOpen + 1, paramsClose));
+    // Read after `long long` became one word; the signature says it in two.
+    const returnType = cSpelling(normalizeSpace(baseText));
+    const parameters = cSpelling(
+      normalizeSpace(code.slice(paramsOpen + 1, paramsClose))
+    );
     const stars = '*'.repeat(depth);
     this.info[runtimeType] = {
       displayType: signatureOf(returnType, parameters, stars, ''),

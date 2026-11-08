@@ -28,6 +28,7 @@ import {
   VariableDeclarationDetail,
 } from './Construct';
 import { Enumerator } from './EnumTable';
+import { cSpelling } from './ExpressionTypes';
 import {
   DeclarationSpecifierInfo,
   DeclarationSpecifiers,
@@ -163,7 +164,7 @@ function detailOf(
     }
     const type: any = (node as any).type;
     if (typeof type === 'string') {
-      return type;
+      return cSpelling(type);
     }
     return type instanceof UniClassDec ? type.className || '' : '';
   }
@@ -209,7 +210,7 @@ function declarationType(
   const stars = (rawName.match(/\*/g) || []).length;
   let baseType =
     typeof node.type === 'string'
-      ? node.type
+      ? cSpelling(node.type)
       : node.type instanceof UniClassDec
         ? node.type.className || ''
         : '';
@@ -962,7 +963,7 @@ function clausesOf(
     case 'cast':
       return [
         ...(typeof node.type === 'string' && node.type !== ''
-          ? [{ label: 'clauseTargetType', text: node.type }]
+          ? [{ label: 'clauseTargetType', text: cSpelling(node.type) }]
           : []),
         ...clause('clauseExpression', node.value),
       ];

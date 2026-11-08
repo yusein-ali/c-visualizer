@@ -9,6 +9,7 @@ import {
   splitTopLevel,
 } from './scan';
 import { TypeQualifier } from './DeclarationSpecifiers';
+import { ENGINE_LONG_LONG_WORD } from './ExpressionTypes';
 
 /**
  * What `struct` and `union` declarations mean, read from the source rather than
@@ -41,9 +42,18 @@ import { TypeQualifier } from './DeclarationSpecifiers';
 /** How wide a basic type is. Mirrors `Engine.sizeof` in unicoen.ts. */
 export type Sizeof = (type: string) => number;
 
+/**
+ * `Engine.sizeof` in unicoen.ts, and eight bytes for `long long` - which the
+ * engine is given as one word (`ExpressionTypes.ENGINE_LONG_LONG`) and which
+ * upstream would size as four. `CPP14Engine` installs this as the engine's
+ * own, so the two cannot disagree.
+ */
 export function basicSizeof(type: string): number {
   if (type.includes('*')) {
     return 4;
+  }
+  if (ENGINE_LONG_LONG_WORD.test(type) || /\blong\s+long\b/.test(type)) {
+    return 8;
   }
   if (type.includes('char')) {
     return 1;

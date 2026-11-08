@@ -104,6 +104,21 @@ describe('parseFormat', () => {
     });
     expect(directive('%lf').problem).toBeUndefined();
   });
+
+  it("reads POSIX's ' flag as part of the directive and notes it does nothing", () => {
+    const grouped = directive("%-'8d");
+    expect(grouped).toMatchObject({
+      source: "%-'8d",
+      conversion: 'd',
+      width: 8,
+      flags: { minus: true },
+      problem: { rule: 'posix-flag', severity: 'warning' },
+    });
+    expect(grouped.problem?.message).toContain('"C" locale');
+    // A worse problem is the one reported.
+    expect(directive("%'q").problem?.rule).toBe('unknown-conversion');
+    expect(explainDirective(grouped)).toContain('thousands grouping');
+  });
 });
 
 describe('formatPrintf', () => {

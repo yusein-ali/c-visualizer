@@ -1,8 +1,10 @@
 import {
   commonType,
+  exactInteger,
   integerTypeInfo,
   isArithmeticType,
   isFloatingType,
+  isInexact,
   isIntegerType,
   promotedType,
 } from './ExpressionTypes';
@@ -19,7 +21,9 @@ import {
  * it shows agree.
  *
  * Pure numbers in and out; `CPP14Engine.ts` turns them back into the engine's
- * values. Widths are the engine's (ILP32).
+ * values. Widths are the engine's (ILP32, with an eight-byte `long long`).
+ * A 64-bit result is computed exactly and then held in a number, which is
+ * exact only up to 2^53; `inexact` says when that lost something.
  */
 
 /** The operators this module computes; anything else is left to the engine. */
@@ -55,6 +59,8 @@ export interface ArithmeticResult {
   badShift: boolean;
   /** An integer division or remainder by zero. */
   divisionByZero: boolean;
+  /** The exact result is past 2^53, so the number holding it is not exact. */
+  inexact: boolean;
 }
 
 const wrap = (value: bigint, type: string): bigint => {
@@ -81,7 +87,36 @@ export function valueAs(raw: number, type: string): number {
     // Undefined in C; there is no integer to wrap.
     return raw;
   }
-  return Number(wrap(BigInt(Math.trunc(raw)), type));
+  return Number(wrap(exactInteger(raw, type), type));
+}
+
+/**
+ * `valueAs`, spelled: the same value, with every digit of a 64-bit one that a
+ * number past 2^53 would round (`LLONG_MAX` is 9223372036854775807, not the
+ * 9223372036854775808 a number holds).
+ */
+export function valueText(raw: number, type: string): string {
+  if (
+    isFloatingType(type) ||
+    !isIntegerType(type) ||
+    type === '_Bool' ||
+    !Number.isFinite(raw)
+  ) {
+    return String(valueAs(raw, type));
+  }
+  return String(wrap(exactInteger(raw, type), type));
+}
+
+/**
+ * Whether storing `raw` in an object of `type` loses digits: the value the
+ * type holds is past 2^53, and is not one of the two `exactInteger` reads
+ * back.
+ */
+export function convertsInexactly(raw: number, type: string): boolean {
+  if (!isIntegerType(type) || type === '_Bool' || !Number.isFinite(raw)) {
+    return false;
+  }
+  return isInexact(wrap(exactInteger(raw, type), type), type);
 }
 
 /** A value of one type converted to another. */
@@ -115,6 +150,7 @@ const result = (
   overflow: false,
   badShift: false,
   divisionByZero: false,
+  inexact: false,
   ...flags,
 });
 
@@ -137,10 +173,12 @@ function shifted(
   // What the processor does with a count it was not meant to get: x86 keeps
   // the low bits of it, which is also what the engine did before.
   const by = BigInt(((count % bits) + bits) % bits);
-  const exact = op === '<<' ? BigInt(value) << by : BigInt(value) >> by;
+  const operand = exactInteger(value, type);
+  const exact = op === '<<' ? operand << by : operand >> by;
   const wrapped = wrap(exact, type);
   return result(Number(wrapped), type, {
     badShift,
+    inexact: isInexact(wrapped, type),
     overflow:
       op === '<<' &&
       !badShift &&
@@ -201,8 +239,8 @@ export function evaluate(
   if ((op === '/' || op === '%') && b === 0) {
     return result(0, common, { divisionByZero: true });
   }
-  const x = BigInt(a);
-  const y = BigInt(b);
+  const x = exactInteger(a, common);
+  const y = exactInteger(b, common);
   let exact: bigint;
   switch (op) {
     case '+':
@@ -222,7 +260,11 @@ export function evaluate(
       exact = x % y;
       // `INT_MIN % -1` is undefined for the same reason `INT_MIN / -1` is.
       if (wrap(x / y, common) !== x / y) {
-        return result(Number(wrap(exact, common)), common, { overflow: true });
+        const wrappedRemainder = wrap(exact, common);
+        return result(Number(wrappedRemainder), common, {
+          overflow: true,
+          inexact: isInexact(wrappedRemainder, common),
+        });
       }
       break;
     case '&':
@@ -238,5 +280,6 @@ export function evaluate(
   const wrapped = wrap(exact, common);
   return result(Number(wrapped), common, {
     overflow: integerTypeInfo(common)!.signed && wrapped !== exact,
+    inexact: isInexact(wrapped, common),
   });
 }

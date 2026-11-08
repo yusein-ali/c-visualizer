@@ -128,10 +128,15 @@ describe('a type specifier of more than one word', () => {
    * created, `printf` printed nothing, and the run reported success over a
    * program that had not declared its variable. Reducing the sequence to the
    * one word the mapper reads is what makes these programs run at all.
+   * `long long` is written as one word of its own, which the engine sizes as
+   * eight bytes; reduced to `long`, it was four.
    */
   it.each([
-    ['long long', 'long long a = 1;', 'long      a = 1;'],
-    ['long long int', 'long long int a = 1;', 'long          a = 1;'],
+    ['long long', 'long long a = 1;', '_LongLong a = 1;'],
+    ['long long int', 'long long int a = 1;', '_LongLong     a = 1;'],
+    ['signed long long', 'signed long long a = 1;', '_LongLong        a = 1;'],
+    ['long unsigned long', 'long unsigned long a;', '_ULongLong         a;'],
+    ['a cast to long long', '(long long)x', '(_LongLong)x'],
     ['short int', 'short int a = 1;', 'short     a = 1;'],
     ['long int', 'long int a = 1;', 'long     a = 1;'],
     ['signed int', 'signed int a = 1;', '       int a = 1;'],
@@ -140,8 +145,10 @@ describe('a type specifier of more than one word', () => {
     [
       'unsigned long long',
       'unsigned long long a = 1;',
-      'unsigned long      a = 1;',
+      '_ULongLong         a = 1;',
     ],
+    // No room to write the one word in: reduced as it used to be.
+    ['long long across a comment', 'long/**/long a;', 'long/**/     a;'],
   ])(
     'reduces %s without moving a source position',
     (_name, source, expected) => {
@@ -197,8 +204,8 @@ describe('a type specifier of more than one word', () => {
 
   /**
    * The reduction is for the mapper, not for the reader: the engine holds a
-   * `long` and the declaration said `long long`, and the canvas has no
-   * business repeating that compromise. `unsigned int` is in here because the
+   * `_LongLong` and the declaration said `long long`, and the canvas has no
+   * business repeating that spelling. `unsigned int` is in here because the
    * mapper joins it into `unsignedint`, which is nobody's spelling of a type.
    */
   it('spells the type on the canvas the way it was written', () => {

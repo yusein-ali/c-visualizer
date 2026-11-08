@@ -5,6 +5,7 @@ import { UniExpr } from 'unicoen.ts/dist/node/UniExpr';
 import { UniFor } from 'unicoen.ts/dist/node/UniFor';
 import { UniIdent } from 'unicoen.ts/dist/node/UniIdent';
 import { UniIntLiteral } from 'unicoen.ts/dist/node/UniIntLiteral';
+import { UniMethodCall } from 'unicoen.ts/dist/node/UniMethodCall';
 import { UniParam } from 'unicoen.ts/dist/node/UniParam';
 import { UniSwitchUnit } from 'unicoen.ts/dist/node/UniSwitchUnit';
 import { UniUnaryOp } from 'unicoen.ts/dist/node/UniUnaryOp';
@@ -12,6 +13,7 @@ import { UniVariableDec } from 'unicoen.ts/dist/node/UniVariableDec';
 import { UniVariableDef } from 'unicoen.ts/dist/node/UniVariableDef';
 import { CodeLocation } from 'unicoen.ts/dist/node_helper/CodeLocation';
 import { CodeRange } from 'unicoen.ts/dist/node_helper/CodeRange';
+import { ENGINE_LONG_LONG, ENGINE_UNSIGNED_LONG_LONG } from './ExpressionTypes';
 import { LIBRARY_TYPE_NAMES } from './library/types';
 import { mask, matchBrace, splitTopLevel } from './scan';
 
@@ -79,7 +81,12 @@ export function typedefNamesIn(code: string): Set<string> {
  */
 export function typeNamesFor(code: string, tree: unknown): Set<string> {
   const names = typedefNamesIn(code);
-  for (const name of LIBRARY_TYPE_NAMES) {
+  // The engine's one-word `long long` reads like a typedef name to the
+  // grammar: `long long *p` arrives as `_LongLong *p`.
+  for (const name of LIBRARY_TYPE_NAMES.concat(
+    ENGINE_LONG_LONG,
+    ENGINE_UNSIGNED_LONG_LONG
+  )) {
     names.add(name);
   }
   for (const name of objectNamesIn(tree)) {
@@ -380,6 +387,46 @@ function castOf(
 }
 
 /**
+ * `(T)(x)` read back as the cast it is. Not knowing `T` is a type, the
+ * grammar reads a call of `T` - parenthesised, which C allows of a function
+ * name - with the argument `x`, and the run stopped on a call to a function
+ * that does not exist: `(size_t)(-1)` and `(Byte)(n)` both did. A call of a
+ * typedef name with one argument, its name alone in parentheses, can only be
+ * a cast.
+ */
+function callCastOf(
+  expr: unknown,
+  types: Set<string>,
+  source: SourceText
+): UniExpr | null {
+  if (
+    !(expr instanceof UniMethodCall) ||
+    (expr.receiver !== null && typeof expr.receiver !== 'undefined') ||
+    !(expr.methodName instanceof UniIdent) ||
+    !types.has(expr.methodName.name) ||
+    !Array.isArray(expr.args) ||
+    expr.args.length !== 1 ||
+    !(expr.args[0] instanceof UniExpr)
+  ) {
+    return null;
+  }
+  const typeRange = rangeOf(expr.methodName);
+  if (
+    typeRange === null ||
+    source.before(typeRange.begin) !== '(' ||
+    source.after(typeRange.end) !== ')'
+  ) {
+    return null;
+  }
+  const converted = new UniCast(expr.methodName.name, expr.args[0]);
+  const whole = rangeOf(expr);
+  if (whole !== null) {
+    converted.codeRange = spanning(whole.begin, whole.end);
+  }
+  return converted;
+}
+
+/**
  * Corrects, in place, the declarations and casts the C++ grammar read as
  * expressions because it did not know a name was a type.
  */
@@ -424,13 +471,15 @@ export function resolveTypedefAmbiguities(
       const child = node[field];
       if (Array.isArray(child)) {
         child.forEach((item, index) => {
-          const cast = castOf(item, types, source);
+          const cast =
+            castOf(item, types, source) ?? callCastOf(item, types, source);
           if (cast !== null) {
             child[index] = cast;
           }
         });
       } else {
-        const cast = castOf(child, types, source);
+        const cast =
+          castOf(child, types, source) ?? callCastOf(child, types, source);
         if (cast !== null) {
           node[field] = cast;
         }

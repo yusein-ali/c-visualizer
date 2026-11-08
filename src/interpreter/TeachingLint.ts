@@ -20,6 +20,7 @@ import { UniUnaryOp } from 'unicoen.ts/dist/node/UniUnaryOp';
 import { UniVariableDec } from 'unicoen.ts/dist/node/UniVariableDec';
 import { UniWhile } from 'unicoen.ts/dist/node/UniWhile';
 import { decodeEscapes } from './Escapes';
+import { cSpelling } from './ExpressionTypes';
 import { libraryTypedefIn } from './library/types';
 import { mask } from './scan';
 
@@ -115,7 +116,9 @@ const declaratorStars = (name: string): number => {
 
 const withoutStars = (name: string): string => name.replace(/^\**/, '');
 
-const classOf = (declared: Declared): TypeClass => {
+const classOf = (found: Declared): TypeClass => {
+  // The tree spells `long long` with the engine's one word for it.
+  const declared = { ...found, type: cSpelling(found.type) };
   const isCharacter = /\bchar\b/.test(declared.type);
   if (libraryTypedefIn(declared.type)?.pointer === true) {
     // `va_list`: a pointer here, and nothing a conversion should print.
@@ -207,8 +210,9 @@ const conversionsIn = (format: string, reads: boolean): Conversion[] => {
     }
     return conversions;
   }
+  // `'` is POSIX's grouping flag; printf accepts it, so the count must too.
   const pattern =
-    /%[-+ #0]*(\d+|\*)?(?:\.(\d*|\*))?(?:hh|h|ll|l|L|z|j|t)?([diouxXeEfFgGaAcspn%])/g;
+    /%[-+ #0']*(\d+|\*)?(?:\.(\d*|\*))?(?:hh|h|ll|l|L|z|j|t)?([diouxXeEfFgGaAcspn%])/g;
   let found = pattern.exec(format);
   while (found !== null) {
     if (found[1] === '*') {
@@ -793,7 +797,7 @@ const uninitializedRead: Rule = {
       this,
       range,
       `${node.name} is evaluated before a value is stored in it. This ` +
-        `uninitialized object of type ${declared.type} has an indeterminate ` +
+        `uninitialized object of type ${cSpelling(declared.type)} has an indeterminate ` +
         `value; using that value here has undefined behavior.`
     );
   },

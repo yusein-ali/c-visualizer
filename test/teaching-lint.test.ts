@@ -599,6 +599,19 @@ int main(void) {
     expect(found[1].message).toContain('%d');
   });
 
+  it("counts a directive with POSIX's ' flag, so the arguments after it line up", () => {
+    const code = `#include <stdio.h>
+int main(void) {
+  double d = 0.5;
+  printf("%'d %f\\n", 1234567, d);
+  printf("%'d %d\\n", 1234567, d);
+  return 0;
+}
+`;
+    const found = only(code, 'format-arguments');
+    expect(found.map((one) => one.line)).toEqual([5]);
+  });
+
   it('checks fscanf, and asks for the address of what it stores', () => {
     const code = `#include <stdio.h>
 int main(void) {

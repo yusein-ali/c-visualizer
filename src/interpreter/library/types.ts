@@ -7,14 +7,18 @@
  * pulling the interpreter into their bundle.
  *
  * The data model is the engine's, not a real machine's. unicoen.ts gives
- * `int`, `long` and every pointer four bytes (`Engine.sizeof`), reduces
- * `long long` to `long`, and reads every integer constant through `v | 0`: it
- * is an ILP32 implementation. The library's widths follow it, so that
+ * `int`, `long` and every pointer four bytes (`Engine.sizeof`), and PLIVET
+ * gives `long long` eight (`basicSizeof`): it is an ILP32 implementation, as
+ * a 32-bit x86 or ARM target is. The library's widths follow it, so that
  * `sizeof(size_t) == sizeof(void *)` and `LONG_MAX` is what a `long` on the
  * canvas can actually hold. Moving the engine to LP64 is a change to all of
  * those at once; when it happens, `DATA_MODEL` is the one line to flip here.
  */
 
+import {
+  ENGINE_LONG_LONG,
+  ENGINE_UNSIGNED_LONG_LONG,
+} from '../ExpressionTypes';
 import type { RuntimeRecordTypes } from '../RecordTable';
 import { mask } from '../scan';
 
@@ -36,9 +40,42 @@ export interface LibraryTypedef {
   pointer?: boolean;
   /** Bytes, in this engine's data model. */
   bytes: number;
+  /**
+   * The type as the engine spells it (`unsignedchar`), for a typedef narrower
+   * or wider than the engine's default of four bytes. The engine is given
+   * `typedef <engineType> <name>` before the program's first declaration (see
+   * `installLibraryTypedefs`), so its own sizes - the stride of an array, the
+   * step of a pointer - follow the width, as they do for a typedef the program
+   * writes itself. Left out, the engine sizes the name as four bytes, which is
+   * the width of every other entry here.
+   */
+  engineType?: string;
   /** The one-line description the editor shows. */
   description: string;
 }
+
+/**
+ * One exact-width integer type of `<stdint.h>`, as glibc declares it for a
+ * 32-bit target: what the data model here is.
+ */
+const exactWidth = (
+  name: string,
+  underlying: string,
+  engineType: string,
+  bytes: number
+): LibraryTypedef => {
+  const unsigned = underlying.startsWith('unsigned');
+  return {
+    header: 'stdint.h',
+    underlying,
+    unsigned,
+    bytes,
+    engineType,
+    description: `${unsigned ? 'an unsigned' : 'a signed'} integer type of exactly ${
+      bytes * 8
+    } bits${unsigned ? '' : ", in two's complement"}; ${name} is ${underlying} here`,
+  };
+};
 
 /**
  * The scalar typedefs a program may use without declaring them. The two
@@ -87,6 +124,54 @@ export const LIBRARY_TYPEDEFS: Record<string, LibraryTypedef> = {
     description:
       'the type of the object va_start, va_arg and va_end work through; here a pointer to the next unnamed argument in the frame of the function declared with ...',
   },
+  // `<stdint.h>`.
+  int8_t: exactWidth('int8_t', 'signed char', 'char', 1),
+  uint8_t: exactWidth('uint8_t', 'unsigned char', 'unsignedchar', 1),
+  int16_t: exactWidth('int16_t', 'short', 'short', 2),
+  uint16_t: exactWidth('uint16_t', 'unsigned short', 'unsignedshort', 2),
+  int32_t: exactWidth('int32_t', 'int', 'int', 4),
+  uint32_t: exactWidth('uint32_t', 'unsigned int', 'unsignedint', 4),
+  int64_t: exactWidth('int64_t', 'long long', ENGINE_LONG_LONG, 8),
+  uint64_t: exactWidth(
+    'uint64_t',
+    'unsigned long long',
+    ENGINE_UNSIGNED_LONG_LONG,
+    8
+  ),
+  intmax_t: {
+    header: 'stdint.h',
+    underlying: 'long long',
+    unsigned: false,
+    bytes: 8,
+    engineType: ENGINE_LONG_LONG,
+    description: 'the widest signed integer type; long long here',
+  },
+  uintmax_t: {
+    header: 'stdint.h',
+    underlying: 'unsigned long long',
+    unsigned: true,
+    bytes: 8,
+    engineType: ENGINE_UNSIGNED_LONG_LONG,
+    description: 'the widest unsigned integer type; unsigned long long here',
+  },
+  intptr_t: {
+    header: 'stdint.h',
+    underlying: 'int',
+    unsigned: false,
+    bytes: LONG_BYTES,
+    engineType: 'int',
+    description:
+      'a signed integer type that can hold any object pointer converted to it and give the same pointer back',
+  },
+  uintptr_t: {
+    header: 'stdint.h',
+    underlying: 'unsigned int',
+    unsigned: true,
+    bytes: LONG_BYTES,
+    engineType: 'unsignedint',
+    description:
+      'an unsigned integer type that can hold any object pointer converted to it and give the same pointer back',
+  },
 };
 
 /** The structure types the library returns by value. */
@@ -115,6 +200,25 @@ const LIBRARY_TYPEDEF_WORD = new RegExp(
 export function libraryTypedefIn(type: string): LibraryTypedef | null {
   const found = LIBRARY_TYPEDEF_WORD.exec(type);
   return found === null ? null : LIBRARY_TYPEDEFS[found[1]];
+}
+
+/**
+ * The library typedefs the engine is told about as typedefs of its own: the
+ * ones whose width differs from its default (see `engineType`). A name the
+ * program has already declared keeps the program's meaning.
+ */
+export function installLibraryTypedefs(global: {
+  typedefList: Map<string, string>;
+  setTypedef(oldType: string, newType: string): void;
+}): void {
+  for (const [name, typedef] of Object.entries(LIBRARY_TYPEDEFS)) {
+    if (
+      typeof typedef.engineType === 'string' &&
+      !global.typedefList.has(name)
+    ) {
+      global.setTypedef(typedef.engineType, name);
+    }
+  }
 }
 
 /**

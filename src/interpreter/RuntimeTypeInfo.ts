@@ -3,6 +3,7 @@ import { Variable } from 'unicoen.ts/dist/interpreter/Engine/Variable';
 import { MEMORY_ALIGNMENT, MEMORY_START_ADDRESSES } from '../core/model';
 import { RuntimeDeclarationInfo } from './DeclarationSpecifiers';
 import { RuntimeEnumInfo, RuntimeEnumTypes } from './EnumTable';
+import { cSpelling } from './ExpressionTypes';
 import {
   RuntimeFunctionPointerTypes,
   signatureOf,
@@ -243,8 +244,9 @@ export function displayTypeOf(variable: Variable): string {
   }
   const recordInfo = recordInfoOf(variable);
   // A bit-field is filed as `unsigned:3`; the width is the name's to show.
+  // `long long` is one word to the engine and two to the reader.
   return recordInfo === null
-    ? variable.type.replace(/\s*:\s*\d+$/, '')
+    ? cSpelling(variable.type.replace(/\s*:\s*\d+$/, ''))
     : recordInfo.displayType;
 }
 

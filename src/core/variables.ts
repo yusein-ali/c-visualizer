@@ -8,6 +8,7 @@ import {
   displayTypeOf,
   functionPointerInfoOf,
 } from '../interpreter/RuntimeTypeInfo';
+import { cSpelling, exactInteger } from '../interpreter/ExpressionTypes';
 import { basicSizeof } from '../interpreter/RecordTable';
 import { libraryTypedefIn } from '../interpreter/library/types';
 import { VariableModel } from './model';
@@ -40,11 +41,51 @@ export const formatAddress = (address: number): string =>
  * integer are left alone.
  */
 export function narrowToType(value: number, spelled: string): number | null {
-  if (!Number.isFinite(value) || Number.isNaN(value)) {
+  const shape = integerShapeOf(spelled);
+  if (shape === null || shape.bits >= 64 || !Number.isFinite(value)) {
     return null;
   }
-  // The engine glues a sign to the word after it: `unsignedint`.
-  const type = spelled.replace(/\b(unsigned|signed)(?=[a-z_])/g, '$1 ');
+  const whole = BigInt(Math.trunc(value));
+  return Number(
+    shape.unsigned
+      ? BigInt.asUintN(shape.bits, whole)
+      : BigInt.asIntN(shape.bits, whole)
+  );
+}
+
+/**
+ * The value as the declared type holds it, as text, or null for a type that
+ * is not a plain integer.
+ *
+ * `narrowToType` for the types a number holds exactly; for a 64-bit one, the
+ * digits of the value itself, which a number past 2^53 cannot spell - to a
+ * number, `LLONG_MAX` is 2^63 and prints as 9223372036854775808.
+ */
+export function heldText(value: number, spelled: string): string | null {
+  const shape = integerShapeOf(spelled);
+  if (shape === null || !Number.isFinite(value)) {
+    return null;
+  }
+  if (shape.bits < 64) {
+    return String(narrowToType(value, spelled));
+  }
+  const canonical = shape.unsigned ? 'unsigned long long' : 'long long';
+  const whole = exactInteger(value, canonical);
+  return String(
+    shape.unsigned ? BigInt.asUintN(64, whole) : BigInt.asIntN(64, whole)
+  );
+}
+
+/** The width and signedness of an integer type, however it is spelled. */
+function integerShapeOf(
+  spelled: string
+): { bits: number; unsigned: boolean } | null {
+  // The engine glues a sign to the word after it, `unsignedint`, and spells
+  // `long long` as one word.
+  const type = cSpelling(spelled).replace(
+    /\b(unsigned|signed)(?=[a-z_])/g,
+    '$1 '
+  );
   if (
     type.indexOf('*') !== -1 ||
     type.indexOf('[') !== -1 ||
@@ -64,18 +105,11 @@ export function narrowToType(value: number, spelled: string): number | null {
   ) {
     return null;
   }
-  const bits = /\blong\s+long\b/.test(type)
-    ? 64
-    : (typedef === null ? basicSizeof(type) : typedef.bytes) * 8;
-  if (bits >= 64) {
-    return null;
-  }
-  const whole = BigInt(Math.trunc(value));
-  const unsigned =
-    typedef === null ? type.indexOf('unsigned') !== -1 : typedef.unsigned;
-  return Number(
-    unsigned ? BigInt.asUintN(bits, whole) : BigInt.asIntN(bits, whole)
-  );
+  return {
+    bits: (typedef === null ? basicSizeof(type) : typedef.bytes) * 8,
+    unsigned:
+      typedef === null ? type.indexOf('unsigned') !== -1 : typedef.unsigned,
+  };
 }
 
 /** Whether the element of an array value is a `Variable` and not a raw value. */
@@ -117,7 +151,16 @@ export function memoryRegionOf(
   return stackName === 'GLOBAL' ? 'data' : 'stack';
 }
 
-function formatValue(value: any, type: string): string {
+/** What a typedef name stands for, as the execution state knows it. */
+type Resolve = (type: string) => string;
+
+const unresolved: Resolve = (type) => type;
+
+function formatValue(
+  value: any,
+  type: string,
+  resolve: Resolve = unresolved
+): string {
   if (value === null || typeof value === 'undefined') {
     return '?';
   }
@@ -142,8 +185,10 @@ function formatValue(value: any, type: string): string {
     return `'${String.fromCharCode(value & 0xff)}' (${held === null ? value : held})`;
   }
   if (typeof value === 'number') {
-    const held = narrowToType(value, type);
-    return String(held === null ? value : held);
+    // A typedef of the program's own (`u64`) says nothing until resolved.
+    return (
+      heldText(value, type) ?? heldText(value, resolve(type)) ?? String(value)
+    );
   }
   return String(value);
 }
@@ -153,7 +198,11 @@ function formatValue(value: any, type: string): string {
  * is always shown as one; a function pointer is named as well, because the
  * address on its own says nothing about which function was chosen.
  */
-function valueOf(variable: Variable, type: string): string {
+function valueOf(
+  variable: Variable,
+  type: string,
+  resolve: Resolve = unresolved
+): string {
   const held = variable.getValue();
   const functionInfo = functionPointerInfoOf(variable);
   if (functionInfo !== null && held != null && !Array.isArray(held)) {
@@ -168,7 +217,7 @@ function valueOf(variable: Variable, type: string): string {
   if (pointerValue !== null) {
     return formatAddress(pointerValue);
   }
-  return formatValue(held, type);
+  return formatValue(held, type, resolve);
 }
 
 /**
@@ -277,6 +326,7 @@ export function extractVariables(
     return [];
   }
   const variables: VariableModel[] = [];
+  const resolve: Resolve = (type) => execState.getTypedef(type);
   const stacks = execState.getStacks();
   const activeStack = stacks
     .slice()
@@ -294,7 +344,7 @@ export function extractVariables(
         // passes are separate and have to agree on one thing, and this is it.
         key: `${stack.name}-${variable.name}`,
         type,
-        value: valueOf(variable, type),
+        value: valueOf(variable, type, resolve),
         address: displayAddressOf(variable),
         region: memoryRegionOf(variable, stack.name),
         frame: stack.name,

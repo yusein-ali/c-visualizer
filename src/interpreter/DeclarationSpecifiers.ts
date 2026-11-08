@@ -1,4 +1,5 @@
 import { CodeRange } from 'unicoen.ts/dist/node_helper/CodeRange';
+import { ENGINE_LONG_LONG, ENGINE_UNSIGNED_LONG_LONG } from './ExpressionTypes';
 import { identifierEnd, IDENT_START, mask } from './scan';
 
 export type StorageClass =
@@ -92,9 +93,9 @@ interface TypeWord {
  * mapper does read. `signed` always goes: it is the default, so dropping it
  * changes the type the engine builds only where C says it should not.
  *
- * The width lost by the reduction is the width PLIVET never modelled anyway.
- * `basicSizeof` gives `int` and `long` four bytes each and knows nothing of
- * `long long`, so no size the reader is shown changes by this.
+ * No width the reader is shown is lost: `short int` is `short`, `long int`
+ * is `long`. `long long` is the exception, and does not come here - see
+ * `longLongSpelling`.
  */
 const reducedSpecifiers = (words: TypeWord[]): TypeWord[] | null => {
   const bases = words.filter((word) => BASE_TYPES.indexOf(word.name) !== -1);
@@ -136,6 +137,63 @@ interface TypeSpelling {
 }
 
 /**
+ * The engine's spelling of a `long long` sequence (`ExpressionTypes`), or
+ * null for any other.
+ *
+ * `long long` cannot be reduced to one of the mapper's words without losing
+ * its width - it used to become `long`, four bytes - so the sequence is
+ * written as one identifier the engine sizes as eight bytes. `long long`,
+ * `long long int`, `signed long long` and `unsigned long long` (in any order)
+ * are all one; `long long` with any other base word is not C.
+ */
+const longLongSpelling = (words: TypeWord[]): string | null => {
+  const longs = words.filter((word) => word.name === 'long').length;
+  const others = words.filter(
+    (word) =>
+      word.name !== 'long' &&
+      word.name !== 'int' &&
+      SIGN_SPECIFIERS.indexOf(word.name) === -1
+  );
+  if (longs !== 2 || others.length !== 0) {
+    return null;
+  }
+  return words.some((word) => word.name === 'unsigned')
+    ? ENGINE_UNSIGNED_LONG_LONG
+    : ENGINE_LONG_LONG;
+};
+
+/**
+ * Writes `spelling` over a type specifier sequence, if the sequence's own
+ * text has room for it: from the first word on, nothing but the words and
+ * the spaces between them, each of which is already blank. Anything else
+ * there - a comment, a line break - is left alone, and the caller reduces the
+ * sequence instead.
+ */
+const writeOver = (
+  chars: string[],
+  words: TypeWord[],
+  spelling: string
+): boolean => {
+  const start = words[0].start;
+  const inWord = (at: number): boolean =>
+    words.some((word) => word.start <= at && at < word.end);
+  for (let at = start; at < start + spelling.length; at += 1) {
+    if (at >= chars.length || (!inWord(at) && !/^[ \t]$/.test(chars[at]))) {
+      return false;
+    }
+  }
+  for (const word of words) {
+    for (let at = word.start; at < word.end; at += 1) {
+      chars[at] = ' ';
+    }
+  }
+  for (let at = 0; at < spelling.length; at += 1) {
+    chars[start + at] = spelling[at];
+  }
+  return true;
+};
+
+/**
  * Blank every word of one type specifier sequence the reduction drops, and
  * record what the sequence said so the reader is still shown their own type.
  */
@@ -144,7 +202,9 @@ const reduceTypeWords = (
   words: TypeWord[],
   spellings: TypeSpelling[]
 ): void => {
-  const kept = reducedSpecifiers(words);
+  const longLong = longLongSpelling(words);
+  const written = longLong !== null && writeOver(chars, words, longLong);
+  const kept = written ? null : reducedSpecifiers(words);
   for (const word of kept === null ? [] : words) {
     if (kept!.indexOf(word) !== -1) {
       continue;

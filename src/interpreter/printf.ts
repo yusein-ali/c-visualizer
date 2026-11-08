@@ -247,6 +247,21 @@ const problemOf = (
 };
 
 /**
+ * The `'` flag: POSIX's thousands grouping, which ISO C does not define. A
+ * program that never calls `setlocale` runs in the "C" locale, whose
+ * thousands separator is empty, so glibc prints `%'d` exactly as `%d` - which
+ * is what this does, with a note that the flag did nothing.
+ */
+const groupingNote = (source: string): PrintfDiagnostic => ({
+  rule: 'posix-flag',
+  severity: 'warning',
+  message:
+    `the ' flag in "${source}" asks for thousands grouping, a POSIX ` +
+    `extension rather than ISO C; the "C" locale this program runs in groups ` +
+    `nothing, so it is formatted as if the flag were not there`,
+});
+
+/**
  * The format as literal runs and directives, in order. `%%` is a directive -
  * C calls it a conversion specification - that takes no argument.
  */
@@ -273,10 +288,13 @@ export function parseFormat(format: string): FormatSegment[] {
     const start = i;
     let j = i + 1;
     const flags = noFlags();
+    let grouping = false;
     for (; j < format.length; j += 1) {
       const c = format[j];
       if (c === '-') {
         flags.minus = true;
+      } else if (c === "'") {
+        grouping = true;
       } else if (c === '+') {
         flags.plus = true;
       } else if (c === ' ') {
@@ -334,7 +352,10 @@ export function parseFormat(format: string): FormatSegment[] {
       length,
       conversion,
     };
-    const problem = problemOf(directive);
+    // A worse problem says more; the grouping note only stands on its own.
+    const problem =
+      problemOf(directive) ??
+      (grouping ? groupingNote(directive.source) : undefined);
     segments.push(
       typeof problem === 'undefined' ? directive : { ...directive, problem }
     );
@@ -464,6 +485,34 @@ const parseInteger = (argument: PrintfArgument): bigint => {
   }
   const number = parseDouble(value);
   return Number.isFinite(number) ? BigInt(Math.trunc(number)) : BIG_ZERO;
+};
+
+const TWO_63 = BIG_ONE << BigInt(63);
+const TWO_64 = BIG_ONE << BigInt(64);
+
+/**
+ * An integer argument, with the two numbers a 64-bit maximum becomes read
+ * back as that maximum.
+ *
+ * A JavaScript number holds 2^63 - 1 and 2^64 - 1 only as 2^63 and 2^64, and
+ * neither of those is a value a 64-bit argument can have: wrapped, they made
+ * `printf("%lld", LLONG_MAX)` print LLONG_MIN and `%llu` of ULLONG_MAX print
+ * 0. A caller with the exact value passes it as a string, which is left alone.
+ */
+const integerArgument = (
+  argument: PrintfArgument,
+  directive: FormatDirective
+): bigint => {
+  const value = parseInteger(argument);
+  if (typeof argument.value !== 'number' || conversionBits(directive) !== 64) {
+    return value;
+  }
+  if (value === TWO_64) {
+    return TWO_64 - BIG_ONE;
+  }
+  return value === TWO_63 && isSigned(directive.conversion)
+    ? TWO_63 - BIG_ONE
+    : value;
 };
 
 const wrap = (value: bigint, bits: number, signed: boolean): bigint =>
@@ -1002,7 +1051,12 @@ function formatOne(
 ): string {
   const { conversion, flags } = directive;
   if (INTEGER_CONVERSIONS.indexOf(conversion) !== -1) {
-    return formatInteger(parseInteger(argument), directive, width, precision);
+    return formatInteger(
+      integerArgument(argument, directive),
+      directive,
+      width,
+      precision
+    );
   }
   if (FLOAT_CONVERSIONS.indexOf(conversion) !== -1) {
     const value =

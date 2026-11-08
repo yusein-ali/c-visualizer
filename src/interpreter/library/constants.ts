@@ -17,12 +17,18 @@ import { DATA_MODEL } from './types';
  * any name spelled in macro case, so none of these needs a lint exception.
  *
  * Integer widths follow `DATA_MODEL` (see `types.ts`). The `long long`
- * limits are the 64-bit values C requires, which this engine - whose
- * `long long` is reduced to a 32-bit `long` - can name but not hold exactly
- * above 2^53.
+ * limits are the 64-bit values C requires. A number holds them only to the
+ * nearest double - 2^63 - 1 becomes 2^63 - and `exactInteger` in
+ * `ExpressionTypes.ts` reads those two back as the maximums they stand for.
  */
 
-export type ConstantType = 'int' | 'unsigned' | 'long' | 'double';
+export type ConstantType =
+  | 'int'
+  | 'unsigned'
+  | 'long'
+  | 'long long'
+  | 'unsigned long long'
+  | 'double';
 
 export interface LibraryConstant {
   header: string;
@@ -47,6 +53,20 @@ const limit = (
   description: string
 ): LibraryConstant => ({
   header: 'limits.h',
+  value,
+  type,
+  spelling,
+  description,
+});
+
+/** A `<stdint.h>` limit, spelled as glibc spells it for a 32-bit target. */
+const stdint = (
+  value: number,
+  type: ConstantType,
+  spelling: string,
+  description: string
+): LibraryConstant => ({
+  header: 'stdint.h',
   value,
   type,
   spelling,
@@ -124,21 +144,124 @@ export const LIBRARY_CONSTANTS: Record<string, LibraryConstant> = {
   ),
   LLONG_MIN: limit(
     -LLONG_MAX - 1,
-    'long',
+    'long long',
     '(-9223372036854775807LL - 1)',
     'the minimum value of long long'
   ),
   LLONG_MAX: limit(
     LLONG_MAX,
-    'long',
+    'long long',
     '9223372036854775807LL',
     'the maximum value of long long'
   ),
   ULLONG_MAX: limit(
     ULLONG_MAX,
-    'unsigned',
+    'unsigned long long',
     '18446744073709551615ULL',
     'the maximum value of unsigned long long'
+  ),
+
+  // `<stdint.h>`, for the types `types.ts` declares from it.
+  INT8_MIN: stdint(-128, 'int', '(-128)', 'the minimum value of int8_t'),
+  INT8_MAX: stdint(127, 'int', '(127)', 'the maximum value of int8_t'),
+  UINT8_MAX: stdint(255, 'int', '(255)', 'the maximum value of uint8_t'),
+  INT16_MIN: stdint(
+    -32768,
+    'int',
+    '(-32767-1)',
+    'the minimum value of int16_t'
+  ),
+  INT16_MAX: stdint(32767, 'int', '(32767)', 'the maximum value of int16_t'),
+  UINT16_MAX: stdint(65535, 'int', '(65535)', 'the maximum value of uint16_t'),
+  INT32_MIN: stdint(
+    -2147483648,
+    'int',
+    '(-2147483647-1)',
+    'the minimum value of int32_t'
+  ),
+  INT32_MAX: stdint(
+    2147483647,
+    'int',
+    '(2147483647)',
+    'the maximum value of int32_t'
+  ),
+  UINT32_MAX: stdint(
+    4294967295,
+    'unsigned',
+    '(4294967295U)',
+    'the maximum value of uint32_t'
+  ),
+  INTPTR_MIN: stdint(
+    -2147483648,
+    'int',
+    '(-2147483647-1)',
+    'the minimum value of intptr_t'
+  ),
+  INTPTR_MAX: stdint(
+    2147483647,
+    'int',
+    '(2147483647)',
+    'the maximum value of intptr_t'
+  ),
+  UINTPTR_MAX: stdint(
+    4294967295,
+    'unsigned',
+    '(4294967295U)',
+    'the maximum value of uintptr_t'
+  ),
+  SIZE_MAX: stdint(
+    4294967295,
+    'unsigned',
+    '(4294967295U)',
+    'the maximum value of size_t'
+  ),
+  PTRDIFF_MIN: stdint(
+    -2147483648,
+    'int',
+    '(-2147483647-1)',
+    'the minimum value of ptrdiff_t'
+  ),
+  PTRDIFF_MAX: stdint(
+    2147483647,
+    'int',
+    '(2147483647)',
+    'the maximum value of ptrdiff_t'
+  ),
+  INT64_MIN: stdint(
+    -LLONG_MAX - 1,
+    'long long',
+    '(-9223372036854775807LL-1)',
+    'the minimum value of int64_t'
+  ),
+  INT64_MAX: stdint(
+    LLONG_MAX,
+    'long long',
+    '(9223372036854775807LL)',
+    'the maximum value of int64_t'
+  ),
+  UINT64_MAX: stdint(
+    ULLONG_MAX,
+    'unsigned long long',
+    '(18446744073709551615ULL)',
+    'the maximum value of uint64_t'
+  ),
+  INTMAX_MIN: stdint(
+    -LLONG_MAX - 1,
+    'long long',
+    '(-9223372036854775807LL-1)',
+    'the minimum value of intmax_t'
+  ),
+  INTMAX_MAX: stdint(
+    LLONG_MAX,
+    'long long',
+    '(9223372036854775807LL)',
+    'the maximum value of intmax_t'
+  ),
+  UINTMAX_MAX: stdint(
+    ULLONG_MAX,
+    'unsigned long long',
+    '(18446744073709551615ULL)',
+    'the maximum value of uintmax_t'
   ),
 
   FLT_MIN: float(
@@ -278,7 +401,7 @@ export const LIBRARY_CONSTANTS: Record<string, LibraryConstant> = {
 /** Whether a constant's value is stored as the engine's 32-bit `Int`. */
 export const isIntConstant = (constant: LibraryConstant): boolean =>
   constant.type !== 'double' &&
-  constant.type !== 'unsigned' &&
+  !constant.type.startsWith('unsigned') &&
   Number.isInteger(constant.value) &&
   constant.value >= -2147483648 &&
   constant.value <= 2147483647;

@@ -9,10 +9,33 @@
  * ask it about any of them.
  *
  * Widths are the engine's: unicoen.ts gives `int`, `long` and pointers four
- * bytes, so this is ILP32, as the library's typedefs are. They decide one rule
- * here - whether a `long` can hold every `unsigned int`, which it cannot, so
- * the two meet in `unsigned long` - and the value a conversion produces.
+ * bytes and `long long` eight, so this is ILP32, as the library's typedefs
+ * are. They decide one rule here - whether a `long` can hold every `unsigned
+ * int`, which it cannot, so the two meet in `unsigned long` - and the value a
+ * conversion produces.
  */
+
+/**
+ * `long long` and `unsigned long long` as the engine spells them.
+ *
+ * unicoen's mapper reads one type word, so `DeclarationSpecifiers` writes the
+ * sequence as one identifier no longer than it - every source position stays
+ * where it was - and `CPP14Engine` teaches the engine's `sizeof` that it is
+ * eight bytes. Reserved spellings (an underscore and a capital), so no
+ * program's own name can be one. Nothing shown to the reader carries them:
+ * `cSpelling` puts C's words back.
+ */
+export const ENGINE_LONG_LONG = '_LongLong';
+export const ENGINE_UNSIGNED_LONG_LONG = '_ULongLong';
+
+/** Either engine spelling of `long long`, as a word. */
+export const ENGINE_LONG_LONG_WORD = /\b_U?LongLong\b/;
+
+/** A type as C spells it, with the engine's spellings of `long long` undone. */
+export const cSpelling = (type: string): string =>
+  type
+    .replace(/\b_ULongLong\b/g, 'unsigned long long')
+    .replace(/\b_LongLong\b/g, 'long long');
 
 interface IntegerType {
   /** Conversion rank, 6.3.1.1: only the order matters. */
@@ -105,7 +128,10 @@ const canonicalBase = (spelling: string): string => {
  * question the tree asks of them.
  */
 export function canonicalType(spelling: string): string {
-  const text = spelling.replace(QUALIFIERS, ' ').replace(/\s+/g, ' ').trim();
+  const text = cSpelling(spelling)
+    .replace(QUALIFIERS, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
   if (text.indexOf('(') !== -1) {
     // A function pointer spells its declarator inside the type.
     return text;
@@ -216,6 +242,56 @@ export function addressType(type: string | null): string | null {
 const ZERO = BigInt(0);
 const ONE = BigInt(1);
 
+const TWO_63 = 2 ** 63;
+const TWO_64 = 2 ** 64;
+
+/**
+ * An integer the engine holds as a JavaScript number, as a `bigint` for the
+ * type it has.
+ *
+ * A number is exact only up to 2^53, and the 64-bit types reach past that.
+ * Their two largest values are the case worth a rule: 2^63 - 1 and 2^64 - 1
+ * round up to 2^63 and 2^64, which no object of the type can hold, so taken
+ * at face value `LLONG_MAX` wrapped to `LLONG_MIN` the moment anything
+ * converted it. A number of exactly that size is read as the maximum it was
+ * rounded from. Every other value is the number's own.
+ */
+export function exactInteger(value: number, type: string): bigint {
+  const integer = INTEGER_TYPES[type];
+  if (typeof integer !== 'undefined' && integer.bits === 64) {
+    if (value === TWO_64) {
+      return (ONE << BigInt(64)) - ONE;
+    }
+    if (integer.signed && value === TWO_63) {
+      return (ONE << BigInt(63)) - ONE;
+    }
+  }
+  return BigInt(Math.trunc(value));
+}
+
+/**
+ * Whether a value of an integer type is lost by holding it in a number: past
+ * 2^53, except the two `exactInteger` reads back.
+ */
+export const isInexact = (value: bigint, type: string): boolean =>
+  exactInteger(Number(value), type) !== value;
+
+/**
+ * An integer constant's value from its spelling (`077`, `0x1F`, `42ULL`), or
+ * null for any other spelling. Exact at any size, which the number the
+ * parser read it as is not past 2^53.
+ */
+export function exactLiteral(spelling: string): bigint | null {
+  const digits = spelling.trim().replace(/[uUlL]+$/, '');
+  if (/^0[xX][0-9a-fA-F]+$/.test(digits) || /^0[bB][01]+$/.test(digits)) {
+    return BigInt(digits);
+  }
+  if (/^0[0-7]+$/.test(digits)) {
+    return BigInt(`0o${digits.slice(1)}`);
+  }
+  return /^(?:0|[1-9][0-9]*)$/.test(digits) ? BigInt(digits) : null;
+}
+
 const fits = (value: bigint, type: string): boolean => {
   const integer = INTEGER_TYPES[type];
   const bits = BigInt(integer.bits);
@@ -261,7 +337,9 @@ export function literalType(
   if (!Number.isFinite(value)) {
     return candidates[0];
   }
-  const whole = BigInt(Math.trunc(value));
+  // The spelling, not the number: `9223372036854775807LL` is a `long long`,
+  // and the number it was read as, 2^63, is not.
+  const whole = exactLiteral(text) ?? BigInt(Math.trunc(value));
   return candidates.find((type) => fits(whole, type)) ?? null;
 }
 
@@ -317,7 +395,7 @@ export function convertedValue(
   if (to === '_Bool') {
     return number === 0 ? '0' : '1';
   }
-  const whole = BigInt(Math.trunc(number));
+  const whole = exactInteger(number, from);
   if (isFloatingType(from) && !fits(whole, to)) {
     return null;
   }

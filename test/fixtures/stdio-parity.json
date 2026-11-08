@@ -1623,6 +1623,39 @@
       "diagnostics": ["invalid-length-modifier"]
     },
     {
+      "format": "[%'d]",
+      "args": [
+        {
+          "kind": "int",
+          "value": 1234567
+        }
+      ],
+      "expected": "[1234567]",
+      "diagnostics": ["posix-flag"]
+    },
+    {
+      "format": "%-'8d|",
+      "args": [
+        {
+          "kind": "int",
+          "value": -4200
+        }
+      ],
+      "expected": "-4200   |",
+      "diagnostics": ["posix-flag"]
+    },
+    {
+      "format": "%'.2f",
+      "args": [
+        {
+          "kind": "double",
+          "value": 1234567.891
+        }
+      ],
+      "expected": "1234567.89",
+      "diagnostics": ["posix-flag"]
+    },
+    {
       "format": "%s|",
       "args": [
         {

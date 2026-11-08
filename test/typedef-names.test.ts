@@ -113,4 +113,23 @@ int main(void) {
 `)
     ).toBe('7 -6 8 255\n');
   });
+
+  it('casts a parenthesised operand, which the grammar read as a call', async () => {
+    expect(
+      await outputOf(`#include <stdio.h>
+#include <stddef.h>
+typedef unsigned char byte;
+int twice(int x) { return 2 * x; }
+int main(void) {
+  int m = 300;
+  byte b = (byte)(m);
+  size_t s = (size_t)(-1);
+  int sum = (byte)(m) + 1;
+  int called = (twice)(4);
+  printf("%d %zu %d %d\\n", b, s, sum, called);
+  return 0;
+}
+`)
+    ).toBe('44 4294967295 45 8\n');
+  });
 });

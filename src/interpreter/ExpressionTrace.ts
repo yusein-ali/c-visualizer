@@ -31,6 +31,7 @@ import {
   commonType,
   conversionText,
   convertedValue,
+  cSpelling,
   elementType,
   isArithmeticType,
   isIntegerType,
@@ -432,7 +433,7 @@ function ruleOf(expression: UniExpr): TypeRule {
     return { kind: 'fixed', type: 'char *' };
   }
   if (expression instanceof UniCast) {
-    return { kind: 'written', spelling: expression.type };
+    return { kind: 'written', spelling: cSpelling(expression.type) };
   }
   if (expression instanceof UniUnaryOp) {
     return { kind: 'unary', operator: expression.operator };
@@ -921,7 +922,8 @@ function expressionText(expression: UniExpr): string {
     return '?:';
   }
   if (expression instanceof UniCast) {
-    return `(${expression.type})`;
+    // `(long long)` reaches the tree as the engine's one word for it.
+    return `(${cSpelling(expression.type)})`;
   }
   if (expression instanceof UniMethodCall) {
     return `${calleeName(expression.methodName)}()`;
@@ -939,7 +941,8 @@ function expressionText(expression: UniExpr): string {
     return '{}';
   }
   if (expression instanceof UniIdent) {
-    return expression.name;
+    // `sizeof(long long)` names its type with the engine's one word.
+    return cSpelling(expression.name);
   }
   const spelling = literalSpelling(expression);
   if (spelling !== null) {

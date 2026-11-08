@@ -14,6 +14,7 @@ import {
   conversionValueOf,
   expressionTraceOf,
 } from '../interpreter/ExpressionTrace';
+import { libraryTypedefIn } from '../interpreter/library/types';
 import { statementNames } from '../interpreter/StatementNames';
 import {
   bitFieldWidthOf,
@@ -52,8 +53,8 @@ import {
   extractMemberValues,
   extractVariables,
   formatAddress,
+  heldText,
   memoryRegionOf,
-  narrowToType,
 } from './variables';
 
 /**
@@ -208,17 +209,17 @@ function valueTextOf(variable: Variable, getTypedef: Typedef): string {
   if (value !== null && typeof value !== 'undefined') {
     const raw = value.valueOf();
     if (typeof raw === 'number') {
-      // `long long` is held by the engine as a `long`; the declaration says
-      // how wide the object really is.
+      // The declaration says how wide the object is where the rewrite
+      // reduced its type (`DeclarationSpecifiers`).
       const declared = declarationInfoOf(variable)?.declaredType;
-      const held = narrowToType(
+      const held = heldText(
         raw,
         typeof declared === 'string' && !/[*[]/.test(type)
           ? declared
           : getTypedef(type)
       );
       if (held !== null) {
-        valueStr = String(held);
+        valueStr = held;
       }
     }
   }
@@ -244,7 +245,9 @@ function valueTextOf(variable: Variable, getTypedef: Typedef): string {
     const pointerValue = displayPointerValueOf(variable);
     valueStr = formatAddress(pointerValue === null ? value : pointerValue);
   }
-  if (rawType === 'char' && value != null) {
+  // `int8_t` is a `char` to the engine but a number to the reader, as
+  // `uint8_t` already is.
+  if (rawType === 'char' && value != null && libraryTypedefIn(type) === null) {
     valueStr += ` '${String.fromCharCode(Number(value.valueOf()) & 0xff)}'`;
   }
   return valueStr;

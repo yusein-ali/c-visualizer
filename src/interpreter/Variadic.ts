@@ -1,6 +1,8 @@
 import { Int } from 'unicoen.ts/dist/interpreter/CPP14/Int';
 import { UniBinOp } from 'unicoen.ts/dist/node/UniBinOp';
+import { UniDoubleLiteral } from 'unicoen.ts/dist/node/UniDoubleLiteral';
 import { UniIdent } from 'unicoen.ts/dist/node/UniIdent';
+import { UniIntLiteral } from 'unicoen.ts/dist/node/UniIntLiteral';
 import { UniMethodCall } from 'unicoen.ts/dist/node/UniMethodCall';
 import { UniTernaryOp } from 'unicoen.ts/dist/node/UniTernaryOp';
 import { UniUnaryOp } from 'unicoen.ts/dist/node/UniUnaryOp';
@@ -11,9 +13,11 @@ import {
   isFloatingType,
   isIntegerType,
   isPointerType,
+  literalType,
   promotedType,
 } from './ExpressionTypes';
 import { LIBRARY_TYPEDEFS } from './library/types';
+import { literalSpelling } from './LiteralSpelling';
 import { mask } from './scan';
 
 /**
@@ -228,6 +232,17 @@ export function argumentTypeOf(
   }
   if (expr instanceof UniMethodCall) {
     return typing.returnTypeOf(expr);
+  }
+  // A constant's type is in its spelling: `5000000000LL` is a `long long`,
+  // and was passed through `...` as an `int` when the engine was asked.
+  if (expr instanceof UniIntLiteral || expr instanceof UniDoubleLiteral) {
+    return (
+      literalType(
+        literalSpelling(expr) ?? String(expr.value),
+        expr instanceof UniDoubleLiteral,
+        expr.value
+      ) ?? typing.staticTypeOf(expr)
+    );
   }
   return typing.staticTypeOf(expr);
 }

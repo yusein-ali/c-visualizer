@@ -44,17 +44,27 @@ import {
   markAddress,
   parameterNames,
 } from './ConstructTrace';
-import { FieldOffset, Member, RecordTable } from './RecordTable';
+import { basicSizeof, FieldOffset, Member, RecordTable } from './RecordTable';
 import { RuntimeDiagnostic } from './RuntimeDiagnostic';
-import { TYPED_OPERATORS, evaluate, valueAs } from './Arithmetic';
+import {
+  convertsInexactly,
+  TYPED_OPERATORS,
+  evaluate,
+  valueAs,
+  valueText,
+} from './Arithmetic';
 import { decodedText } from './Escapes';
 import { ASSIGNMENT, ExpressionRecorder } from './ExpressionTrace';
 import {
   canonicalType,
   commonType,
+  ENGINE_LONG_LONG,
+  ENGINE_UNSIGNED_LONG_LONG,
+  exactLiteral,
   integerTypeInfo,
   isArithmeticType,
   isFloatingType,
+  isInexact,
   isIntegerType,
   literalType,
   promotedType,
@@ -73,6 +83,7 @@ import { ASSERT_FILE } from './library/assert';
 import { Memory } from './library/memory';
 import { mainParameterNames, storeProgramArguments } from './ProgramArguments';
 import {
+  installLibraryTypedefs,
   LIBRARY_TYPEDEFS,
   libraryRecordTypes,
   libraryTypedefIn,
@@ -598,6 +609,21 @@ interface SteppingEngine {
  * `FILE` of `stream.ts`.
  */
 export class PlivetCPP14Engine extends CPP14Engine {
+  /**
+   * The engine's `sizeof` - a static of unicoen's `Engine`, which `Scope` and
+   * `Variable` copy - with `long long` eight bytes wide (`basicSizeof`).
+   * Upstream knows only one-word types and gives every one it does not
+   * recognise four bytes, which is what `long long` became when the rewrite
+   * wrote it as one word. The same function every time, so a second instance
+   * replaces it with itself.
+   */
+  constructor() {
+    super();
+    Engine.sizeof = basicSizeof;
+    Scope.sizeof = basicSizeof;
+    Variable.sizeof = basicSizeof;
+  }
+
   private structs = new StructTable();
   private unions = new UnionTable();
   private declarationSpecifiers = new DeclarationSpecifiers();
@@ -637,6 +663,8 @@ export class PlivetCPP14Engine extends CPP14Engine {
   /** Stdio routines referenced by this program, whether or not execution reaches them. */
   private usedStdioFunctions = new Set<string>();
   private globalScope: Scope | null = null;
+  /** The global scope the library's typedefs were last given to. */
+  private typedefsInstalledIn: Scope | null = null;
   /** The calls being executed, innermost last, for the library to read. */
   private readonly calls: UniMethodCall[] = [];
   /** What the library call being executed has stored so far. */
@@ -1405,7 +1433,9 @@ export class PlivetCPP14Engine extends CPP14Engine {
       return table.displaySizeOf(type);
     }
     const library = libraryTypedefIn(type);
-    if (library !== null) {
+    // One the engine was given as a typedef resolves below, like the
+    // program's own, which may have replaced it.
+    if (library !== null && typeof library.engineType === 'undefined') {
       return library.bytes;
     }
     const record = libraryRecordTypes()[type];
@@ -1421,7 +1451,10 @@ export class PlivetCPP14Engine extends CPP14Engine {
     }
     return /^(?:unsigned|signed)?(?:char|short|int|long|float|double|bool|_Bool)+$/.test(
       type.replace(/\s+/g, '')
-    ) || /^(?:unsigned|signed)$/.test(type)
+    ) ||
+      /^(?:unsigned|signed)$/.test(type) ||
+      type === ENGINE_LONG_LONG ||
+      type === ENGINE_UNSIGNED_LONG_LONG
       ? Engine.sizeof(type)
       : null;
   }
@@ -2153,6 +2186,27 @@ export class PlivetCPP14Engine extends CPP14Engine {
     }
     this.installErrno(global);
     this.installProgramArguments(global);
+    // A program with no declaration outside its functions reaches here first.
+    this.installTypedefs(global);
+  }
+
+  /**
+   * `uint8_t`, `int16_t` and the library's other typedefs whose width is not
+   * the engine's default, given to the engine as typedefs once per run (see
+   * `installLibraryTypedefs`).
+   *
+   * The engine files a program's globals before it loads the library, so this
+   * cannot wait for `loadLibarary`: a global `uint8_t buf[4];` would already
+   * have been laid out four bytes to an element. The first declaration is the
+   * earliest point there is, and it comes before any typedef of the
+   * program's own - which then replaces the library's, as C has it.
+   */
+  private installTypedefs(global: Scope): void {
+    if (this.typedefsInstalledIn === global) {
+      return;
+    }
+    this.typedefsInstalledIn = global;
+    installLibraryTypedefs(global);
   }
 
   /**
@@ -2648,6 +2702,7 @@ export class PlivetCPP14Engine extends CPP14Engine {
     // Every declaration reaches here, so this is the earliest and only hook
     // needed to keep hold of the scope the functions were filed in.
     this.globalScope = scope.global;
+    this.installTypedefs(scope.global);
     if (scope.global.address.codeAddress === 0) {
       // The code area starts at the null pointer. A program whose first
       // global is `char *msg = "hi";` had its literal written there, so
@@ -3351,13 +3406,21 @@ export class PlivetCPP14Engine extends CPP14Engine {
         op === '/' ? 'division by zero' : 'remainder of a division by zero'
       );
     }
+    const operation =
+      `${valueText(left, leftType)} ${op} ` + valueText(right, rightType);
     if (computed.overflow) {
+      const wrapped =
+        typeof computed.value === 'number'
+          ? valueText(computed.value, computed.type)
+          : String(computed.value);
       this.warnOncePerLine(
         'signed-overflow',
-        `${valueAs(left, leftType)} ${op} ${valueAs(right, rightType)} does ` +
-          `not fit in ${computed.type}; signed overflow has undefined ` +
-          `behavior, and this run wrapped the result to ${computed.value}`
+        `${operation} does not fit in ${computed.type}; signed overflow has ` +
+          `undefined behavior, and this run wrapped the result to ${wrapped}`
       );
+    }
+    if (computed.inexact) {
+      this.warnInexact(operation, computed.type);
     }
     if (computed.badShift) {
       this.warnOncePerLine(
@@ -3370,6 +3433,21 @@ export class PlivetCPP14Engine extends CPP14Engine {
     return typeof computed.value === 'boolean'
       ? computed.value
       : engineValue(computed.value, computed.type);
+  }
+
+  /**
+   * The engine holds an integer in a JavaScript number, which is exact only
+   * up to 2^53. A `long long` reaches far past that, and a value there is
+   * held to the nearest number that can be - so it is said, once per line,
+   * rather than shown as if it were exact.
+   */
+  private warnInexact(what: string, type: string): void {
+    this.warnOncePerLine(
+      'inexact-integer',
+      `${what} is a ${type} beyond 2^53 (9007199254740992); this visualizer ` +
+        `computes in JavaScript numbers, which hold integers that large only ` +
+        `approximately, so the value shown may be off in its last digits`
+    );
   }
 
   /** A warning raised at most once for each line it is raised on. */
@@ -3553,6 +3631,9 @@ export class PlivetCPP14Engine extends CPP14Engine {
       switch (constant.type) {
         case 'unsigned':
           return 'unsigned int';
+        case 'long long':
+        case 'unsigned long long':
+          return constant.type;
         case 'long':
           return Math.abs(constant.value) <= 2147483648 ? 'long' : 'long long';
         case 'double':
@@ -3662,14 +3743,16 @@ export class PlivetCPP14Engine extends CPP14Engine {
 
   /** Integer constants have the type their spelling and value give them. */
   protected execIntLiteral(expr: UniIntLiteral, scope: Scope): any {
-    const type = literalType(
-      literalSpelling(expr) ?? String(expr.value),
-      false,
-      expr.value
-    );
-    return type === null || !Number.isFinite(expr.value)
-      ? super.execIntLiteral(expr, scope)
-      : engineValue(valueAs(expr.value, type), type);
+    const spelling = literalSpelling(expr) ?? String(expr.value);
+    const type = literalType(spelling, false, expr.value);
+    if (type === null || !Number.isFinite(expr.value)) {
+      return super.execIntLiteral(expr, scope);
+    }
+    const exact = exactLiteral(spelling);
+    if (exact !== null && isInexact(exact, type)) {
+      this.warnInexact(`the constant ${spelling}`, type);
+    }
+    return engineValue(valueAs(expr.value, type), type);
   }
 
   /**
@@ -3679,10 +3762,9 @@ export class PlivetCPP14Engine extends CPP14Engine {
    * converted to `int` alone and left every other type holding whatever it
    * was handed, so `c + 1` read the 300 back.
    *
-   * `long` is left as it is: `long long` reaches the engine spelled `long`
-   * (`DeclarationSpecifiers`), and narrowing every `long` to four bytes here
-   * would narrow those too. The operators, which read the declaration, still
-   * compute at the right width.
+   * `long` used to be left as it was, because `long long` reached the engine
+   * spelled `long`; it now has a spelling of its own (`ENGINE_LONG_LONG`), so
+   * a `long` wraps at its four bytes and a `long long` at its eight.
    */
   protected _execCast(type: string, value: any): any {
     const raw =
@@ -3702,12 +3784,11 @@ export class PlivetCPP14Engine extends CPP14Engine {
     if (isFloatingType(target)) {
       return raw;
     }
-    if (
-      !isIntegerType(target) ||
-      ((target === 'long' || target === 'unsigned long') &&
-        /\blong\b/.test(type.replace(/(unsigned|signed)(?=long)/g, '$1 ')))
-    ) {
+    if (!isIntegerType(target)) {
       return super._execCast(type, value);
+    }
+    if (convertsInexactly(raw, target)) {
+      this.warnInexact(`${valueText(raw, target)} as a ${target}`, target);
     }
     return engineValue(valueAs(raw, target), target);
   }

@@ -90,13 +90,19 @@ The fork modernizes PLIVET and reshapes it into an embeddable teaching widget:
   `calloc`, the `strto*`/`ato*` conversions with `errno`, `div`, a seedable
   `rand`, `<time.h>`'s `time`/`clock`/`difftime`, `assert`, the `<limits.h>`
   and `<float.h>` constants, `true`/`false`, `size_t` with a `sizeof` that
-  measures arrays and structures, `offsetof`, and the rest of `<math.h>` a
-  course meets live in `src/interpreter/library/`. Every byte they store is
+  measures arrays and structures, `offsetof`, `<stdint.h>`'s exact-width
+  types from `int8_t` to `uint64_t` with `intptr_t`, `intmax_t`, their
+  unsigned forms and their limits, and the rest of `<math.h>` a course meets
+  live in `src/interpreter/library/`. Every byte they store is
   drawn on the canvas and listed among the object writes; writing past the
   end of an array, reading a string with no terminator, `memcpy` between
   overlapping bytes and a null pointer argument stop the program on the line
   with a diagnostic. Widths follow the engine's data model, which is ILP32:
-  `int`, `long`, pointers and `size_t` are four bytes, as `sizeof` reports.
+  `int`, `long`, pointers and `size_t` are four bytes and `long long` is
+  eight, as `sizeof` reports. A `long long` is held in a JavaScript number,
+  exact up to 2^53; a value past that raises an `inexact-integer` warning,
+  and `LLONG_MAX` and `ULLONG_MAX` - which a number rounds up to 2^63 and
+  2^64 - are printed and drawn exactly.
   `realloc` grows the last block on the heap in place and otherwise moves the
   block, which the canvas and the object writes show; `qsort` and `bsearch`
   call the program's comparator as ordinary code, so stepping enters it and
@@ -105,7 +111,8 @@ The fork modernizes PLIVET and reshapes it into an embeddable teaching widget:
   `va_list` points at one by one, and `vprintf` and its family format them.
 - **C's arithmetic and C's literals.** Binary operators apply the integer
   promotions and the usual arithmetic conversions at the ILP32 widths
-  (`-1 < 0u` is 0, `0u - 1` is 4294967295, `unsigned char` wraps when stored),
+  (`-1 < 0u` is 0, `0u - 1` is 4294967295, `unsigned char` and `uint8_t` wrap
+  when stored),
   with the same rules the expression tree draws its conversion nodes from;
   signed overflow wraps and is reported once per line as undefined behavior.
   Pointer arithmetic counts elements (`p + 1`, `p++`, `*(*(m + 1) + 2)`, and
@@ -122,7 +129,8 @@ The fork modernizes PLIVET and reshapes it into an embeddable teaching widget:
   a bit-field keeps its width: a store wraps at it, `sizeof` packs it as gcc
   does, and the row reads `a : 3`. A typedef name declares a pointer inside a
   function (`Node *n = malloc(sizeof(Node));`) and can be cast to
-  (`(myint)x`, `(ptrdiff_t)-2`). `assert` and a refusal name the file and line
+  (`(myint)x`, `(ptrdiff_t)-2`, `(size_t)(n)`). `assert` and a refusal name
+  the file and line
   they happened on.
 - **A more complete debugging workflow** includes breakpoints, forward and
   backward history navigation, run-to-breakpoint, standard input and output streams,
@@ -959,6 +967,6 @@ a name and the `:` on a line of their own reads as a label), but it never
 misses a construct the interpreter refuses.
 
 The other limits are described where they apply: the data model is ILP32
-(`int`, `long`, pointers and `size_t` are four bytes, `long long` is held in
-a `long`), files are composed into one translation unit (above), and the
-library is what `library.json` lists.
+(`int`, `long`, pointers and `size_t` are four bytes, `long long` is eight
+and exact up to 2^53), files are composed into one translation unit
+(above), and the library is what `library.json` lists.
