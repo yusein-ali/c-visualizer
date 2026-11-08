@@ -11,10 +11,12 @@ import {
 } from '../interpreter/ConstructTrace';
 import {
   callExpansionsOfState,
+  conversionValueOf,
   expressionTraceOf,
 } from '../interpreter/ExpressionTrace';
 import { statementNames } from '../interpreter/StatementNames';
 import {
+  bitFieldWidthOf,
   declarationInfoOf,
   displayAddressOf,
   displayPointerValueOf,
@@ -47,6 +49,7 @@ import {
   foldGroupOf,
 } from './model';
 import {
+  extractMemberValues,
   extractVariables,
   formatAddress,
   memoryRegionOf,
@@ -205,7 +208,15 @@ function valueTextOf(variable: Variable, getTypedef: Typedef): string {
   if (value !== null && typeof value !== 'undefined') {
     const raw = value.valueOf();
     if (typeof raw === 'number') {
-      const held = narrowToType(raw, getTypedef(type));
+      // `long long` is held by the engine as a `long`; the declaration says
+      // how wide the object really is.
+      const declared = declarationInfoOf(variable)?.declaredType;
+      const held = narrowToType(
+        raw,
+        typeof declared === 'string' && !/[*[]/.test(type)
+          ? declared
+          : getTypedef(type)
+      );
       if (held !== null) {
         valueStr = String(held);
       }
@@ -263,7 +274,14 @@ function scalarRows(
   if (size !== null) {
     typeCell.size = size;
   }
-  const nameCell = cell(name, key, 'name', foldGroup);
+  // A bit-field says how wide it is where C writes it: `a : 3`.
+  const bits = bitFieldWidthOf(variable);
+  const nameCell = cell(
+    bits === null ? name : `${name} : ${bits}`,
+    key,
+    'name',
+    foldGroup
+  );
   const valueCell = cell(
     valueTextOf(variable, getTypedef),
     key,
@@ -594,24 +612,81 @@ class MemoryCollector {
  */
 function withOperandValues(
   expression: ExpressionModel | null,
-  variables: VariableModel[]
+  variables: VariableModel[],
+  members: Map<string, string>
 ): ExpressionModel | null {
-  return expression === null ? null : filled(expression, scopeOf(variables));
+  return expression === null
+    ? null
+    : filled(expression, scopeOf(variables, members));
 }
 
-const scopeOf = (variables: VariableModel[]): Map<string, string> =>
-  new Map(variables.map((variable) => [variable.name, variable.value]));
+/**
+ * Names and member paths to what they hold. A variable's name never contains
+ * a dot, so the two cannot collide in one map.
+ */
+const scopeOf = (
+  variables: VariableModel[],
+  members: Map<string, string>
+): Map<string, string> => {
+  const scope = new Map(members);
+  for (const variable of variables) {
+    scope.set(variable.name, variable.value);
+  }
+  return scope;
+};
+
+/** A member access: `pt.x` or `p->x`, its member's name on the right. */
+const isMemberAccess = (node: ExpressionNodeModel): boolean =>
+  node.kind === 'operator' &&
+  (node.text === '.' || node.text === '->') &&
+  node.children.length === 2;
+
+/** The path a chain of `.` spells (`o.inner.x`), or null for anything else. */
+const pathOf = (node: ExpressionNodeModel): string | null => {
+  if (node.kind === 'operand') {
+    return node.text;
+  }
+  if (node.kind === 'operator' && node.text === '.' && isMemberAccess(node)) {
+    const parent = pathOf(node.children[0]);
+    return parent === null ? null : `${parent}.${node.children[1].text}`;
+  }
+  return null;
+};
 
 const filled = (
   expression: ExpressionModel,
   scope: Map<string, string>
 ): ExpressionModel => {
-  const fill = (node: ExpressionNodeModel): ExpressionNodeModel => {
-    const held = node.value === null ? scope.get(node.text) : undefined;
+  const fill = (
+    node: ExpressionNodeModel,
+    memberName: boolean = false
+  ): ExpressionNodeModel => {
+    const access = isMemberAccess(node);
+    const children = node.children.map((child, index) =>
+      fill(child, access && index === 1)
+    );
+    if (node.kind === 'conversion') {
+      // Worth its operand converted, once the operand is worth something.
+      return {
+        ...node,
+        children,
+        value: conversionValueOf({ ...node, children }),
+      };
+    }
+    if (memberName || node.value !== null) {
+      // The `x` of `pt.x` names a member, not the variable `x` that happens
+      // to be in scope: it is worth what the access is, shown on the access.
+      return { ...node, children };
+    }
+    // A member is filled by its path, so `pt.x` shows what `pt.x` holds. One
+    // reached through a pointer has no path to look up and waits for the
+    // engine to evaluate it.
+    const key = access ? pathOf(node) : node.text;
+    const held = key === null ? undefined : scope.get(key);
     return {
       ...node,
       value: typeof held === 'undefined' ? node.value : held,
-      children: node.children.map(fill),
+      children,
     };
   };
   return { ...expression, root: fill(expression.root) };
@@ -625,12 +700,13 @@ const filled = (
  */
 function withCallValues(
   calls: CallExpansionModel[],
-  variables: VariableModel[]
+  variables: VariableModel[],
+  members: Map<string, string>
 ): CallExpansionModel[] {
   if (calls.length === 0) {
     return [];
   }
-  const scope = scopeOf(variables);
+  const scope = scopeOf(variables, members);
   return calls.map((call) => ({
     ...call,
     expression: filled(call.expression, scope),
@@ -719,6 +795,7 @@ export function extractModel(execState?: ExecState | null): StepModel {
   memory.addFunctions(functions, addresses);
   memory.addStrings(runtimeStringsOf(execState), addresses);
   const variables = extractVariables(execState);
+  const members = extractMemberValues(execState);
   const active = variables.find((variable) => variable.active);
   const frames = callFramesOf(execState);
   const currentFrame = frames[frames.length - 1];
@@ -727,8 +804,16 @@ export function extractModel(execState?: ExecState | null): StepModel {
     pointers: addresses.resolve(),
     memory: memory.segments(),
     functions,
-    expression: withOperandValues(expressionTraceOf(execState), variables),
-    callExpansions: withCallValues(callExpansionsOfState(execState), variables),
+    expression: withOperandValues(
+      expressionTraceOf(execState),
+      variables,
+      members
+    ),
+    callExpansions: withCallValues(
+      callExpansionsOfState(execState),
+      variables,
+      members
+    ),
     variables,
     context: {
       file: null,

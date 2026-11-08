@@ -118,6 +118,46 @@ interface Marker {
 }
 
 /**
+ * An address in a recorded value, before the canvas has said where the
+ * object it names is drawn.
+ *
+ * The engine keeps objects at addresses of its own, and the canvas lays the
+ * stack and the string literals out again (`RuntimeTypeInfo`), so the number
+ * an assignment stores is not the number the reader sees on the pointer's
+ * row. Which display address an engine address gets is only known once the
+ * step's state is laid out, so a pointer value is recorded with this mark
+ * around the engine address and spelled by `resolveAddresses` - with the
+ * layout of the step the write was made in, which is the one the reader was
+ * looking at when it happened.
+ */
+const ADDRESS_MARK = '\u0001';
+// eslint-disable-next-line no-control-regex
+const MARKED_ADDRESS = /\u0001(-?\d+)\u0001/g;
+
+/** A pointer value, to be spelled as the canvas spells it. */
+export const markAddress = (address: number): string =>
+  `${ADDRESS_MARK}${Math.trunc(address)}${ADDRESS_MARK}`;
+
+/**
+ * Every marked address in a text spelled as the canvas spells it: the
+ * display address, in hexadecimal, or the engine's own where the canvas has
+ * no object there either (a dangling pointer, a freed block).
+ */
+export function spellAddresses(
+  text: string,
+  display: (address: number) => number | undefined
+): string {
+  if (text.indexOf(ADDRESS_MARK) === -1) {
+    return text;
+  }
+  return text.replace(MARKED_ADDRESS, (_, digits: string) => {
+    const engine = Number(digits);
+    const shown = display(engine) ?? engine;
+    return `0x${shown.toString(16).toUpperCase()}`;
+  });
+}
+
+/**
  * How many writes the log keeps. A run of a hundred thousand iterations
  * writes a hundred thousand times, and the reader is looking at the recent
  * ones; the oldest go rather than the tab.
@@ -150,13 +190,32 @@ const targetText = (node: unknown, values?: Map<object, string>): string => {
   }
   if (node instanceof UniUnaryOp) {
     const inner = targetText(node.expr, values);
-    return inner === '' ? '' : `${node.operator}${inner}`;
+    if (inner === '') {
+      return '';
+    }
+    if (node.operator === '()') {
+      return `(${inner})`;
+    }
+    return `${node.operator}${inner}`;
   }
   if (node instanceof UniBinOp) {
-    const left = targetText(node.left, values);
+    let left = targetText(node.left, values);
     const right = targetText(node.right, values);
     if (left === '') {
       return '';
+    }
+    const postfix =
+      node.operator === '[]' || node.operator === '.' || node.operator === '->';
+    // The tree keeps no parentheses: `(p + 2)->x` and `(*p).x` need theirs
+    // back where a postfix operator binds tighter than the operand's own.
+    if (
+      postfix &&
+      typeof values?.get(node.left) === 'undefined' &&
+      ((node.left instanceof UniBinOp &&
+        ['[]', '.', '->'].indexOf(node.left.operator) === -1) ||
+        (node.left instanceof UniUnaryOp && node.left.operator !== '()'))
+    ) {
+      left = `(${left})`;
     }
     if (node.operator === '[]') {
       return `${left}[${right}]`;
@@ -228,6 +287,11 @@ interface Activation {
   timesEntered?: number;
   /** The function this call entered, so an argument reaches both. */
   callee?: Activation;
+  /**
+   * For a `functionDec` the library called back (`qsort`'s comparator): the
+   * values it passed, since no call expression of the program's carries them.
+   */
+  calledBackWith?: string[];
 }
 
 /**
@@ -351,6 +415,15 @@ const spell = (value: unknown): string => {
     : `${text.slice(0, VALUE_LIMIT - 1)}…`;
 };
 
+/** A pointer value as an address mark, or spelled as any value is. */
+const spellPointer = (value: unknown): string => {
+  const raw = (value as { valueOf?: () => unknown } | null)?.valueOf?.();
+  const number = typeof raw === 'number' ? raw : Number(value);
+  return Number.isFinite(number) && !Array.isArray(value)
+    ? markAddress(number)
+    : spell(value);
+};
+
 /**
  * One activation as facts. A fact with no value is a sentence on its own; one
  * with a value reads as `phrase: value`, and the phrases live in `strings.ts`
@@ -458,6 +531,8 @@ export class ConstructRecorder {
   private mutations: MutationModel[] = [];
   /** The labels each `switch` declares, indexed while the tree is walked. */
   private cases = new WeakMap<object, CaseLabel[]>();
+  /** Writes whose values still hold address marks; see `resolveAddresses`. */
+  private unresolved: MutationModel[] = [];
 
   /**
    * A new run. The index is built once, from the tree about to execute: a
@@ -472,6 +547,7 @@ export class ConstructRecorder {
     this.entries = new Map<object, number>();
     this.evaluations = new Map<object, EvaluationModel>();
     this.mutations = [];
+    this.unresolved = [];
     this.cases = new WeakMap<object, CaseLabel[]>();
     this.index(program);
     if (entryPoint !== null) {
@@ -519,6 +595,25 @@ export class ConstructRecorder {
       site.parameters = activation.parameters;
       site.callee = activation;
     }
+    return depth;
+  }
+
+  /**
+   * A function the library calls back through a pointer - `qsort`'s
+   * comparator - entered from inside the library call that is on the stack.
+   */
+  calledBack(declaration: UniFunctionDec, args: string[]): number {
+    const depth = this.stack.length;
+    const activation = this.activationOf(declaration, 'functionDec');
+    if (activation === null) {
+      return depth;
+    }
+    const times = (this.entries.get(declaration) ?? 0) + 1;
+    this.entries.set(declaration, times);
+    activation.timesEntered = times;
+    activation.parameters = parameterNames(declaration);
+    activation.calledBackWith = args;
+    this.stack.push(activation);
     return depth;
   }
 
@@ -639,7 +734,7 @@ export class ConstructRecorder {
    * assignment itself never evaluates its target - the engine takes its
    * address instead - so this is the one place the previous value is in hand.
    */
-  assigns(previous: unknown, uninitialized = false): void {
+  assigns(previous: unknown, uninitialized = false, pointer = false): void {
     const activation = this.assigning[this.assigning.length - 1];
     if (typeof activation === 'undefined') {
       return;
@@ -647,15 +742,22 @@ export class ConstructRecorder {
     if (uninitialized || typeof previous === 'undefined') {
       activation.before = 'uninitialized';
     } else {
-      activation.before = spell(previous);
+      activation.before =
+        pointer && previous !== null ? spellPointer(previous) : spell(previous);
     }
   }
 
-  /** What a successful write left in its target. */
-  assigned(value: unknown): void {
+  /**
+   * What a successful write left in its target. A pointer's value is kept
+   * as an address mark, for the canvas's layout to spell.
+   */
+  assigned(value: unknown, pointer = false): void {
     const activation = this.assigning[this.assigning.length - 1];
     if (typeof activation !== 'undefined') {
-      activation.result = spell(value);
+      activation.result =
+        pointer && value !== null && typeof value !== 'undefined'
+          ? spellPointer(value)
+          : spell(value);
       if (
         typeof activation.targetNode !== 'undefined' &&
         0 < activation.targetValues.size
@@ -698,6 +800,29 @@ export class ConstructRecorder {
     // target held would be forgotten before the value replacing it arrives.
     this.finished = this.assigning.slice();
     this.evaluations = new Map<object, EvaluationModel>();
+  }
+
+  /**
+   * Spells the addresses in what was recorded since the last call with the
+   * layout of the step the run has just stopped at: the writes, and the
+   * facts the state carries. Called once per step, after the canvas has
+   * laid the step out.
+   */
+  resolveAddresses(
+    state: ExecState,
+    display: (address: number) => number | undefined
+  ): void {
+    for (const mutation of this.unresolved) {
+      mutation.before = spellAddresses(mutation.before, display);
+      mutation.after = spellAddresses(mutation.after, display);
+    }
+    this.unresolved = [];
+    for (const construct of (state as StateWithConstructs).plivetConstructs ??
+      []) {
+      for (const fact of construct.facts) {
+        fact.value = spellAddresses(fact.value, display);
+      }
+    }
   }
 
   /** Nothing is running any more, so nothing is doing anything. */
@@ -789,16 +914,42 @@ export class ConstructRecorder {
     if (target === '' || typeof activation.result === 'undefined') {
       return;
     }
-    this.mutations.push({
+    this.log({
       target,
       frame: this.innermostFunction(),
       before: activation.before ?? '',
       after: activation.result,
       line: activation.range.begin.y,
     });
+  }
+
+  /** One entry of the write log, its addresses left for the layout. */
+  private log(mutation: MutationModel): void {
+    this.mutations.push(mutation);
     if (MUTATION_LIMIT < this.mutations.length) {
       this.mutations.shift();
     }
+    if (
+      mutation.before.indexOf(ADDRESS_MARK) !== -1 ||
+      mutation.after.indexOf(ADDRESS_MARK) !== -1
+    ) {
+      this.unresolved.push(mutation);
+    }
+  }
+
+  /**
+   * A write a library function made. No assignment construct sees it, but
+   * `strcpy(buf, "hi")` changes `buf` as surely as `buf[0] = 'h'` does, and
+   * the reader looking for what changed an object has to find it here too.
+   */
+  libraryWrote(target: string, before: string, after: string, line: number) {
+    this.log({
+      target,
+      frame: this.innermostFunction(),
+      before,
+      after,
+      line,
+    });
   }
 
   private innermostFunction(): string {
@@ -831,7 +982,9 @@ export class ConstructRecorder {
         name: activation.name ?? '',
         line: activation.range.begin.y,
         calledFrom: site === null ? null : site.range.begin.y,
-        arguments: (site === null ? [] : site.args).map((value, position) => ({
+        arguments: (
+          activation.calledBackWith ?? (site === null ? [] : site.args)
+        ).map((value, position) => ({
           name: activation.parameters[position] ?? '',
           value,
         })),

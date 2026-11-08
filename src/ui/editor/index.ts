@@ -40,16 +40,61 @@ export type {
   DeclarationSource,
 } from './gotoDeclaration';
 export { coverageField, setCoverage } from './coverage';
-export { isSession, restoreSession, sessionOf } from './session';
-export type { SessionJSON } from './session';
+export {
+  documentSelection,
+  documentSessionFor,
+  documentText,
+  isDocumentSession,
+  isProgramSession,
+  isSession,
+  restoreSession,
+  sessionOf,
+} from './session';
+export type {
+  DocumentSessionJSON,
+  ProgramSessionJSON,
+  SessionFileJSON,
+  SessionJSON,
+  SessionSelection,
+  SessionWatch,
+} from './session';
 export {
   editableRegions,
+  lineIsProtected,
+  protectedExtensions,
   protectedField,
   protectedRegions,
+  protectionLocked,
   setEditableRegions,
+  setProtection,
   unprotected,
 } from './protected';
-export type { EditableRegion } from './protected';
+export type { EditableRegion, Protection } from './protected';
+export {
+  anchorSegments,
+  isLineRange,
+  locateSegments,
+  mergeLineRanges,
+  normalizeRegions,
+  segmentsFromLines,
+  segmentsFromOffsets,
+  sourceLineCount,
+} from './segments';
+export type {
+  Anchoring,
+  IgnoredLines,
+  LineRange,
+  ProtectedSegment,
+  ProtectedSpan,
+  SegmentAnchor,
+} from './segments';
+export {
+  loadNoticeField,
+  loadNoticeOf,
+  loadNoticeText,
+  setLoadNotice,
+} from './loadNotice';
+export type { LoadNotice } from './loadNotice';
 export type { LineCoverage } from './coverage';
 export { excludedRegionFolding } from './folding';
 export { insertNewlineKeepingLineStart, newlineKeymap } from './newline';

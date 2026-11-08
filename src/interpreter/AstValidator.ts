@@ -1,6 +1,7 @@
 import { UniBlock } from 'unicoen.ts/dist/node/UniBlock';
 import { UniNode } from 'unicoen.ts/dist/node/UniNode';
 import { UniProgram } from 'unicoen.ts/dist/node/UniProgram';
+import { LIBRARY_TYPE_PATTERN } from './library/types';
 
 export interface AstValidationError {
   line: number;
@@ -12,9 +13,12 @@ export interface AstValidationError {
  * A line that opens a declaration. The same shape `syntaxErrorMessage` in
  * `core/server.ts` looks for, and for the same reason: it is what a statement
  * missing its semicolon looks like from the source rather than from the tree.
+ * The library's typedef names (`size_t`, `time_t`, ...) open one as well.
  */
-const DECLARATION =
-  /^(?:(?:const|volatile|static|extern|register|unsigned|signed|long|short)\s+)*(?:void|char|short|int|long|float|double|_Bool|bool|struct|enum|union|FILE)\b/;
+const DECLARATION = new RegExp(
+  '^(?:(?:const|volatile|static|extern|register|unsigned|signed|long|short)\\s+)*' +
+    `(?:void|char|short|int|long|float|double|_Bool|bool|struct|enum|union|FILE|${LIBRARY_TYPE_PATTERN})\\b`
+);
 
 /** A line the parser would have read as finished. */
 const TERMINATED = /[;{}:,=+\-*/%<>&|^!?~[(\\]$/;

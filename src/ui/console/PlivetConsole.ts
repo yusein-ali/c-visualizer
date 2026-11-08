@@ -15,9 +15,16 @@ import strings from '../../strings';
  * current line delete all three problems rather than fixing them.
  *
  * The class knows nothing about the interpreter or the event bus: it reports a
- * submitted line through `onInput` and is told what to show. That is what lets
- * it move out of the React shell without changing.
+ * submitted line through `onInput`, the end of the input through
+ * `onEndOfInput`, and is told what to show. That is what lets it move out of
+ * the React shell without changing.
  */
+
+/** A stretch of the transcript the program wrote to `stderr`, as offsets. */
+export interface ConsoleSpan {
+  start: number;
+  end: number;
+}
 
 export interface PlivetConsoleOptions {
   /** Initial transcript. */
@@ -31,10 +38,19 @@ export interface PlivetConsoleOptions {
    * legitimate submission: it is how a program is told to read nothing.
    */
   onInput?: (text: string) => void;
+  /**
+   * The user ended the input - Ctrl+D in the field, or the button beside it -
+   * with whatever was typed before it, which has no newline after it and may
+   * be empty. The read the program is waiting on then finds the end of input.
+   */
+  onEndOfInput?: (text: string) => void;
   /** Placeholder shown while the program is blocked on a read. */
   inputHint?: string;
   /** Accessible name for the input field. */
   inputLabel?: string;
+  /** The end-of-input button's text, and its tooltip. */
+  endInputLabel?: string;
+  endInputHint?: string;
   dark?: boolean;
   fontSize?: number;
   /** Ask the containing layout to reveal the console for new output/input. */
@@ -44,8 +60,10 @@ export interface PlivetConsoleOptions {
 const defaults = {
   output: '',
   title: strings.consoleTitle,
-  inputHint: 'Enter to submit, Shift+Enter for another line',
+  inputHint: strings.consoleInputHint,
   inputLabel: 'standard input',
+  endInputLabel: strings.consoleEndInput,
+  endInputHint: strings.consoleEndInputHint,
   dark: false,
   fontSize: 14,
   heading: true,
@@ -57,7 +75,11 @@ export class PlivetConsole {
   private readonly disclosure?: HTMLDetailsElement;
   private readonly transcript: HTMLPreElement;
   private readonly field: HTMLTextAreaElement;
+  private readonly endButton: HTMLButtonElement;
   private readonly onInput?: (text: string) => void;
+  private readonly onEndOfInput?: (text: string) => void;
+  /** The spans `setOutput` last drew, to skip an identical redraw. */
+  private spansShown = '';
   private readonly onReveal?: () => void;
   private readonly inputHint: string;
   private accepting = false;
@@ -65,6 +87,7 @@ export class PlivetConsole {
   constructor(parent: HTMLElement, options: PlivetConsoleOptions = {}) {
     const config = { ...defaults, ...options };
     this.onInput = options.onInput;
+    this.onEndOfInput = options.onEndOfInput;
     this.onReveal = options.onReveal;
     this.inputHint = config.inputHint;
 
@@ -99,10 +122,22 @@ export class PlivetConsole {
     this.field.addEventListener('keydown', this.keydown);
     this.field.addEventListener('input', this.fitField);
 
+    // Ctrl+D at a terminal, as a button for a reader who does not know it.
+    this.endButton = document.createElement('button');
+    this.endButton.type = 'button';
+    this.endButton.className = 'plivet-console-end';
+    this.endButton.textContent = config.endInputLabel;
+    this.endButton.title = config.endInputHint;
+    this.endButton.addEventListener('click', this.endClicked);
+
+    const entry = document.createElement('div');
+    entry.className = 'plivet-console-entry';
+    entry.append(this.field, this.endButton);
+
     this.root.append(
       ...(config.heading ? [title] : []),
       this.transcript,
-      this.field
+      entry
     );
     parent.appendChild(this.root);
 
@@ -117,12 +152,36 @@ export class PlivetConsole {
     this.setAccepting(false);
   }
 
-  /** The program's output, as the interpreter reports it after every step. */
-  setOutput(output: string): void {
-    if (this.transcript.textContent === output) {
+  /**
+   * The program's output, as the interpreter reports it after every step,
+   * and which spans of it came from `stderr`: those are drawn in the error
+   * colour, the rest as ordinary text.
+   */
+  setOutput(output: string, errorSpans: ConsoleSpan[] = []): void {
+    const spans = JSON.stringify(errorSpans);
+    if (this.transcript.textContent === output && this.spansShown === spans) {
       return;
     }
-    this.transcript.textContent = output;
+    this.spansShown = spans;
+    this.transcript.textContent = '';
+    let at = 0;
+    for (const span of errorSpans) {
+      const start = Math.max(at, Math.min(span.start, output.length));
+      const end = Math.max(start, Math.min(span.end, output.length));
+      if (at < start) {
+        this.transcript.append(output.slice(at, start));
+      }
+      if (start < end) {
+        const error = document.createElement('span');
+        error.className = 'plivet-console-stderr';
+        error.textContent = output.slice(start, end);
+        this.transcript.append(error);
+      }
+      at = end;
+    }
+    if (at < output.length) {
+      this.transcript.append(output.slice(at));
+    }
     this.expand();
     if (output !== '') {
       this.onReveal?.();
@@ -137,6 +196,7 @@ export class PlivetConsole {
   setAccepting(accepting: boolean): void {
     this.accepting = accepting;
     this.field.disabled = !accepting;
+    this.endButton.disabled = !accepting;
     this.field.placeholder = accepting ? this.inputHint : '';
     this.root.classList.toggle('plivet-console--accepting', accepting);
     if (!accepting) {
@@ -163,10 +223,24 @@ export class PlivetConsole {
   destroy(): void {
     this.field.removeEventListener('keydown', this.keydown);
     this.field.removeEventListener('input', this.fitField);
+    this.endButton.removeEventListener('click', this.endClicked);
     this.root.remove();
   }
 
   private readonly keydown = (event: KeyboardEvent) => {
+    // Ctrl+D is how a terminal ends its input, on every platform: macOS uses
+    // Control here too, and Command+D belongs to the browser.
+    if (
+      event.ctrlKey &&
+      !event.altKey &&
+      !event.metaKey &&
+      !event.shiftKey &&
+      event.key.toLowerCase() === 'd'
+    ) {
+      event.preventDefault();
+      this.endInput();
+      return;
+    }
     // Shift+Enter is the escape hatch for the several values one read can
     // consume: the interpreter keeps whatever a read leaves over, so `3\n4`
     // answers two scanfs. `isComposing` guards the Enter that commits an IME
@@ -187,6 +261,17 @@ export class PlivetConsole {
     if (typeof this.onInput !== 'undefined') {
       this.onInput(text);
     }
+  }
+
+  private readonly endClicked = () => this.endInput();
+
+  private endInput(): void {
+    if (!this.accepting) {
+      return;
+    }
+    const text = this.field.value;
+    this.setAccepting(false);
+    this.onEndOfInput?.(text);
   }
 
   /** Grows the field with what is typed, up to the cap in the stylesheet. */

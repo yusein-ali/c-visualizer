@@ -1,0 +1,54 @@
+/*
+ * The expression tree on a page of its own (`c-expression.js`).
+ *
+ * The boxes are painted through the canvas's tokens, the ones `graph.css`
+ * defines under `.plivet-graph`, which this tree is not inside. So the tokens
+ * the boxes, pills, links and outline read are named again here, for both
+ * themes, with the same values: keep the two in step. A host may still set
+ * any of them on an ancestor of its own and win, as it can on the canvas.
+ */
+.plivet-expression-tree {
+  --plivet-graph-ink: #111111;
+  --plivet-graph-focus-line: #d9a400;
+  --plivet-graph-expression-assignment: #fff0c2;
+  --plivet-graph-expression-operator: #dcecff;
+  --plivet-graph-expression-operand: #f4f4f4;
+  --plivet-graph-expression-value: #ffffff;
+  --plivet-graph-expression-value-border: #b8c4cf;
+  --plivet-graph-expression-value-label: #5d6b78;
+  --plivet-graph-expression-border: #202020;
+  --plivet-graph-expression-link: #5c6773;
+  --plivet-graph-expression-conversion: #f3edff;
+  --plivet-graph-expression-conversion-border: #7759c2;
+
+  display: block;
+  max-width: 100%;
+  overflow: auto;
+  /* Wide trees scroll inside the block rather than widening the page. */
+  overscroll-behavior-x: contain;
+}
+
+.plivet-expression-tree--dark {
+  --plivet-graph-ink: #f3f5f7;
+  --plivet-graph-focus-line: #e0bc3a;
+  --plivet-graph-expression-assignment: #5a491d;
+  --plivet-graph-expression-operator: #27445e;
+  --plivet-graph-expression-operand: #323b44;
+  --plivet-graph-expression-value: #1f272e;
+  --plivet-graph-expression-value-border: #667786;
+  --plivet-graph-expression-value-label: #bac7d2;
+  --plivet-graph-expression-border: #a7b2bc;
+  --plivet-graph-expression-link: #8794a0;
+  --plivet-graph-expression-conversion: #3a3157;
+  --plivet-graph-expression-conversion-border: #b5a1ec;
+
+  color-scheme: dark;
+}
+
+.plivet-expression-tree--empty {
+  display: none;
+}
+
+.plivet-expression-tree__paper {
+  display: block;
+}

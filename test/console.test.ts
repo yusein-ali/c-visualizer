@@ -138,6 +138,102 @@ describe('input', () => {
   });
 });
 
+describe('the end of input', () => {
+  const mountEnding = () => {
+    const parent = document.createElement('div');
+    document.body.appendChild(parent);
+    const lines: string[] = [];
+    const ended: string[] = [];
+    const console = new PlivetConsole(parent, {
+      onInput: (text) => lines.push(text),
+      onEndOfInput: (text) => ended.push(text),
+    });
+    const field = parent.querySelector('textarea') as HTMLTextAreaElement;
+    const button = parent.querySelector(
+      '.plivet-console-end'
+    ) as HTMLButtonElement;
+    return { console, field, button, lines, ended };
+  };
+
+  it('offers a button beside the field, usable only while a read waits', () => {
+    const { console, field, button, ended } = mountEnding();
+    expect(button.parentElement).toBe(field.parentElement);
+    expect(button.type).toBe('button');
+    expect(button.title).toContain('Ctrl+D');
+    expect(button.disabled).toBe(true);
+    button.click();
+    expect(ended).toEqual([]);
+
+    console.setAccepting(true);
+    expect(button.disabled).toBe(false);
+    button.click();
+    expect(ended).toEqual(['']);
+    // Nothing is waiting any more, until the next response says so.
+    expect(button.disabled).toBe(true);
+    expect(field.disabled).toBe(true);
+  });
+
+  it('ends the input on Ctrl+D, with whatever was typed before it', () => {
+    const { console, field, lines, ended } = mountEnding();
+    console.setAccepting(true);
+    field.value = 'partial';
+    expect(press(field, { key: 'd', ctrlKey: true })).toBe(false);
+    expect(ended).toEqual(['partial']);
+    expect(lines).toEqual([]);
+    expect(field.value).toBe('');
+  });
+
+  it('leaves Command+D and Ctrl+Shift+D to the browser', () => {
+    const { console, field, ended } = mountEnding();
+    console.setAccepting(true);
+    expect(press(field, { key: 'd', metaKey: true })).toBe(true);
+    expect(press(field, { key: 'D', ctrlKey: true, shiftKey: true })).toBe(
+      true
+    );
+    expect(ended).toEqual([]);
+  });
+
+  it('does nothing on Ctrl+D when no read is waiting', () => {
+    const { field, ended } = mountEnding();
+    press(field, { key: 'd', ctrlKey: true });
+    expect(ended).toEqual([]);
+  });
+});
+
+describe('standard error', () => {
+  it('draws the spans the program wrote to stderr in the error colour', () => {
+    const { console, output } = mount();
+    console.setOutput('one\nbad\ntwo\nworse', [
+      { start: 4, end: 8 },
+      { start: 12, end: 17 },
+    ]);
+    expect(output.textContent).toBe('one\nbad\ntwo\nworse');
+    const errors = Array.from(
+      output.querySelectorAll('.plivet-console-stderr')
+    ).map((span) => span.textContent);
+    expect(errors).toEqual(['bad\n', 'worse']);
+  });
+
+  it('redraws when only the spans change, and drops them when they go', () => {
+    const { console, output } = mount();
+    console.setOutput('same', []);
+    console.setOutput('same', [{ start: 0, end: 4 }]);
+    expect(output.querySelectorAll('.plivet-console-stderr')).toHaveLength(1);
+    console.setOutput('same');
+    expect(output.querySelectorAll('.plivet-console-stderr')).toHaveLength(0);
+    expect(output.textContent).toBe('same');
+  });
+
+  it('clips a span that runs past the output', () => {
+    const { console, output } = mount();
+    console.setOutput('ab', [{ start: 1, end: 9 }]);
+    expect(output.textContent).toBe('ab');
+    expect(output.querySelector('.plivet-console-stderr')!.textContent).toBe(
+      'b'
+    );
+  });
+});
+
 describe('lifecycle', () => {
   it('takes its markup with it', () => {
     const { console, parent } = mount();

@@ -34,8 +34,23 @@ export { callStackRows } from './callStack';
 export type { CallStackRow } from './callStack';
 export { callHeading } from './callSection';
 export { expressionNodeLabel } from './expressionLabel';
-export { ExpressionNode, expressionNodeOf } from './ExpressionNode';
-export { expressionGeometry } from './expressionLayout';
+export {
+  ExpressionNode,
+  expressionCells,
+  expressionNodeOf,
+} from './ExpressionNode';
+export {
+  CONVERSION_HEIGHT,
+  EXPRESSION_LAYOUT,
+  conversionWidth,
+  expressionGeometry,
+} from './expressionLayout';
+export { EXPRESSION_FONT_SIZE, ExpressionTree } from './ExpressionTree';
+export type {
+  ExpressionTreeOptions,
+  ExpressionTreeRenderOptions,
+  ExpressionTreeTheme,
+} from './ExpressionTree';
 export type {
   ExpressionGeometry,
   ExpressionLayoutOptions,

@@ -1,6 +1,14 @@
 import type { MemoryRegion, SourceFile, ViewSelection } from '../core';
-import type { EditableRegion } from '../ui/editor';
-import type { PlivetFeatures, PlivetOptions } from './Plivet';
+import type { EditableRegion, LineRange, SessionJSON } from '../ui/editor';
+import { isLineRange } from '../ui/editor/segments';
+import { isSession } from '../ui/editor/session';
+import type {
+  PlivetControls,
+  PlivetFeatures,
+  PlivetLayoutMode,
+  PlivetOptions,
+} from './Plivet';
+import type { EditableRegionsOption, FileEditableLines } from './protection';
 import { codeMirrorTheme, type CodeMirrorConfig } from './host';
 import { codeMirrorCount, codeMirrorFlag } from './host';
 import type { Theme } from './theme';
@@ -109,6 +117,7 @@ const featuresOf = (value: unknown): PlivetFeatures | undefined => {
   const preprocessor = boolean(value.preprocessor, 'features.preprocessor');
   const loadSource = boolean(value.loadSource, 'features.loadSource');
   const loadFile = boolean(value.loadFile, 'features.loadFile');
+  const programArgs = boolean(value.programArgs, 'features.programArgs');
   if (typeof preprocessor !== 'undefined') {
     features.preprocessor = preprocessor;
   }
@@ -117,6 +126,9 @@ const featuresOf = (value: unknown): PlivetFeatures | undefined => {
   }
   if (typeof loadSource !== 'undefined') {
     features.loadSource = loadSource;
+  }
+  if (typeof programArgs !== 'undefined') {
+    features.programArgs = programArgs;
   }
   return features;
 };
@@ -272,26 +284,143 @@ const filesOf = (value: unknown): SourceFile[] | undefined => {
   return files;
 };
 
-/** The spans the reader may type in, as offsets into the program. */
-const regionsOf = (value: unknown): EditableRegion[] | undefined => {
+/**
+ * The spans the reader may type in: offsets into the entry file, or line
+ * ranges per file. A range that is not one is dropped on its own, and the
+ * lines it would have opened stay protected - the rule the Sphinx build
+ * applies to a part of `:editable-lines:` it cannot read.
+ */
+const regionsOf = (value: unknown): EditableRegionsOption | undefined => {
   if (typeof value === 'undefined') {
     return undefined;
   }
-  if (!Array.isArray(value)) {
-    warn('editableRegions must be an array');
+  if (Array.isArray(value)) {
+    const regions: EditableRegion[] = [];
+    for (const [index, region] of value.entries()) {
+      const from = isObject(region) ? region.from : undefined;
+      const to = isObject(region) ? region.to : undefined;
+      if (typeof from !== 'number' || typeof to !== 'number') {
+        warn(`editableRegions[${index}] needs a numeric from and to`);
+        continue;
+      }
+      regions.push({ from, to });
+    }
+    return regions;
+  }
+  if (!isObject(value)) {
+    warn(
+      'editableRegions must be an array of offsets or an object of line ranges per file'
+    );
     return undefined;
   }
-  const regions: EditableRegion[] = [];
-  for (const [index, region] of value.entries()) {
-    const from = isObject(region) ? region.from : undefined;
-    const to = isObject(region) ? region.to : undefined;
-    if (typeof from !== 'number' || typeof to !== 'number') {
-      warn(`editableRegions[${index}] needs a numeric from and to`);
+  const byFile: Record<string, LineRange[] | FileEditableLines> = {};
+  for (const [path, entry] of Object.entries(value)) {
+    const field = `editableRegions.${path}`;
+    const lines = Array.isArray(entry)
+      ? entry
+      : isObject(entry)
+        ? entry.lines
+        : undefined;
+    if (!Array.isArray(lines)) {
+      warn(`${field} must be [start, end] line ranges, or { lines, text }`);
       continue;
     }
-    regions.push({ from, to });
+    const ranges: LineRange[] = [];
+    for (const [index, range] of lines.entries()) {
+      if (!isLineRange(range)) {
+        warn(
+          `${field}[${index}] must be [start, end], counted from 1, start not after end`
+        );
+        continue;
+      }
+      ranges.push([range[0], range[1]]);
+    }
+    const text = isObject(entry)
+      ? string(entry.text, `${field}.text`)
+      : undefined;
+    byFile[path] =
+      typeof text === 'undefined' ? ranges : { lines: ranges, text };
   }
-  return regions;
+  return byFile;
+};
+
+/**
+ * A session to open with. It is checked whole, as `restoreSession` checks
+ * one: a session with one malformed file is no session.
+ */
+const sessionOf = (value: unknown): SessionJSON | undefined => {
+  if (typeof value === 'undefined') {
+    return undefined;
+  }
+  if (!isSession(value)) {
+    warn('session must be a version 1 or version 2 session');
+    return undefined;
+  }
+  return value;
+};
+
+/** Side by side, one above the other, or whichever the width suits. */
+const layoutOf = (value: unknown): PlivetLayoutMode | undefined => {
+  const name = string(value, 'layout');
+  if (typeof name === 'undefined') {
+    return undefined;
+  }
+  if (name !== 'auto' && name !== 'columns' && name !== 'stacked') {
+    warn('layout must be "auto", "columns" or "stacked"');
+    return undefined;
+  }
+  return name;
+};
+
+/** The width, in pixels, below which `auto` stacks the boxes. */
+const stackedBelowOf = (value: unknown): number | undefined => {
+  if (typeof value === 'undefined') {
+    return undefined;
+  }
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    warn('stackedBelow must be a number of pixels, 0 or more');
+    return undefined;
+  }
+  return value;
+};
+
+/**
+ * The program's arguments: an array of strings, or one string written as a
+ * command line, kept as written so the control bar's field shows the page's
+ * own quoting. The application splits it.
+ */
+const argsOf = (value: unknown): string[] | string | undefined => {
+  if (typeof value === 'undefined' || typeof value === 'string') {
+    return value;
+  }
+  if (Array.isArray(value) && value.every((arg) => typeof arg === 'string')) {
+    return [...value];
+  }
+  warn('args must be an array of strings or one string of arguments');
+  return undefined;
+};
+
+/** The control-bar items the page takes off the bar. */
+const controlsOf = (value: unknown): PlivetControls | undefined => {
+  if (typeof value === 'undefined') {
+    return undefined;
+  }
+  if (!isObject(value)) {
+    warn('controls must be an object');
+    return undefined;
+  }
+  const controls: PlivetControls = {};
+  for (const [name, shown] of Object.entries(value)) {
+    if (name !== 'theme' && name !== 'textSize') {
+      warn(`controls.${name} is not a control that can be hidden`);
+      continue;
+    }
+    const flag = boolean(shown, `controls.${name}`);
+    if (typeof flag !== 'undefined') {
+      controls[name] = flag;
+    }
+  }
+  return controls;
 };
 
 /**
@@ -317,7 +446,12 @@ export function parseConfig(text: string): PlivetOptions {
   const theme = themeOf(parsed.theme);
   const files = filesOf(parsed.files);
   const editableRegions = regionsOf(parsed.editableRegions);
+  const session = sessionOf(parsed.session);
+  const controls = controlsOf(parsed.controls);
+  const layout = layoutOf(parsed.layout);
+  const stackedBelow = stackedBelowOf(parsed.stackedBelow);
   const features = featuresOf(parsed.features);
+  const args = argsOf(parsed.args);
   const footer = boolean(parsed.footer, 'footer');
   const licenses = string(parsed.licenses, 'licenses');
   const codeMirror = codeMirrorOf(
@@ -343,8 +477,23 @@ export function parseConfig(text: string): PlivetOptions {
   if (typeof editableRegions !== 'undefined') {
     options.editableRegions = editableRegions;
   }
+  if (typeof session !== 'undefined') {
+    options.session = session;
+  }
+  if (typeof controls !== 'undefined') {
+    options.controls = controls;
+  }
+  if (typeof layout !== 'undefined') {
+    options.layout = layout;
+  }
+  if (typeof stackedBelow !== 'undefined') {
+    options.stackedBelow = stackedBelow;
+  }
   if (typeof features !== 'undefined') {
     options.features = features;
+  }
+  if (typeof args !== 'undefined') {
+    options.args = args;
   }
   if (typeof footer !== 'undefined') {
     options.footer = footer;

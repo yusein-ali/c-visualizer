@@ -10,11 +10,23 @@
  */
 export { Plivet, Plivet as CVisualizer } from './app/Plivet';
 export type {
+  PlivetControls,
+  PlivetControls as CVisualizerControls,
   PlivetFeatures,
   PlivetFeatures as CVisualizerFeatures,
+  PlivetLayout,
+  PlivetLayout as CVisualizerLayout,
+  PlivetLayoutMode,
+  PlivetLayoutMode as CVisualizerLayoutMode,
   PlivetOptions,
   PlivetOptions as CVisualizerOptions,
 } from './app/Plivet';
+export type {
+  EditableRegionsOption,
+  FileEditableLines,
+  LoadOrigin,
+  LoadRefusal,
+} from './app/protection';
 export {
   CONFIG_ATTRIBUTE,
   CONFIG_ELEMENT_ID,
@@ -30,7 +42,16 @@ export {
 } from './app/mount';
 export type { ViewSelection } from './core';
 export type { Theme } from './app/theme';
-export type { EditableRegion, SessionJSON } from './ui/editor';
+export type {
+  DocumentSessionJSON,
+  EditableRegion,
+  LineRange,
+  ProgramSessionJSON,
+  SessionFileJSON,
+  SessionJSON,
+  SessionSelection,
+  SessionWatch,
+} from './ui/editor';
 export type { SourceFile } from './core';
 export type {
   CodeMirrorConfig,
@@ -39,8 +60,28 @@ export type {
   DiagnosticOptions,
   DiagnosticProvider,
   ExternalDiagnostic,
+  ProtectedSpan,
+  SnapshotFile,
   SourcePosition,
   SourceSnapshot,
   Unsubscribe,
 } from './app/host';
 export { codeMirrorSettings } from './app/host';
+export {
+  LIBRARY_MANIFEST_VERSION,
+  libraryManifest,
+} from './app/libraryManifest';
+export type {
+  LibraryManifest,
+  ManifestFunction,
+  ManifestMacro,
+  ManifestObject,
+  ManifestRefused,
+  ManifestType,
+} from './app/libraryManifest';
+export { REFUSED_CONSTRUCTS } from './interpreter/refused';
+export type {
+  RefusedConstruct,
+  RefusedConstructId,
+} from './interpreter/refused';
+export { joinArgs, splitArgs } from './app/programArgs';

@@ -52,6 +52,23 @@ export interface ControlBarOptions {
   onBuild?: () => void;
   /** Whether the host-backed Build button is present. */
   build?: boolean;
+  /**
+   * Whether the bar carries the theme switch. A host that keeps the theme in
+   * step with its own page leaves it out, and the switch is not built rather
+   * than built and hidden. Default: it is there.
+   */
+  theme?: boolean;
+  /** Whether the bar carries the three text-size buttons. Default: yes. */
+  textSize?: boolean;
+  /**
+   * Whether the bar carries the program-arguments field, where the reader
+   * writes what `main` receives in `argv`. Default: it is not there.
+   */
+  programArgs?: boolean;
+  /** The field's text when the bar opens: arguments as on a command line. */
+  args?: string;
+  /** The field's text, on every change the reader makes to it. */
+  onArgs?: (text: string) => void;
   dark?: boolean;
 }
 
@@ -70,7 +87,10 @@ export class ControlBar {
   private readonly buttons: DebugButton[] = [];
   private readonly debugToolbar: HTMLDivElement;
   private readonly dragHandle: HTMLButtonElement;
-  private readonly theme: HTMLSelectElement;
+  /** Null where the page has left the switch off the bar. */
+  private readonly theme: HTMLSelectElement | null;
+  /** Null unless the page asked for the program-arguments field. */
+  private readonly args: HTMLInputElement | null = null;
   private readonly fileInput: HTMLInputElement;
   /** The tab strip whose height keeps the toolbar below the file names. */
   private toolbarTabs: HTMLElement | null = null;
@@ -132,24 +152,29 @@ export class ControlBar {
     this.fileInput.disabled = options.load !== true;
     this.fileInput.addEventListener('change', this.chosen);
 
-    this.theme = this.themeSwitch();
+    this.theme = options.theme === false ? null : this.themeSwitch();
+    const argsField =
+      options.programArgs === true ? this.argsField(options.args ?? '') : null;
+    if (argsField !== null) {
+      this.args = argsField.querySelector('input');
+    }
     this.dragHandle = this.toolbarHandle();
     this.debugToolbar = this.debugGroup();
 
     // Left to right: save/load, the compiler's source, text size, help and the
     // theme. The run controls float independently over the editor. A configured
     // Build action belongs to that debug group, after the execution controls.
+    // An item a host drives itself goes with the rule in front of it.
     this.root.append(
       this.fileGroup(),
       this.fileInput,
       this.debugToolbar,
+      ...(argsField === null ? [] : [this.divider(), argsField]),
       ...(options.preprocessor === false ? [] : [this.divider(), preprocessed]),
-      this.divider(),
-      this.zoomGroup(),
+      ...(options.textSize === false ? [] : [this.divider(), this.zoomGroup()]),
       this.divider(),
       help,
-      this.divider(),
-      this.theme
+      ...(this.theme === null ? [] : [this.divider(), this.theme])
     );
     parent.appendChild(this.root);
 
@@ -319,7 +344,16 @@ export class ControlBar {
   }
 
   setDark(dark: boolean): void {
-    this.theme.value = dark ? 'dark' : 'light';
+    if (this.theme !== null) {
+      this.theme.value = dark ? 'dark' : 'light';
+    }
+  }
+
+  /** The program-arguments field's text; ignored where there is no field. */
+  setArgs(text: string): void {
+    if (this.args !== null) {
+      this.args.value = text;
+    }
   }
 
   /** Keep the toolbar's CSS opening position below a possibly wrapped tab bar. */
@@ -331,6 +365,27 @@ export class ControlBar {
     if (typeof ResizeObserver !== 'undefined') {
       this.toolbarTabsObserver = new ResizeObserver(this.syncDebugToolbarTabs);
       this.toolbarTabsObserver.observe(tabs);
+    }
+  }
+
+  /**
+   * The visualizer around the bar has been arranged anew - two columns to
+   * one, or back. The toolbar opens centred over the editor, and the editor
+   * is not where it was, so the toolbar goes back to that opening position:
+   * a drag made over the old arrangement says nothing about the new one.
+   * During a session its fixed place is measured again from there, which is
+   * what a scroll alone would not do.
+   */
+  relayout(): void {
+    const active = this.debugHome !== null;
+    this.keepDebugToolbarVisible(false);
+    this.x = 0;
+    this.y = 0;
+    this.debugToolbar.style.removeProperty('--plivet-debug-x');
+    this.debugToolbar.style.removeProperty('--plivet-debug-y');
+    this.syncDebugToolbarTabs();
+    if (active) {
+      this.keepDebugToolbarVisible(true);
     }
   }
 
@@ -631,6 +686,30 @@ export class ControlBar {
     element.appendChild(iconFor(icon));
     element.addEventListener('click', () => this.options.onZoom?.(command));
     return element;
+  }
+
+  /**
+   * The program's arguments, as a line typed on a command line. What is in
+   * it is read when a run starts, so an edit applies at the next Start or
+   * Run and never to the run under way.
+   */
+  private argsField(text: string): HTMLLabelElement {
+    const field = document.createElement('label');
+    field.className = 'plivet-controls__args';
+    field.title = strings.programArgsHint;
+    const caption = document.createElement('span');
+    caption.className = 'plivet-controls__args-caption';
+    caption.textContent = strings.programArgs;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'plivet-controls__args-input';
+    input.value = text;
+    input.spellcheck = false;
+    input.autocomplete = 'off';
+    input.setAttribute('aria-label', strings.programArgsLabel);
+    input.addEventListener('input', () => this.options.onArgs?.(input.value));
+    field.append(caption, input);
+    return field;
   }
 
   private themeSwitch(): HTMLSelectElement {

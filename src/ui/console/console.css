@@ -29,6 +29,10 @@
 	--plivet-console-heading-surface: var(--plivet-console-title-bg, #26384a);
 	--plivet-console-heading-ink: var(--plivet-console-title-color, #ffffff);
 	--plivet-console-heading-line: var(--plivet-console-title-border, #333333);
+	--plivet-console-error-ink: var(
+		--plivet-console-error-color,
+		var(--bs-danger-text-emphasis, #b02a37)
+	);
 
 	box-sizing: border-box;
 	margin: 1px;
@@ -85,6 +89,10 @@
 	--plivet-console-heading-surface: var(--plivet-console-title-bg, #526f89);
 	--plivet-console-heading-ink: var(--plivet-console-title-color, #f5f8fb);
 	--plivet-console-heading-line: var(--plivet-console-title-border, #73808c);
+	--plivet-console-error-ink: var(
+		--plivet-console-error-color,
+		var(--bs-danger-text-emphasis, #f1919b)
+	);
 }
 
 .plivet-console-title {
@@ -124,9 +132,47 @@
 	overflow-wrap: break-word;
 }
 
+/* What the program wrote to stderr, among what it wrote to stdout. */
+.plivet-console-stderr {
+	color: var(--plivet-console-error-ink);
+}
+
+/* The input field and, while a read waits, the end-of-input button. */
+.plivet-console-entry {
+	display: flex;
+	align-items: flex-start;
+}
+
+.plivet-console-end {
+	display: none;
+	flex: none;
+	margin: 0 4px 4px 0;
+	padding: 0 6px;
+	border: 1px solid currentColor;
+	border-radius: 3px;
+	background: var(--plivet-console-field);
+	color: inherit;
+	font: inherit;
+	font-size: 0.85em;
+	line-height: 1.4;
+	cursor: pointer;
+	opacity: 0.8;
+}
+
+.plivet-console--accepting .plivet-console-end {
+	display: block;
+}
+
+.plivet-console-end:hover,
+.plivet-console-end:focus-visible {
+	opacity: 1;
+}
+
 .plivet-console-input {
 	box-sizing: border-box;
 	display: block;
+	flex: 1 1 auto;
+	min-width: 0;
 	width: 100%;
 	min-height: 1.4em;
 	/* Taller input scrolls inside itself rather than pushing the transcript out

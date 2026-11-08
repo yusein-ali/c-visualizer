@@ -1,7 +1,10 @@
+const fs = require('fs');
 const path = require('path');
+const webpack = require('webpack');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const { merge } = require('webpack-merge');
 const baseConfig = require('./webpack.config.js');
+const { generateLibraryManifest } = require('./scripts/library-manifest');
 const isDebug = process.env.DEBUG_DEPLOY === '1';
 
 /*
@@ -21,6 +24,10 @@ const isDebug = process.env.DEBUG_DEPLOY === '1';
  *     dist/embed/<worker>.<hash>.js        <- the interpreter's Worker
  *     dist/embed/preprocessed.<hash>.js    <- the preprocessor dialog
  *     dist/embed/licenses.html             <- what the footer links to
+ *     dist/embed/c-stdio.js                <- printf and scanf, no interpreter
+ *     dist/embed/c-stdio.parity.json       <- the printf parity table
+ *     dist/embed/c-expression.js           <- the expression tree renderer
+ *     dist/embed/library.json              <- what a program may call and not write
  *
  * The three bootstrap assets have fixed names because the loader addresses
  * the other two. Lazy chunks are addressed by the application runtime, so
@@ -83,9 +90,50 @@ const deployed = (name, entry, extra = {}) => {
   return config;
 };
 
-const loader = deployed('embed-loader', {
-  'c-visualizer': './src/embed.loader.ts',
-});
+/*
+ * Emits a file generated at build time - `{ text, files }` from `generate`,
+ * where `files` are the sources it was made from, watched like any module.
+ * Like `EmitFilePlugin` below it goes through the compilation, so it follows
+ * `output.path` wherever a wrapping configuration points it.
+ */
+class EmitGeneratedPlugin {
+  constructor(name, generate) {
+    this.name = name;
+    this.generate = generate;
+  }
+
+  apply(compiler) {
+    compiler.hooks.thisCompilation.tap('EmitGeneratedPlugin', (compilation) => {
+      compilation.hooks.processAssets.tap(
+        {
+          name: 'EmitGeneratedPlugin',
+          stage: webpack.Compilation.PROCESS_ASSETS_STAGE_ADDITIONAL,
+        },
+        () => {
+          const { text, files } = this.generate();
+          for (const file of files) {
+            compilation.fileDependencies.add(file);
+          }
+          compilation.emitAsset(this.name, new webpack.sources.RawSource(text));
+        }
+      );
+    });
+  }
+}
+
+/*
+ * `library.json` goes beside the loader: the functions, macros, objects and
+ * types a program may use and the constructs the interpreter refuses,
+ * generated from `src/app/libraryHelp.ts` and `src/interpreter/refused.ts`
+ * (see `src/app/libraryManifest.ts`). The course build's lint reads it.
+ */
+const loader = deployed(
+  'embed-loader',
+  { 'c-visualizer': './src/embed.loader.ts' },
+  {
+    plugins: [new EmitGeneratedPlugin('library.json', generateLibraryManifest)],
+  }
+);
 
 /*
  * The fallback is one file because the loader addresses it by name and has no
@@ -130,4 +178,69 @@ const application = deployed(
   }
 );
 
-module.exports = [loader, fallback, application];
+/*
+ * Copies a file from the repository into the build output unchanged. The
+ * asset is emitted through the compilation rather than written beside it, so
+ * it lands in whatever `output.path` is in effect - `dist/embed` here, and
+ * the Sphinx repository's directory when ../webpack.config.c-visualizer.js
+ * rewrites the path.
+ */
+class EmitFilePlugin {
+  constructor(name, source) {
+    this.name = name;
+    this.source = source;
+  }
+
+  apply(compiler) {
+    compiler.hooks.thisCompilation.tap('EmitFilePlugin', (compilation) => {
+      compilation.hooks.processAssets.tap(
+        {
+          name: 'EmitFilePlugin',
+          stage: webpack.Compilation.PROCESS_ASSETS_STAGE_ADDITIONAL,
+        },
+        () => {
+          compilation.fileDependencies.add(this.source);
+          compilation.emitAsset(
+            this.name,
+            new webpack.sources.RawSource(fs.readFileSync(this.source))
+          );
+        }
+      );
+    });
+  }
+}
+
+/*
+ * `c-stdio.js`: the printf formatter and the scanf matcher without the
+ * interpreter, for a host's format playground. One file, no chunks and no
+ * runtime to discover them, so a host can load it with a plain script tag.
+ * `c-stdio.parity.json` is the table the interpreter's printf is tested
+ * against, copied so the playground's own tests read the same expectations.
+ */
+const stdio = deployed(
+  'embed-stdio',
+  { 'c-stdio': './src/stdio.entry.ts' },
+  {
+    optimization: { splitChunks: false },
+    plugins: [
+      new EmitFilePlugin(
+        'c-stdio.parity.json',
+        path.resolve(__dirname, 'test', 'fixtures', 'stdio-parity.json')
+      ),
+    ],
+  }
+);
+
+/*
+ * `c-expression.js`: the canvas's expression tree drawing - layout, boxes,
+ * conversion pills, JointJS - for a host that evaluates expressions itself.
+ * One file with no chunks, like `c-stdio.js`: nothing in it reaches the
+ * worker, the interpreter or CodeMirror, and a host loads it with one tag.
+ */
+const expression = deployed(
+  'embed-expression',
+  { 'c-expression': './src/expression.entry.ts' },
+  { optimization: { splitChunks: false } }
+);
+
+module.exports = [loader, fallback, application, stdio, expression];

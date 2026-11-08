@@ -1,0 +1,1639 @@
+{
+  "version": 1,
+  "about": "printf parity: each case is a format, typed arguments and the text C (glibc, LP64) prints. test/stdio-parity.test.ts runs every case through formatPrintf, through the built c-stdio.js, and - unless engine is false - through the interpreter's own printf. diagnostics lists the rules formatPrintf reports. The deploy copies this file to c-stdio.parity.json.",
+  "cases": [
+    {
+      "format": "%d",
+      "args": [
+        {
+          "kind": "int",
+          "value": 42
+        }
+      ],
+      "expected": "42"
+    },
+    {
+      "format": "%i",
+      "args": [
+        {
+          "kind": "int",
+          "value": -42
+        }
+      ],
+      "expected": "-42"
+    },
+    {
+      "format": "%5d|",
+      "args": [
+        {
+          "kind": "int",
+          "value": 42
+        }
+      ],
+      "expected": "   42|"
+    },
+    {
+      "format": "%-5d|",
+      "args": [
+        {
+          "kind": "int",
+          "value": 42
+        }
+      ],
+      "expected": "42   |"
+    },
+    {
+      "format": "%05d",
+      "args": [
+        {
+          "kind": "int",
+          "value": -42
+        }
+      ],
+      "expected": "-0042"
+    },
+    {
+      "format": "%+d %+d",
+      "args": [
+        {
+          "kind": "int",
+          "value": 5
+        },
+        {
+          "kind": "int",
+          "value": -5
+        }
+      ],
+      "expected": "+5 -5"
+    },
+    {
+      "format": "% d % d",
+      "args": [
+        {
+          "kind": "int",
+          "value": 5
+        },
+        {
+          "kind": "int",
+          "value": -5
+        }
+      ],
+      "expected": " 5 -5"
+    },
+    {
+      "format": "%+ d",
+      "args": [
+        {
+          "kind": "int",
+          "value": 5
+        }
+      ],
+      "expected": "+5"
+    },
+    {
+      "format": "%.3d",
+      "args": [
+        {
+          "kind": "int",
+          "value": 7
+        }
+      ],
+      "expected": "007"
+    },
+    {
+      "format": "%8.3d|",
+      "args": [
+        {
+          "kind": "int",
+          "value": -7
+        }
+      ],
+      "expected": "    -007|"
+    },
+    {
+      "format": "%08.3d|",
+      "args": [
+        {
+          "kind": "int",
+          "value": 7
+        }
+      ],
+      "expected": "     007|"
+    },
+    {
+      "format": "%.0d|",
+      "args": [
+        {
+          "kind": "int",
+          "value": 0
+        }
+      ],
+      "expected": "|"
+    },
+    {
+      "format": "%5.0d|",
+      "args": [
+        {
+          "kind": "int",
+          "value": 0
+        }
+      ],
+      "expected": "     |"
+    },
+    {
+      "format": "%-+6d|",
+      "args": [
+        {
+          "kind": "int",
+          "value": 42
+        }
+      ],
+      "expected": "+42   |"
+    },
+    {
+      "format": "%d",
+      "args": [
+        {
+          "kind": "int",
+          "value": 2147483647
+        }
+      ],
+      "expected": "2147483647"
+    },
+    {
+      "format": "%d",
+      "args": [
+        {
+          "kind": "int",
+          "value": -2147483648
+        }
+      ],
+      "expected": "-2147483648"
+    },
+    {
+      "format": "%u",
+      "args": [
+        {
+          "kind": "int",
+          "value": -1
+        }
+      ],
+      "expected": "4294967295"
+    },
+    {
+      "format": "%u",
+      "args": [
+        {
+          "kind": "unsigned",
+          "value": 3000000000
+        }
+      ],
+      "expected": "3000000000"
+    },
+    {
+      "format": "%o",
+      "args": [
+        {
+          "kind": "unsigned",
+          "value": 8
+        }
+      ],
+      "expected": "10"
+    },
+    {
+      "format": "%#o",
+      "args": [
+        {
+          "kind": "unsigned",
+          "value": 8
+        }
+      ],
+      "expected": "010"
+    },
+    {
+      "format": "%#o",
+      "args": [
+        {
+          "kind": "unsigned",
+          "value": 0
+        }
+      ],
+      "expected": "0"
+    },
+    {
+      "format": "%#.3o",
+      "args": [
+        {
+          "kind": "unsigned",
+          "value": 8
+        }
+      ],
+      "expected": "010"
+    },
+    {
+      "format": "%x",
+      "args": [
+        {
+          "kind": "unsigned",
+          "value": 255
+        }
+      ],
+      "expected": "ff"
+    },
+    {
+      "format": "%X",
+      "args": [
+        {
+          "kind": "unsigned",
+          "value": 255
+        }
+      ],
+      "expected": "FF"
+    },
+    {
+      "format": "%#x",
+      "args": [
+        {
+          "kind": "unsigned",
+          "value": 255
+        }
+      ],
+      "expected": "0xff"
+    },
+    {
+      "format": "%#X",
+      "args": [
+        {
+          "kind": "unsigned",
+          "value": 255
+        }
+      ],
+      "expected": "0XFF"
+    },
+    {
+      "format": "%#x",
+      "args": [
+        {
+          "kind": "unsigned",
+          "value": 0
+        }
+      ],
+      "expected": "0"
+    },
+    {
+      "format": "%#08x",
+      "args": [
+        {
+          "kind": "unsigned",
+          "value": 255
+        }
+      ],
+      "expected": "0x0000ff"
+    },
+    {
+      "format": "%-#8x|",
+      "args": [
+        {
+          "kind": "unsigned",
+          "value": 255
+        }
+      ],
+      "expected": "0xff    |"
+    },
+    {
+      "format": "%x",
+      "args": [
+        {
+          "kind": "int",
+          "value": -1
+        }
+      ],
+      "expected": "ffffffff"
+    },
+    {
+      "format": "%.4x",
+      "args": [
+        {
+          "kind": "unsigned",
+          "value": 255
+        }
+      ],
+      "expected": "00ff"
+    },
+    {
+      "format": "%hhd",
+      "args": [
+        {
+          "kind": "int",
+          "value": 200
+        }
+      ],
+      "expected": "-56"
+    },
+    {
+      "format": "%hhu",
+      "args": [
+        {
+          "kind": "int",
+          "value": 300
+        }
+      ],
+      "expected": "44"
+    },
+    {
+      "format": "%hhx",
+      "args": [
+        {
+          "kind": "int",
+          "value": -1
+        }
+      ],
+      "expected": "ff"
+    },
+    {
+      "format": "%hd",
+      "args": [
+        {
+          "kind": "int",
+          "value": 40000
+        }
+      ],
+      "expected": "-25536"
+    },
+    {
+      "format": "%hu",
+      "args": [
+        {
+          "kind": "int",
+          "value": -1
+        }
+      ],
+      "expected": "65535"
+    },
+    {
+      "format": "%hx",
+      "args": [
+        {
+          "kind": "int",
+          "value": 65536
+        }
+      ],
+      "expected": "0"
+    },
+    {
+      "format": "%ld",
+      "args": [
+        {
+          "kind": "int",
+          "value": "9223372036854775807",
+          "bits": 64
+        }
+      ],
+      "expected": "9223372036854775807",
+      "engine": false,
+      "why": "the interpreter's integer literals are 32 bits wide, so this value cannot be written in a program it runs"
+    },
+    {
+      "format": "%lu",
+      "args": [
+        {
+          "kind": "int",
+          "value": -1
+        }
+      ],
+      "expected": "18446744073709551615"
+    },
+    {
+      "format": "%lld",
+      "args": [
+        {
+          "kind": "int",
+          "value": "-9223372036854775808",
+          "bits": 64
+        }
+      ],
+      "expected": "-9223372036854775808",
+      "engine": false,
+      "why": "the interpreter's integer literals are 32 bits wide, so this value cannot be written in a program it runs"
+    },
+    {
+      "format": "%llx",
+      "args": [
+        {
+          "kind": "int",
+          "value": -1
+        }
+      ],
+      "expected": "ffffffffffffffff"
+    },
+    {
+      "format": "%lx",
+      "args": [
+        {
+          "kind": "int",
+          "value": "4294967296",
+          "bits": 64
+        }
+      ],
+      "expected": "100000000",
+      "engine": false,
+      "why": "the interpreter's integer literals are 32 bits wide, so this value cannot be written in a program it runs"
+    },
+    {
+      "format": "%jd",
+      "args": [
+        {
+          "kind": "int",
+          "value": -5
+        }
+      ],
+      "expected": "-5"
+    },
+    {
+      "format": "%zu",
+      "args": [
+        {
+          "kind": "unsigned",
+          "value": 42,
+          "bits": 64
+        }
+      ],
+      "expected": "42"
+    },
+    {
+      "format": "%zd",
+      "args": [
+        {
+          "kind": "int",
+          "value": -1
+        }
+      ],
+      "expected": "-1"
+    },
+    {
+      "format": "%td",
+      "args": [
+        {
+          "kind": "int",
+          "value": -3
+        }
+      ],
+      "expected": "-3"
+    },
+    {
+      "format": "%zx",
+      "args": [
+        {
+          "kind": "int",
+          "value": -1
+        }
+      ],
+      "expected": "ffffffffffffffff"
+    },
+    {
+      "format": "%d",
+      "args": [
+        {
+          "kind": "int",
+          "value": "4294967297",
+          "bits": 64
+        }
+      ],
+      "expected": "1",
+      "diagnostics": ["argument-mismatch"],
+      "engine": false,
+      "why": "the interpreter's integer literals are 32 bits wide, so this value cannot be written in a program it runs"
+    },
+    {
+      "format": "%c",
+      "args": [
+        {
+          "kind": "char",
+          "value": "A"
+        }
+      ],
+      "expected": "A"
+    },
+    {
+      "format": "%c%c%c",
+      "args": [
+        {
+          "kind": "char",
+          "value": 72
+        },
+        {
+          "kind": "char",
+          "value": 105
+        },
+        {
+          "kind": "char",
+          "value": 33
+        }
+      ],
+      "expected": "Hi!"
+    },
+    {
+      "format": "%3c|",
+      "args": [
+        {
+          "kind": "char",
+          "value": "x"
+        }
+      ],
+      "expected": "  x|"
+    },
+    {
+      "format": "%-3c|",
+      "args": [
+        {
+          "kind": "char",
+          "value": "x"
+        }
+      ],
+      "expected": "x  |"
+    },
+    {
+      "format": "%c",
+      "args": [
+        {
+          "kind": "int",
+          "value": 321
+        }
+      ],
+      "expected": "A"
+    },
+    {
+      "format": "[%c]",
+      "args": [
+        {
+          "kind": "char",
+          "value": 0
+        }
+      ],
+      "expected": "[\u0000]"
+    },
+    {
+      "format": "%s",
+      "args": [
+        {
+          "kind": "string",
+          "value": "hello"
+        }
+      ],
+      "expected": "hello"
+    },
+    {
+      "format": "%10s|",
+      "args": [
+        {
+          "kind": "string",
+          "value": "hello"
+        }
+      ],
+      "expected": "     hello|"
+    },
+    {
+      "format": "%-10s|",
+      "args": [
+        {
+          "kind": "string",
+          "value": "hello"
+        }
+      ],
+      "expected": "hello     |"
+    },
+    {
+      "format": "%.3s",
+      "args": [
+        {
+          "kind": "string",
+          "value": "hello"
+        }
+      ],
+      "expected": "hel"
+    },
+    {
+      "format": "%8.3s|",
+      "args": [
+        {
+          "kind": "string",
+          "value": "hello"
+        }
+      ],
+      "expected": "     hel|"
+    },
+    {
+      "format": "%-8.3s|",
+      "args": [
+        {
+          "kind": "string",
+          "value": "hello"
+        }
+      ],
+      "expected": "hel     |"
+    },
+    {
+      "format": "%.0s|",
+      "args": [
+        {
+          "kind": "string",
+          "value": "hello"
+        }
+      ],
+      "expected": "|"
+    },
+    {
+      "format": "%s|%s",
+      "args": [
+        {
+          "kind": "string",
+          "value": ""
+        },
+        {
+          "kind": "string",
+          "value": "x"
+        }
+      ],
+      "expected": "|x"
+    },
+    {
+      "format": "%.10s",
+      "args": [
+        {
+          "kind": "string",
+          "value": "hi"
+        }
+      ],
+      "expected": "hi"
+    },
+    {
+      "format": "%p",
+      "args": [
+        {
+          "kind": "pointer",
+          "value": 4660
+        }
+      ],
+      "expected": "0x1234"
+    },
+    {
+      "format": "%p",
+      "args": [
+        {
+          "kind": "pointer",
+          "value": 0
+        }
+      ],
+      "expected": "(nil)"
+    },
+    {
+      "format": "%12p|",
+      "args": [
+        {
+          "kind": "pointer",
+          "value": 255
+        }
+      ],
+      "expected": "        0xff|"
+    },
+    {
+      "format": "%-12p|",
+      "args": [
+        {
+          "kind": "pointer",
+          "value": 255
+        }
+      ],
+      "expected": "0xff        |"
+    },
+    {
+      "format": "abc%n|",
+      "args": [
+        {
+          "kind": "pointer",
+          "value": 0
+        }
+      ],
+      "expected": "abc|"
+    },
+    {
+      "format": "100%%",
+      "args": [],
+      "expected": "100%"
+    },
+    {
+      "format": "%%d",
+      "args": [],
+      "expected": "%d"
+    },
+    {
+      "format": "%d%%",
+      "args": [
+        {
+          "kind": "int",
+          "value": 50
+        }
+      ],
+      "expected": "50%"
+    },
+    {
+      "format": "%f",
+      "args": [
+        {
+          "kind": "double",
+          "value": 3.14159
+        }
+      ],
+      "expected": "3.141590"
+    },
+    {
+      "format": "%.2f",
+      "args": [
+        {
+          "kind": "double",
+          "value": 3.14159
+        }
+      ],
+      "expected": "3.14"
+    },
+    {
+      "format": "%.0f",
+      "args": [
+        {
+          "kind": "double",
+          "value": 2.5
+        }
+      ],
+      "expected": "2"
+    },
+    {
+      "format": "%.0f",
+      "args": [
+        {
+          "kind": "double",
+          "value": 3.5
+        }
+      ],
+      "expected": "4"
+    },
+    {
+      "format": "%.0f",
+      "args": [
+        {
+          "kind": "double",
+          "value": 0.5
+        }
+      ],
+      "expected": "0"
+    },
+    {
+      "format": "%.2f",
+      "args": [
+        {
+          "kind": "double",
+          "value": 2.675
+        }
+      ],
+      "expected": "2.67"
+    },
+    {
+      "format": "%.1f",
+      "args": [
+        {
+          "kind": "double",
+          "value": 0.25
+        }
+      ],
+      "expected": "0.2"
+    },
+    {
+      "format": "%.3f",
+      "args": [
+        {
+          "kind": "double",
+          "value": 1.0005
+        }
+      ],
+      "expected": "1.000"
+    },
+    {
+      "format": "%8.3f|",
+      "args": [
+        {
+          "kind": "double",
+          "value": -3.14159
+        }
+      ],
+      "expected": "  -3.142|"
+    },
+    {
+      "format": "%-8.2f|",
+      "args": [
+        {
+          "kind": "double",
+          "value": 2.5
+        }
+      ],
+      "expected": "2.50    |"
+    },
+    {
+      "format": "%08.2f",
+      "args": [
+        {
+          "kind": "double",
+          "value": -2.5
+        }
+      ],
+      "expected": "-0002.50"
+    },
+    {
+      "format": "%+.1f",
+      "args": [
+        {
+          "kind": "double",
+          "value": 2.0
+        }
+      ],
+      "expected": "+2.0"
+    },
+    {
+      "format": "% .1f",
+      "args": [
+        {
+          "kind": "double",
+          "value": 2.0
+        }
+      ],
+      "expected": " 2.0"
+    },
+    {
+      "format": "%#.0f",
+      "args": [
+        {
+          "kind": "double",
+          "value": 3.0
+        }
+      ],
+      "expected": "3."
+    },
+    {
+      "format": "%.0f",
+      "args": [
+        {
+          "kind": "double",
+          "value": 1e21
+        }
+      ],
+      "expected": "1000000000000000000000"
+    },
+    {
+      "format": "%f",
+      "args": [
+        {
+          "kind": "double",
+          "value": 1e-7
+        }
+      ],
+      "expected": "0.000000"
+    },
+    {
+      "format": "%.10f",
+      "args": [
+        {
+          "kind": "double",
+          "value": 0.1
+        }
+      ],
+      "expected": "0.1000000000"
+    },
+    {
+      "format": "%.20f",
+      "args": [
+        {
+          "kind": "double",
+          "value": 0.1
+        }
+      ],
+      "expected": "0.10000000000000000555"
+    },
+    {
+      "format": "%f",
+      "args": [
+        {
+          "kind": "double",
+          "value": "-0.0"
+        }
+      ],
+      "expected": "-0.000000"
+    },
+    {
+      "format": "%F",
+      "args": [
+        {
+          "kind": "double",
+          "value": "inf"
+        }
+      ],
+      "expected": "INF"
+    },
+    {
+      "format": "%f",
+      "args": [
+        {
+          "kind": "double",
+          "value": "-inf"
+        }
+      ],
+      "expected": "-inf"
+    },
+    {
+      "format": "%f",
+      "args": [
+        {
+          "kind": "double",
+          "value": "nan"
+        }
+      ],
+      "expected": "nan"
+    },
+    {
+      "format": "%5.1f|",
+      "args": [
+        {
+          "kind": "double",
+          "value": "inf"
+        }
+      ],
+      "expected": "  inf|"
+    },
+    {
+      "format": "%05f",
+      "args": [
+        {
+          "kind": "double",
+          "value": "-inf"
+        }
+      ],
+      "expected": " -inf"
+    },
+    {
+      "format": "%+f",
+      "args": [
+        {
+          "kind": "double",
+          "value": "inf"
+        }
+      ],
+      "expected": "+inf"
+    },
+    {
+      "format": "%e",
+      "args": [
+        {
+          "kind": "double",
+          "value": 12345.678
+        }
+      ],
+      "expected": "1.234568e+04"
+    },
+    {
+      "format": "%.2e",
+      "args": [
+        {
+          "kind": "double",
+          "value": 0.000123
+        }
+      ],
+      "expected": "1.23e-04"
+    },
+    {
+      "format": "%E",
+      "args": [
+        {
+          "kind": "double",
+          "value": 1e100
+        }
+      ],
+      "expected": "1.000000E+100"
+    },
+    {
+      "format": "%.0e",
+      "args": [
+        {
+          "kind": "double",
+          "value": 15000
+        }
+      ],
+      "expected": "2e+04"
+    },
+    {
+      "format": "%#.0e",
+      "args": [
+        {
+          "kind": "double",
+          "value": 1.5
+        }
+      ],
+      "expected": "2.e+00"
+    },
+    {
+      "format": "%e",
+      "args": [
+        {
+          "kind": "double",
+          "value": 0.0
+        }
+      ],
+      "expected": "0.000000e+00"
+    },
+    {
+      "format": "%12.3e|",
+      "args": [
+        {
+          "kind": "double",
+          "value": -1234.5
+        }
+      ],
+      "expected": "  -1.234e+03|"
+    },
+    {
+      "format": "%+e",
+      "args": [
+        {
+          "kind": "double",
+          "value": 1.0
+        }
+      ],
+      "expected": "+1.000000e+00"
+    },
+    {
+      "format": "%e",
+      "args": [
+        {
+          "kind": "double",
+          "value": 5e-324
+        }
+      ],
+      "expected": "4.940656e-324"
+    },
+    {
+      "format": "%.3e",
+      "args": [
+        {
+          "kind": "double",
+          "value": 9.9996
+        }
+      ],
+      "expected": "1.000e+01"
+    },
+    {
+      "format": "%g",
+      "args": [
+        {
+          "kind": "double",
+          "value": 100000
+        }
+      ],
+      "expected": "100000"
+    },
+    {
+      "format": "%g",
+      "args": [
+        {
+          "kind": "double",
+          "value": 1000000
+        }
+      ],
+      "expected": "1e+06"
+    },
+    {
+      "format": "%g",
+      "args": [
+        {
+          "kind": "double",
+          "value": 0.0001
+        }
+      ],
+      "expected": "0.0001"
+    },
+    {
+      "format": "%g",
+      "args": [
+        {
+          "kind": "double",
+          "value": 1e-5
+        }
+      ],
+      "expected": "1e-05"
+    },
+    {
+      "format": "%g",
+      "args": [
+        {
+          "kind": "double",
+          "value": 3.14159
+        }
+      ],
+      "expected": "3.14159"
+    },
+    {
+      "format": "%.3g",
+      "args": [
+        {
+          "kind": "double",
+          "value": 3.14159
+        }
+      ],
+      "expected": "3.14"
+    },
+    {
+      "format": "%g",
+      "args": [
+        {
+          "kind": "double",
+          "value": 0.0
+        }
+      ],
+      "expected": "0"
+    },
+    {
+      "format": "%#g",
+      "args": [
+        {
+          "kind": "double",
+          "value": 1.0
+        }
+      ],
+      "expected": "1.00000"
+    },
+    {
+      "format": "%G",
+      "args": [
+        {
+          "kind": "double",
+          "value": 1e-10
+        }
+      ],
+      "expected": "1E-10"
+    },
+    {
+      "format": "%g",
+      "args": [
+        {
+          "kind": "double",
+          "value": 123456789
+        }
+      ],
+      "expected": "1.23457e+08"
+    },
+    {
+      "format": "%.10g",
+      "args": [
+        {
+          "kind": "double",
+          "value": 123456789
+        }
+      ],
+      "expected": "123456789"
+    },
+    {
+      "format": "%g",
+      "args": [
+        {
+          "kind": "double",
+          "value": 1.5
+        }
+      ],
+      "expected": "1.5"
+    },
+    {
+      "format": "%10.4g|",
+      "args": [
+        {
+          "kind": "double",
+          "value": 3.14159
+        }
+      ],
+      "expected": "     3.142|"
+    },
+    {
+      "format": "%-10g|",
+      "args": [
+        {
+          "kind": "double",
+          "value": 2.5
+        }
+      ],
+      "expected": "2.5       |"
+    },
+    {
+      "format": "%g",
+      "args": [
+        {
+          "kind": "double",
+          "value": 100
+        }
+      ],
+      "expected": "100"
+    },
+    {
+      "format": "%.0g",
+      "args": [
+        {
+          "kind": "double",
+          "value": 123
+        }
+      ],
+      "expected": "1e+02"
+    },
+    {
+      "format": "%#.3g",
+      "args": [
+        {
+          "kind": "double",
+          "value": 1.0
+        }
+      ],
+      "expected": "1.00"
+    },
+    {
+      "format": "%g",
+      "args": [
+        {
+          "kind": "double",
+          "value": "inf"
+        }
+      ],
+      "expected": "inf"
+    },
+    {
+      "format": "%G",
+      "args": [
+        {
+          "kind": "double",
+          "value": "nan"
+        }
+      ],
+      "expected": "NAN"
+    },
+    {
+      "format": "%a",
+      "args": [
+        {
+          "kind": "double",
+          "value": 1.0
+        }
+      ],
+      "expected": "0x1p+0"
+    },
+    {
+      "format": "%a",
+      "args": [
+        {
+          "kind": "double",
+          "value": 3.0
+        }
+      ],
+      "expected": "0x1.8p+1"
+    },
+    {
+      "format": "%a",
+      "args": [
+        {
+          "kind": "double",
+          "value": 0.1
+        }
+      ],
+      "expected": "0x1.999999999999ap-4"
+    },
+    {
+      "format": "%A",
+      "args": [
+        {
+          "kind": "double",
+          "value": -0.5
+        }
+      ],
+      "expected": "-0X1P-1"
+    },
+    {
+      "format": "%a",
+      "args": [
+        {
+          "kind": "double",
+          "value": 0.0
+        }
+      ],
+      "expected": "0x0p+0"
+    },
+    {
+      "format": "%.2a",
+      "args": [
+        {
+          "kind": "double",
+          "value": 1.0
+        }
+      ],
+      "expected": "0x1.00p+0"
+    },
+    {
+      "format": "%a",
+      "args": [
+        {
+          "kind": "double",
+          "value": 5e-324
+        }
+      ],
+      "expected": "0x0.0000000000001p-1022"
+    },
+    {
+      "format": "%.1a",
+      "args": [
+        {
+          "kind": "double",
+          "value": 1.97
+        }
+      ],
+      "expected": "0x2.0p+0"
+    },
+    {
+      "format": "%.1a",
+      "args": [
+        {
+          "kind": "double",
+          "value": 1.96875
+        }
+      ],
+      "expected": "0x1.fp+0"
+    },
+    {
+      "format": "%.0a",
+      "args": [
+        {
+          "kind": "double",
+          "value": 1.5
+        }
+      ],
+      "expected": "0x2p+0"
+    },
+    {
+      "format": "%#.0a",
+      "args": [
+        {
+          "kind": "double",
+          "value": 1.0
+        }
+      ],
+      "expected": "0x1.p+0"
+    },
+    {
+      "format": "%010a",
+      "args": [
+        {
+          "kind": "double",
+          "value": 1.0
+        }
+      ],
+      "expected": "0x00001p+0"
+    },
+    {
+      "format": "%*d|",
+      "args": [
+        {
+          "kind": "int",
+          "value": 5
+        },
+        {
+          "kind": "int",
+          "value": 42
+        }
+      ],
+      "expected": "   42|"
+    },
+    {
+      "format": "%-*d|",
+      "args": [
+        {
+          "kind": "int",
+          "value": 5
+        },
+        {
+          "kind": "int",
+          "value": 42
+        }
+      ],
+      "expected": "42   |"
+    },
+    {
+      "format": "%*d|",
+      "args": [
+        {
+          "kind": "int",
+          "value": -5
+        },
+        {
+          "kind": "int",
+          "value": 42
+        }
+      ],
+      "expected": "42   |"
+    },
+    {
+      "format": "%.*f",
+      "args": [
+        {
+          "kind": "int",
+          "value": 2
+        },
+        {
+          "kind": "double",
+          "value": 3.14159
+        }
+      ],
+      "expected": "3.14"
+    },
+    {
+      "format": "%*.*f|",
+      "args": [
+        {
+          "kind": "int",
+          "value": 8
+        },
+        {
+          "kind": "int",
+          "value": 3
+        },
+        {
+          "kind": "double",
+          "value": 3.14159
+        }
+      ],
+      "expected": "   3.142|"
+    },
+    {
+      "format": "%.*f",
+      "args": [
+        {
+          "kind": "int",
+          "value": -1
+        },
+        {
+          "kind": "double",
+          "value": 2.5
+        }
+      ],
+      "expected": "2.500000"
+    },
+    {
+      "format": "%.*s",
+      "args": [
+        {
+          "kind": "int",
+          "value": 3
+        },
+        {
+          "kind": "string",
+          "value": "hello"
+        }
+      ],
+      "expected": "hel"
+    },
+    {
+      "format": "%*s|",
+      "args": [
+        {
+          "kind": "int",
+          "value": 6
+        },
+        {
+          "kind": "string",
+          "value": "ab"
+        }
+      ],
+      "expected": "    ab|"
+    },
+    {
+      "format": "%s is %d years and %.1f m",
+      "args": [
+        {
+          "kind": "string",
+          "value": "Ann"
+        },
+        {
+          "kind": "int",
+          "value": 20
+        },
+        {
+          "kind": "double",
+          "value": 1.75
+        }
+      ],
+      "expected": "Ann is 20 years and 1.8 m"
+    },
+    {
+      "format": "[%5s][%-5d][%05.1f]",
+      "args": [
+        {
+          "kind": "string",
+          "value": "ab"
+        },
+        {
+          "kind": "int",
+          "value": 7
+        },
+        {
+          "kind": "double",
+          "value": 3.14159
+        }
+      ],
+      "expected": "[   ab][7    ][003.1]"
+    },
+    {
+      "format": "%d items at %.2f = %8.2f",
+      "args": [
+        {
+          "kind": "int",
+          "value": 3
+        },
+        {
+          "kind": "double",
+          "value": 1.5
+        },
+        {
+          "kind": "double",
+          "value": 4.5
+        }
+      ],
+      "expected": "3 items at 1.50 =     4.50"
+    },
+    {
+      "format": "%p",
+      "args": [
+        {
+          "kind": "pointer",
+          "value": 50002
+        }
+      ],
+      "expected": "0xc352",
+      "defect": "the interpreter's program declares a char at this address first, which made the old wrapper print the character instead"
+    },
+    {
+      "format": "%d",
+      "args": [
+        {
+          "kind": "int",
+          "value": 50002
+        }
+      ],
+      "expected": "50002",
+      "defect": "the interpreter's program declares a char at this address first, which made the old wrapper print the character instead"
+    },
+    {
+      "format": "a%qb",
+      "args": [],
+      "expected": "ab",
+      "diagnostics": ["unknown-conversion"]
+    },
+    {
+      "format": "%d %d|",
+      "args": [
+        {
+          "kind": "int",
+          "value": 1
+        }
+      ],
+      "expected": "1 |",
+      "diagnostics": ["missing-argument"]
+    },
+    {
+      "format": "50%",
+      "args": [],
+      "expected": "50",
+      "diagnostics": ["unknown-conversion"]
+    },
+    {
+      "format": "%hf",
+      "args": [
+        {
+          "kind": "double",
+          "value": 2.5
+        }
+      ],
+      "expected": "2.500000",
+      "diagnostics": ["invalid-length-modifier"]
+    },
+    {
+      "format": "%s|",
+      "args": [
+        {
+          "kind": "int",
+          "value": 5
+        }
+      ],
+      "expected": "|",
+      "diagnostics": ["argument-mismatch"],
+      "engine": false,
+      "why": "the interpreter reads %s from the address it is given, so a plain number is not a string there"
+    }
+  ]
+}

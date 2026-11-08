@@ -180,6 +180,9 @@
 	--plivet-graph-expression-value-label: #5d6b78;
 	--plivet-graph-expression-border: #202020;
 	--plivet-graph-expression-link: #5c6773;
+	/* An implicit conversion, drawn as a dashed pill on an expression edge. */
+	--plivet-graph-expression-conversion: #f3edff;
+	--plivet-graph-expression-conversion-border: #7759c2;
 	--plivet-graph-stack-header: #f3f5f7;
 	--plivet-graph-stack-border: #000000;
 	/* The findings band. A wash rather than a colour: the row is read as a
@@ -250,6 +253,8 @@
 	--plivet-graph-expression-value-label: #bac7d2;
 	--plivet-graph-expression-border: #a7b2bc;
 	--plivet-graph-expression-link: #8794a0;
+	--plivet-graph-expression-conversion: #3a3157;
+	--plivet-graph-expression-conversion-border: #b5a1ec;
 	--plivet-graph-stack-header: #34414d;
 	--plivet-graph-stack-border: #73808c;
 	--plivet-graph-error: #4a2320;

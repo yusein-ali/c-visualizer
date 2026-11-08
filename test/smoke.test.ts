@@ -243,7 +243,7 @@ describe('a PLIVET on a page', () => {
     shell.dispatchEvent(
       new KeyboardEvent('keydown', { bubbles: true, key: 'F9' })
     );
-    expect(plivet.session().breakpoints).toEqual([0]);
+    expect(plivet.session().files[0].breakpoints).toEqual([0]);
 
     shell.dispatchEvent(
       new KeyboardEvent('keydown', { bubbles: true, key: 'F6' })
@@ -351,6 +351,45 @@ describe('a PLIVET on a page', () => {
       parent.querySelector('.plivet-files__button')?.getAttribute('aria-label')
     ).toBe('download result.txt');
     expect(files.open).toBe(true);
+  });
+
+  it('ends standard input from the console, and colours stderr', async () => {
+    plivet.destroy();
+    parent.textContent = '';
+    plivet = new Plivet(parent, {
+      sourceCode: `#include <stdio.h>
+
+int main(void) {
+  int c;
+  int n = 0;
+  while ((c = getchar()) != EOF) {
+    n++;
+  }
+  fprintf(stderr, "read %d\\n", n);
+  return 0;
+}
+`,
+    });
+    const field = parent.querySelector<HTMLTextAreaElement>(
+      '.plivet-console-input'
+    )!;
+    buttonsOf(parent)[RUN].click();
+    await until('the run to wait for input', () => !field.disabled);
+
+    field.value = 'abc';
+    field.dispatchEvent(
+      new KeyboardEvent('keydown', { bubbles: true, key: 'Enter' })
+    );
+    await until('the run to wait again', () => !field.disabled);
+    parent.querySelector<HTMLButtonElement>('.plivet-console-end')!.click();
+    await until('the run to reach EOF', () =>
+      outputOf(parent)!.includes('read')
+    );
+
+    expect(outputOf(parent)).toBe('abc\nread 4\n');
+    expect(parent.querySelector('.plivet-console-stderr')?.textContent).toBe(
+      'read 4\n'
+    );
   });
 
   it('gives the document back when the session is stopped', async () => {

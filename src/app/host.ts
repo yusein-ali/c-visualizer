@@ -1,7 +1,20 @@
 import type { SourceFile } from '../core';
+import type { ProtectedSpan } from '../ui/editor/segments';
 import type { CodeMirrorThemeName } from '../ui/editor/theme';
 
 export type { CodeMirrorThemeName } from '../ui/editor/theme';
+export type { ProtectedSpan } from '../ui/editor/segments';
+
+/**
+ * One file of a snapshot. `protected` is present when the file has protected
+ * segments: each one's text and where it stands in `text` (offsets, `to`
+ * exclusive), so a host can check a submission keeps them without working
+ * them out again. A segment the text has lost - possible only for a file
+ * that was handed over already altered, and is locked - stands at -1.
+ */
+export interface SnapshotFile extends SourceFile {
+  protected?: ProtectedSpan[];
+}
 
 /**
  * One immutable view of the program a host can compile, save or submit.
@@ -11,7 +24,7 @@ export type { CodeMirrorThemeName } from '../ui/editor/theme';
  * never painted over newer source.
  */
 export interface SourceSnapshot {
-  files: SourceFile[];
+  files: SnapshotFile[];
   entry: string;
   active: string;
   revision: number;

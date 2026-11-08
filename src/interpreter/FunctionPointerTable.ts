@@ -11,6 +11,7 @@ import {
   matchParen,
   skipSpace,
 } from './scan';
+import { LIBRARY_TYPEDEFS } from './library/types';
 
 /**
  * Function pointers, done where the parser cannot destroy them.
@@ -88,6 +89,8 @@ const TYPE_KEYWORDS = [
   'struct',
   'union',
   'enum',
+  // The library's scalar typedefs: `size_t (*measure)(const char *)`.
+  ...Object.keys(LIBRARY_TYPEDEFS),
 ];
 
 interface Declarator {

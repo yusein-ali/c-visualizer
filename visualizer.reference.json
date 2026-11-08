@@ -8,19 +8,45 @@
     }
   ],
   "entry": "main.c",
+  "args": [],
   "editableRegions": [
     {
       "from": 0,
       "to": 28
     }
   ],
+  "session": {
+    "version": 2,
+    "files": [
+      {
+        "path": "main.c",
+        "text": "int main(void) { return 0; }",
+        "selection": {
+          "anchor": 0,
+          "head": 0
+        },
+        "breakpoints": [],
+        "disabledBreakpoints": [],
+        "watches": []
+      }
+    ],
+    "entry": "main.c",
+    "active": "main.c"
+  },
+  "controls": {
+    "theme": true,
+    "textSize": true
+  },
+  "layout": "auto",
+  "stackedBelow": 720,
   "support-build": true,
   "footer": true,
   "licenses": "./licenses.html",
   "features": {
     "preprocessor": true,
     "loadSource": false,
-    "loadFile": true
+    "loadFile": true,
+    "programArgs": false
   },
   "views": {
     "diagnostics": true,

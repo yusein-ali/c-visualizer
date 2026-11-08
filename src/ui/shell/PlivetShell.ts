@@ -20,10 +20,26 @@ import './shell.css';
  * has dragged is the shell as it always was, and Enter or a double-click on a
  * handle puts it back.
  *
+ * How the boxes are arranged is decided against the shell's own width, not
+ * the window's: a course chapter's column on a wide screen is as narrow as a
+ * phone. Below `stackedBelow` the two columns become one - editor, console,
+ * canvas - by a class on the root and nothing else. No box is moved, so
+ * nothing in one loses what it holds: the editor keeps its scroll position
+ * and its folds, the canvas its drawing, and a debug session goes on.
+ *
  * Like every other module under `src/ui/`, it knows nothing about the
  * interpreter or the event bus. It hands out the mount points and lets the
  * caller decide what goes in them.
  */
+
+/** How the boxes are arranged: side by side, or one above the other. */
+export type ShellLayout = 'columns' | 'stacked';
+
+/**
+ * What a page asks for: one arrangement whatever the room, or `auto` -
+ * whichever the width the shell is given suits.
+ */
+export type ShellLayoutMode = 'auto' | ShellLayout;
 
 export interface PlivetShellOptions {
   /** Shown in the footer. The application reads it from `package.json`. */
@@ -46,7 +62,34 @@ export interface PlivetShellOptions {
   files?: boolean;
   /** Whether to append the copyright and licence footer. Default: true. */
   footer?: boolean;
+  /**
+   * Side by side, one above the other, or - `auto` - stacked whenever the
+   * shell is narrower than `stackedBelow`. Default: `auto`.
+   */
+  layout?: ShellLayoutMode;
+  /**
+   * The width, in pixels, below which `auto` stacks the boxes. Default:
+   * `STACKED_BELOW`. Going back to two columns takes `LAYOUT_HYSTERESIS`
+   * more, so a width that sits on the threshold does not flap between them.
+   */
+  stackedBelow?: number;
+  /**
+   * Called after the arrangement has changed, with the one it changed to -
+   * never for the one the shell opens with, which `layout()` reports.
+   */
+  onLayoutChange?: (layout: ShellLayout) => void;
 }
+
+/** Below this many pixels of its own width, `auto` stacks the shell. */
+export const STACKED_BELOW = 720;
+
+/**
+ * How much wider than the threshold a stacked shell must grow before it goes
+ * back to two columns. A layout change can itself move the width a little -
+ * a page that grows a scrollbar, a container sized by its content - and
+ * without the margin a width at the threshold would switch on every frame.
+ */
+export const LAYOUT_HYSTERESIS = 48;
 
 const REPOSITORY = 'https://github.com/yusein-ali/c-visualizer';
 const UPSTREAM = 'https://github.com/RYOSKATE/PLIVET';
@@ -65,6 +108,9 @@ const MIN_CANVAS = 200;
 const SIDE_WIDTH = '--plivet-side-width';
 const EDITOR_HEIGHT = '--plivet-editor-height';
 const CANVAS_HEIGHT = '--plivet-graph-height';
+/** The stacked canvas' shape, width over height, as `aspect-ratio` reads it. */
+const CANVAS_RATIO = '--plivet-canvas-ratio';
+const STACKED = 'plivet--stacked';
 
 const copyrightYears = (fromYear: number | undefined): string => {
   const thisYear = new Date().getFullYear();
@@ -89,8 +135,17 @@ export class PlivetShell {
   private readonly observer: ResizeObserver | null;
   /** The width the last drag asked for, before any clamping. */
   private wanted: number | null = null;
+  private readonly mode: ShellLayoutMode;
+  private readonly stackedBelow: number;
+  private readonly onLayoutChange?: (layout: ShellLayout) => void;
+  private arrangement: ShellLayout = 'columns';
+  /** The frame a layout change is waiting for, if one is. */
+  private frame: number | null = null;
 
   constructor(parent: HTMLElement, options: PlivetShellOptions = {}) {
+    this.mode = options.layout ?? 'auto';
+    this.stackedBelow = options.stackedBelow ?? STACKED_BELOW;
+    this.onLayoutChange = options.onLayoutChange;
     this.root = document.createElement('div');
     this.root.className = 'plivet';
 
@@ -136,7 +191,7 @@ export class PlivetShell {
       label: strings.resizeCanvas,
       size: () => this.main.getBoundingClientRect().height,
       resize: (height) => this.setCanvasHeight(height),
-      reset: () => this.root.style.removeProperty(CANVAS_HEIGHT),
+      reset: () => this.resetCanvas(),
     });
     const column = document.createElement('div');
     column.className = 'plivet__column';
@@ -153,19 +208,30 @@ export class PlivetShell {
     );
     parent.appendChild(this.root);
 
+    // The first arrangement is decided now, before any widget is mounted,
+    // so that nothing is drawn in the wrong one first.
+    this.arrangement = this.layoutFor(this.width());
+    this.root.classList.toggle(STACKED, this.arrangement === 'stacked');
+
     // A width dragged at one window size is still a width at the next one, and
     // a canvas the window has squeezed out is not what the reader asked for.
     // What a drag stores is a preference; what the shell draws is that
-    // preference clamped to the room there is now.
+    // preference clamped to the room there is now. And the room there is now
+    // is also what decides whether there is room for two columns at all.
     this.observer =
       typeof ResizeObserver === 'undefined'
         ? null
-        : new ResizeObserver(() => this.applySideWidth());
+        : new ResizeObserver(this.resized);
     if (this.observer !== null) {
       this.observer.observe(this.root);
     }
 
     this.setDark(options.dark === true);
+  }
+
+  /** How the boxes are arranged now. */
+  layout(): ShellLayout {
+    return this.arrangement;
   }
 
   setDark(dark: boolean): void {
@@ -189,18 +255,26 @@ export class PlivetShell {
   /**
    * How tall the visualization is drawn. It is a window onto the drawing
    * rather than the drawing itself: the canvas scrolls whatever does not fit.
+   *
+   * Stacked, the canvas has a shape rather than a height - its width is the
+   * shell's, and changes with it - so what is stored is the shape this height
+   * gives it at the width it has now. Each arrangement keeps its own: going
+   * back to two columns gives back the height the canvas had there.
    */
   setCanvasHeight(height: number): void {
-    this.root.style.setProperty(
-      CANVAS_HEIGHT,
-      `${Math.round(Math.max(height, MIN_CANVAS))}px`
-    );
+    const tall = Math.round(Math.max(height, MIN_CANVAS));
+    const wide = Math.round(this.main.getBoundingClientRect().width);
+    if (this.arrangement === 'stacked' && wide > 0) {
+      this.root.style.setProperty(CANVAS_RATIO, `${wide} / ${tall}`);
+      return;
+    }
+    this.root.style.setProperty(CANVAS_HEIGHT, `${tall}px`);
   }
 
   /** Back to the proportions the stylesheet opens with. */
   resetLayout(): void {
     this.clearSideWidth();
-    for (const property of [EDITOR_HEIGHT, CANVAS_HEIGHT]) {
+    for (const property of [EDITOR_HEIGHT, CANVAS_HEIGHT, CANVAS_RATIO]) {
       this.root.style.removeProperty(property);
     }
   }
@@ -208,6 +282,10 @@ export class PlivetShell {
   destroy(): void {
     if (this.observer !== null) {
       this.observer.disconnect();
+    }
+    if (this.frame !== null) {
+      cancelAnimationFrame(this.frame);
+      this.frame = null;
     }
     for (const splitter of this.splitters) {
       splitter.destroy();
@@ -239,6 +317,75 @@ export class PlivetShell {
   private clearSideWidth(): void {
     this.wanted = null;
     this.root.style.removeProperty(SIDE_WIDTH);
+  }
+
+  /** The canvas handle's reset: the default of the arrangement it is in. */
+  private resetCanvas(): void {
+    this.root.style.removeProperty(
+      this.arrangement === 'stacked' ? CANVAS_RATIO : CANVAS_HEIGHT
+    );
+  }
+
+  /** The shell's own width: the room its container gives it. */
+  private width(): number {
+    return this.root.getBoundingClientRect().width;
+  }
+
+  /**
+   * The arrangement a width calls for. Narrower than the threshold is
+   * stacked; back to columns takes the threshold and the margin, so a shell
+   * that stacked at 719 pixels stays stacked until it has 768.
+   */
+  private layoutFor(width: number): ShellLayout {
+    if (this.mode !== 'auto') {
+      return this.mode;
+    }
+    // A shell that is not laid out - not yet attached, or inside a closed
+    // panel - measures nothing, and nothing is not narrow: it keeps what it
+    // has until it is shown and measured.
+    if (width <= 0) {
+      return this.arrangement;
+    }
+    const threshold =
+      this.arrangement === 'stacked'
+        ? this.stackedBelow + LAYOUT_HYSTERESIS
+        : this.stackedBelow;
+    return width < threshold ? 'stacked' : 'columns';
+  }
+
+  private readonly resized = (): void => {
+    this.applySideWidth();
+    if (this.layoutFor(this.width()) !== this.arrangement) {
+      this.scheduleLayout();
+    }
+  };
+
+  /**
+   * Change the arrangement on the next frame rather than in the observer's
+   * callback. Stacking changes the shell's height, and a size change to an
+   * observed box made inside its own callback is the loop `ResizeObserver`
+   * reports as an error - on the window, where a host page's error handler
+   * and the development server's overlay both see it. One frame later it is
+   * an ordinary resize, which the observer answers with the arrangement it
+   * has just been given.
+   */
+  private scheduleLayout(): void {
+    if (this.frame !== null) {
+      return;
+    }
+    this.frame = requestAnimationFrame(() => {
+      this.frame = null;
+      this.applyLayout(this.layoutFor(this.width()));
+    });
+  }
+
+  private applyLayout(layout: ShellLayout): void {
+    if (layout === this.arrangement) {
+      return;
+    }
+    this.arrangement = layout;
+    this.root.classList.toggle(STACKED, layout === 'stacked');
+    this.onLayoutChange?.(layout);
   }
 
   private footer(options: PlivetShellOptions): HTMLElement {

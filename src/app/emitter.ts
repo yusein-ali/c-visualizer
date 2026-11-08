@@ -10,6 +10,7 @@ import type {
 import type { Theme } from './theme';
 import type { ZOOM_COMMAND } from '../ui/controls';
 import type { BreakpointEntry } from '../ui/breakpoints';
+import type { ConsoleSpan } from '../ui/console';
 
 export type event =
   | 'debug'
@@ -31,7 +32,11 @@ export type event =
  * `signal` against the `slot` that answers it.
  */
 export interface EventPayloads {
-  debug: [command: CONTROL_EVENT, stdinText?: string];
+  /**
+   * A debug command, with the console's answer when the program is waiting
+   * on a read: a line, and whether the reader ended the input after it.
+   */
+  debug: [command: CONTROL_EVENT, stdinText?: string, endOfInput?: boolean];
   changeTheme: [theme: Theme];
   /**
    * What the debugger is doing, and - when it is standing still somewhere a
@@ -44,7 +49,8 @@ export interface EventPayloads {
     step: number,
     position?: DebugPosition | null,
   ];
-  changeOutput: [output: string];
+  /** The transcript, and which spans of it the program wrote to `stderr`. */
+  changeOutput: [output: string, errorSpans?: ConsoleSpan[]];
   /** The editor's text size, not the visualization's scale. */
   zoom: [command: ZOOM_COMMAND];
   /**

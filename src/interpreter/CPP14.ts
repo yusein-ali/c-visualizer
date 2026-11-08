@@ -1,11 +1,16 @@
 import { Interpreter } from 'unicoen.ts/dist/interpreter/Interpreter';
 import { CPP14Mapper } from 'unicoen.ts/dist/interpreter/CPP14/CPP14Mapper';
+import type {
+  FloatingliteralContext,
+  IntegerliteralContext,
+} from 'unicoen.ts/dist/interpreter/CPP14/CPP14Parser';
 import { ExecState } from 'unicoen.ts/dist/interpreter/Engine/ExecState';
 import { SyntaxErrorData } from 'unicoen.ts/dist/interpreter/mapper/SyntaxErrorData';
 import { SyntaxErrorListener } from 'unicoen.ts/dist/interpreter/mapper/SyntaxErrorListener';
 import { UniProgram } from 'unicoen.ts/dist/node/UniProgram';
 import { CommonTokenStream } from 'antlr4ts';
-import { PlivetCPP14Engine } from './CPP14Engine';
+import type { ParserRuleContext } from 'antlr4ts';
+import { PlivetCPP14Engine, SourceLocator } from './CPP14Engine';
 import { Construct } from './Construct';
 import { DeclarationSpecifiers } from './DeclarationSpecifiers';
 import { DesignatedInitializers } from './DesignatedInitializers';
@@ -22,8 +27,10 @@ import { RuntimeRecordTypes } from './RecordTable';
 import {
   annotateRuntimeFunctions,
   annotateRuntimeVariables,
+  takeDisplayAddresses,
 } from './RuntimeTypeInfo';
 import { RuntimeDiagnostic } from './RuntimeDiagnostic';
+import { OutputSpan } from './stream';
 import { StructTable } from './StructTable';
 import {
   LintDiagnostic,
@@ -31,7 +38,10 @@ import {
   teachingDiagnostics,
 } from './TeachingLint';
 import { linkerDiagnostics } from './LinkerCheck';
+import { spelledFloating, spelledInteger } from './LiteralSpelling';
 import { JscppCheck, JscppWarning, jscppCheck } from './jscpp/JscppSyntax';
+import { libraryRecordTypes, typedefsForSyntaxCheck } from './library/types';
+import { resolveTypedefAmbiguities, typeNamesFor } from './TypedefNames';
 import { UnionTable } from './UnionTable';
 
 interface PreparedSource {
@@ -86,6 +96,38 @@ class PlivetCPP14Mapper extends CPP14Mapper {
     } catch {
       return { errors, tree: null };
     }
+  }
+
+  /** The text being parsed, for the typedef pass below. */
+  private parsing = '';
+
+  parseToANTLRTree(code: string) {
+    this.parsing = code;
+    return super.parseToANTLRTree(code);
+  }
+
+  /**
+   * The tree, with the declarations and casts that only a typedef name could
+   * have made ambiguous read the way C reads them (`TypedefNames.ts`):
+   * `Node *head = NULL;` inside a function is a declaration, not a product.
+   */
+  makeUniTree(tree: ParserRuleContext, tokens: CommonTokenStream): UniProgram {
+    const program = super.makeUniTree(tree, tokens);
+    resolveTypedefAmbiguities(
+      program,
+      typeNamesFor(this.parsing, program),
+      this.parsing
+    );
+    return program;
+  }
+
+  /** `Number(text)` reads `0u` and `1.5f` as NaN; see `LiteralSpelling`. */
+  visitIntegerliteral(ctx: IntegerliteralContext) {
+    return spelledInteger(super.visitIntegerliteral(ctx), ctx.text);
+  }
+
+  visitFloatingliteral(ctx: FloatingliteralContext) {
+    return spelledFloating(super.visitFloatingliteral(ctx), ctx.text);
   }
 }
 
@@ -156,6 +198,12 @@ export class PlivetCPP14Interpreter extends Interpreter {
       (address) => this.plivetEngine.functionNameAt(address),
       this.plivetEngine.stringLiterals()
     );
+    const display = takeDisplayAddresses(annotated);
+    if (display !== null) {
+      this.plivetEngine.resolveDisplayAddresses(annotated, (address) =>
+        display.get(address)
+      );
+    }
     return annotateRuntimeFunctions(
       annotated,
       this.plivetEngine.functionLocations()
@@ -388,6 +436,36 @@ export class PlivetCPP14Interpreter extends Interpreter {
   }
 
   /**
+   * Which file each line of the composed program came from, for the
+   * messages the program itself prints (`assert`'s, a refusal's).
+   */
+  setSourceLocator(locator: SourceLocator | null): void {
+    this.plivetEngine.setSourceLocator(locator);
+  }
+
+  /**
+   * The program's arguments for the next run, `argv[0]` first. See
+   * `PlivetCPP14Engine.setProgramArguments`.
+   */
+  setProgramArguments(args: readonly string[]): void {
+    this.plivetEngine.setProgramArguments(args);
+  }
+
+  /**
+   * Ends standard input for the read the program is waiting on, which then
+   * returns `EOF` (or a null pointer) once it has read what `stdin(text)`
+   * delivers with it. See `PlivetCPP14Engine.endInput`.
+   */
+  endInput(): void {
+    this.plivetEngine.endInput();
+  }
+
+  /** Which spans of `getStdout()` the program wrote to `stderr`. */
+  errorSpans(): OutputSpan[] {
+    return this.plivetEngine.errorSpans();
+  }
+
+  /**
    * What a compiler would warn about, for the editor to raise as lint.
    *
    * Read from the same parse as the constructs, and from the same prepared
@@ -455,7 +533,9 @@ export class PlivetCPP14Interpreter extends Interpreter {
     // accepted. The grammar in `jscpp/` reads those itself, and function
     // pointers, and enums; a designated initializer is the one form it has no
     // rule for. Its own instance, so the engine's is left alone.
-    const checkCode = new DesignatedInitializers().rewrite(preprocessed.code);
+    const checkCode = typedefsForSyntaxCheck(
+      new DesignatedInitializers().rewrite(preprocessed.code)
+    );
     const declarationSpecifiers = new DeclarationSpecifiers();
     const declarations = declarationSpecifiers.rewrite(preprocessed.code);
     // Read where the qualifiers have been blanked - `int (* const op)(void)`
@@ -480,12 +560,17 @@ export class PlivetCPP14Interpreter extends Interpreter {
     unions.read(recordSource);
     this.recordTypes = Object.assign(
       {},
+      libraryRecordTypes(),
       structs.runtimeTypes(),
       unions.runtimeTypes()
     );
     this.plivetEngine.setRecordTables(structs, unions);
     this.plivetEngine.setDeclarationSpecifiers(declarationSpecifiers);
     this.plivetEngine.setDesignatedInitializers(designatedInitializers);
+    this.plivetEngine.setSourceText(
+      code,
+      preprocessed.expansions.concat(enums.expansions)
+    );
     const recordsForParser = unions.rewriteForParser(
       structs.rewriteForParser(functionPointers.apply(initializers))
     );

@@ -30,6 +30,13 @@ module.exports = {
   },
   resolve: {
     extensions: ['.tsx', '.ts', '.js', '.json'],
+    alias: {
+      // unicoen.ts requires agh.sprintf at load for its own printf, which
+      // PlivetCPP14Engine replaces (src/interpreter/printf.ts), so nothing
+      // calls it. An empty module keeps it out of the interpreter chunk; the
+      // package stays installed as a dependency of unicoen.ts.
+      'agh.sprintf': false,
+    },
     fallback: {
       // unicoen.ts pulls in scanf, which requires fs. There is no server here.
       fs: false,

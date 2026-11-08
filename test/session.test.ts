@@ -132,3 +132,59 @@ describe('opening a session', () => {
     expect(isSession('{}')).toBe(false);
   });
 });
+
+describe('positions that no longer fit', () => {
+  it('are dropped rather than moved onto other text', () => {
+    const view = viewWith('int main() {}');
+    restoreSession(view, {
+      version: 1,
+      editor: {
+        doc: 'int a;\nint b;',
+        selection: { ranges: [{ anchor: 40, head: 40 }], main: 0 },
+      },
+      breakpoints: [1, 2, 9],
+      disabledBreakpoints: [0, 7],
+      watches: [
+        { name: 'b', pos: 11 },
+        { name: 'c', pos: 4 },
+        { name: 'a', pos: 99 },
+      ],
+    });
+    expect(view.state.doc.toString()).toBe('int a;\nint b;');
+    expect(view.state.selection.main.anchor).toBe(0);
+    expect(breakpointStates(view.state)).toEqual([
+      { row: 0, enabled: false },
+      { row: 1, enabled: true },
+    ]);
+    expect(watchNames(view.state)).toEqual(['b']);
+    view.destroy();
+  });
+});
+
+describe('a version 2 session, as a value', () => {
+  it('is a session when every file in it is well formed', () => {
+    expect(
+      isSession({
+        version: 2,
+        files: [
+          { path: 'main.c', text: 'int x;', selection: { anchor: 1, head: 2 } },
+          { path: 'helper.c' },
+        ],
+        entry: 'main.c',
+        active: 'helper.c',
+      })
+    ).toBe(true);
+    expect(isSession({ version: 2, files: [] })).toBe(true);
+  });
+
+  it('is refused whole when one file in it is not', () => {
+    expect(isSession({ version: 2, files: [{ text: 'x' }] })).toBe(false);
+    expect(
+      isSession({ version: 2, files: [{ path: 'a.c', breakpoints: [1.5] }] })
+    ).toBe(false);
+    expect(
+      isSession({ version: 2, files: [{ path: 'a.c', watches: [{ pos: 1 }] }] })
+    ).toBe(false);
+    expect(isSession({ version: 2, files: [], entry: 3 })).toBe(false);
+  });
+});

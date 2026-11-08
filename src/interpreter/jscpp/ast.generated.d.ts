@@ -45,4 +45,10 @@ export interface PegNode {
   [field: string]: unknown;
 }
 
-export declare function parse(input: string): PegNode;
+/** What the PLIVET rules read besides the input. */
+export interface ParseOptions {
+  /** The typedef names the program declares, for `(T)x` casts. */
+  typedefs?: string[];
+}
+
+export declare function parse(input: string, options?: ParseOptions): PegNode;

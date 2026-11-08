@@ -254,13 +254,40 @@ export interface FunctionModel {
   size: number;
 }
 
-export type ExpressionNodeKind = 'operand' | 'operator' | 'assignment';
+/**
+ * The shape of `ExpressionModel`, for a host that builds one itself and draws
+ * it with `c-expression.js`. Raise it when a field or a node kind is added,
+ * removed or changes meaning; the README documents the shape it names.
+ *
+ * 2: the `conversion` kind and the `type` field.
+ */
+export const EXPRESSION_MODEL_VERSION = 2;
+
+/**
+ * `conversion` is an implicit conversion C applies without it being written:
+ * an integer promotion, one of the usual arithmetic conversions, or the
+ * conversion an assignment makes to the type of its target. It has exactly
+ * one child, the operand being converted, and its text names both types, as
+ * `int → double`. A cast is written, so it stays an `operator`.
+ */
+export type ExpressionNodeKind =
+  | 'operand'
+  | 'operator'
+  | 'assignment'
+  | 'conversion';
 
 /** One evaluated part of the statement that completed at this step. */
 export interface ExpressionNodeModel {
   key: string;
   kind: ExpressionNodeKind;
   text: string;
+  /**
+   * The C type of what the node evaluates to, as `unsigned int` or `double *`:
+   * a conversion's target type, an operator's result type, an assignment's
+   * target type. Absent where it is not known - a call, a member reached
+   * through a pointer, a name the frames do not declare.
+   */
+  type?: string;
   /**
    * Where the operand or operator is written. The canvas does not need it; the
    * tooltip does, so that hovering inside a compound expression can answer

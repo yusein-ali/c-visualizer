@@ -93,7 +93,7 @@ src/index.ts                 the public entry: `new Plivet(element, options)`
   └─ src/main.ts             the standalone page, mounting one into #c-visualizer (or #root)
   └─ src/embed.ts            `npm run deploy`: the same mount, plus `window.CVisualizer`, for a host page
   └─ app/Plivet.ts           owns the bus, the interpreter client and the theme
-       ├─ ui/shell/          two-column CSS grid: five mount points, three drag handles, the footer
+       ├─ ui/shell/          two-column CSS grid, stacked by its own width (ResizeObserver): five mount points, three drag handles, the footer
        ├─ ui/controls/       six debug buttons, text size, theme switch, step counter
        ├─ app/EditorController.ts → ui/editor/  (CodeMirror 6)
        ├─ ui/console/        a `pre` and a `textarea`
@@ -177,7 +177,11 @@ total on purpose; the comment in that file says what went wrong when it was not.
 - **Stdin** — when the interpreter blocks on input, `debugState` becomes `'stdin'`, the
   Console's `textarea` becomes writable, and the line submitted with Enter comes back as
   `Request.stdinText`. The interpreter echoes what it reads into its own stdout, so the
-  console never writes the typed line into the transcript itself.
+  console never writes the typed line into the transcript itself. Ctrl+D or the
+  console's EOF button sends `Request.endOfInput` instead (the `debug` bus event's
+  third argument), and the waiting read returns `EOF`. `<stdio.h>` is
+  `interpreter/library/stdio.ts` over `stream.ts`; `stderr` writes go to the same
+  transcript and come back as `Response.errorSpans`, which the console colours.
 - **File uploads** — `FilePanel` hands the chosen `FileList` to `Plivet`, which
   reads them as `ArrayBuffer` into its interpreter client; they cross to the
   Worker and reach the interpreter via `setFileList`, so C programs can `fopen`

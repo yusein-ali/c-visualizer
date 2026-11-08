@@ -8,7 +8,7 @@
 //  nothing but the failure position. Execution stays with unicoen.ts.
 //
 //  Regenerate `ast.generated.js` with `npm run generate:parser` after any
-//  edit here. Two rules are changed from upstream, both marked `PLIVET:`.
+//  edit here. Every rule changed from upstream is marked `PLIVET:`.
 //-------------------------------------------------------------------------
 
 {
@@ -527,11 +527,23 @@ UnaryOperator
     / BANG
     ;
 
+// PLIVET: a cast to a typedef name the program declares, `(myint)x`. The
+// alternative after it reads `(myint)` as a parenthesised expression and then
+// cannot read the `x`; a name known to be a type has no such reading. The
+// names come from `JscppSyntax.ts` as `options.typedefs`.
 CastExpression
-    = UnaryExpression
+    = a:(LPAR KnownTypedefName RPAR) b:CastExpression {
+      return addPositionInfo({type:'CastExpression', TypeName:a[1], Expression:b});
+    }
+    / UnaryExpression
     / a:(LPAR TypeName RPAR) b:CastExpression {
       return addPositionInfo({type:'CastExpression', TypeName:a[1], Expression:b});
     }
+    ;
+
+KnownTypedefName
+    = &(n:Identifier &{ return (options.typedefs || []).indexOf(n) !== -1; })
+      t:TypeName {return t;}
     ;
 
 MultiplicativeExpression

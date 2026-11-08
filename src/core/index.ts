@@ -70,6 +70,7 @@ export { HISTORY_LIMIT, StepHistory } from './history';
 export {
   CELL_FONT_SIZE,
   CELL_HEIGHT,
+  EXPRESSION_MODEL_VERSION,
   MEMORY_ALIGNMENT,
   MEMORY_START_ADDRESSES,
   cellWidth,

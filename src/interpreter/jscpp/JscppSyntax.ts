@@ -1,7 +1,8 @@
 import { IDENT_CHAR, IDENT_START, mask } from '../scan';
-import strings from '../../strings';
+import { refusedConstruct } from '../refused';
 import { PegNode, PegSyntaxError } from './ast.generated';
 import * as parser from './ast.generated';
+import { typedefNamesIn } from '../TypedefNames';
 
 /**
  * Whether PLIVET accepts a program as C, decided by the PEG grammar vendored
@@ -207,13 +208,17 @@ const describe = (
   //    before and nothing after, saying nothing. Named for what it is, rather
   //    than as the missing punctuation the grammar happened to be looking
   //    for, which sent the reader to correct a line that was already right.
-  if (token === ':' && LABEL.test(before.trim())) {
+  //    The label is what follows the last `;`, `{` or `}` on the line, so
+  //    one written after another statement (`i = 0; again: i++;`) is found
+  //    as well as one on a line of its own.
+  const statement = /[^;{}]*$/.exec(before)![0];
+  if (token === ':' && LABEL.test(statement.trim())) {
     return {
       line,
       // The label itself, not the colon the parse stopped on. The reader has
       // to remove the whole statement, and it begins at the name.
-      column: before.length - before.trimStart().length,
-      message: strings.labelUnsupported,
+      column: before.length - statement.trimStart().length,
+      message: refusedConstruct('label').message,
     };
   }
 
@@ -490,21 +495,22 @@ const specifierError = (
  *
  * `<<=` maps correctly and is left alone. Read from the source because the
  * grammar parses `>>=` perfectly well; it is only the tree behind it that
- * loses the operator.
+ * loses the operator - with the pattern the refused-construct list gives a
+ * host, so the editor and the course's lint find the same thing.
  */
-const unsupportedShiftAssign = (
-  code: string,
-  source: string
-): JscppSyntaxError | null => {
-  const at = mask(code).indexOf('>>=');
-  if (at === -1) {
+const unsupportedShiftAssign = (code: string): JscppSyntaxError | null => {
+  const shiftAssign = refusedConstruct('shift-right-assign');
+  const found = new RegExp(shiftAssign.pattern).exec(mask(code));
+  if (found === null) {
     return null;
   }
-  const before = source.slice(0, at).split(/\r?\n/);
+  // Counted in `code`, where the offset was found: the two agree by line and
+  // column but not by offset, since a directive's line is emptied there.
+  const before = code.slice(0, found.index).split(/\r?\n/);
   return {
     line: before.length,
     column: before[before.length - 1].length,
-    message: strings.shiftAssignUnsupported,
+    message: shiftAssign.message,
   };
 };
 
@@ -533,7 +539,7 @@ const unsupportedGoto = (tree: PegNode): JscppSyntaxError | null => {
       error = {
         line: node.sLine,
         column: Math.max(0, (node.sColumn ?? 1) - 1),
-        message: strings.gotoUnsupported,
+        message: refusedConstruct('goto').message,
       };
       return;
     }
@@ -746,7 +752,7 @@ export interface JscppCheck {
 export const jscppCheck = (code: string, source: string = code): JscppCheck => {
   let tree: PegNode;
   try {
-    tree = parser.parse(code);
+    tree = parser.parse(code, { typedefs: Array.from(typedefNamesIn(code)) });
   } catch (thrown) {
     const error = thrown as Partial<PegSyntaxError>;
     // Anything without a position is a fault in the checker, not in the
@@ -766,7 +772,7 @@ export const jscppCheck = (code: string, source: string = code): JscppCheck => {
   return {
     error: earlier(
       earlier(specifierError(tree, source), emptyCharacterConstant(tree)),
-      earlier(unsupportedGoto(tree), unsupportedShiftAssign(code, source))
+      earlier(unsupportedGoto(tree), unsupportedShiftAssign(code))
     ),
     warnings: emptyDeclarations(tree, source).concat(
       duplicateStorageClasses(tree, source)

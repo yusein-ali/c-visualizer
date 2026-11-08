@@ -8,7 +8,9 @@ import { Construct } from '../interpreter/Construct';
 import { Expansion } from '../interpreter/Expansion';
 import { RuntimeDiagnostic } from '../interpreter/RuntimeDiagnostic';
 import { LintDiagnostic } from '../interpreter/TeachingLint';
+import { LIBRARY_TYPE_PATTERN } from '../interpreter/library/types';
 import type { SourceAnalysis } from '../interpreter/CPP14';
+import type { OutputSpan } from '../interpreter/stream';
 import { ExecutionSource } from './executionSource';
 import type { SourceLocation } from './executionSource';
 
@@ -49,7 +51,20 @@ export interface Request {
    * not send `files`. A multi-file request composes its named sources below.
    */
   sourcecode: string;
+  /**
+   * The line the console submitted for the read the program is waiting on,
+   * without the newline its Enter stands for.
+   */
   stdinText?: string;
+  /**
+   * The reader ended standard input (Ctrl+D, or the console's end-of-input
+   * button) for the read the program is waiting on. `stdinText`, when given
+   * too, is what was typed before it: the read takes those characters with
+   * no newline after them, then finds the end of input - so `getchar` and
+   * `fgetc` return `EOF`, `fgets` and `gets` a null pointer, and `scanf`
+   * `EOF` when it had converted nothing. A later read waits for new input.
+   */
+  endOfInput?: boolean;
   /**
    * The active file's marked rows, zero-based. The single-file form, kept for
    * callers that send one source; `breakpoints` is what a tabbed editor sends.
@@ -77,6 +92,13 @@ export interface Request {
   entry?: string;
   /** The file whose editor diagnostics a SyntaxCheck should return. */
   active?: string;
+  /**
+   * The program's arguments, `argv[1]` onwards, read by `Start` and `Exec`
+   * and by nothing else. `argv[0]` is the entry file's name without `.c`
+   * (`main` for `main.c`, or when no file is named). A `main` declared
+   * without parameters ignores them.
+   */
+  args?: string[];
 }
 
 /**
@@ -111,10 +133,10 @@ const syntaxErrorMessage = (
       .reverse()
       .find((candidate) => candidate.trim() !== '')
       ?.trim() ?? '';
-  const looksLikeDeclaration =
-    /^(?:(?:const|static|extern|unsigned|signed|long|short)\s+)*(?:void|char|short|int|long|float|double|struct|enum|union)\b/.test(
-      previousLine
-    );
+  const looksLikeDeclaration = new RegExp(
+    '^(?:(?:const|static|extern|unsigned|signed|long|short)\\s+)*' +
+      `(?:void|char|short|int|long|float|double|struct|enum|union|${LIBRARY_TYPE_PATTERN})\\b`
+  ).test(previousLine);
   const looksLikeStatement = /^[_A-Za-z]\w*\s*\(/.test(sourceLine.trim());
   if (
     looksLikeDeclaration &&
@@ -309,6 +331,12 @@ export interface Response {
    * this step added.
    */
   runtime?: RuntimeDiagnostic[];
+  /**
+   * Which parts of `output` the program wrote to `stderr`, as offsets into
+   * it, for the console to show in its error colour. Absent when it wrote
+   * nothing there.
+   */
+  errorSpans?: OutputSpan[];
 }
 
 /** The entry text for syntax checks and callers that send no named file set. */
@@ -452,6 +480,83 @@ function reportsExpansions(
   );
 }
 
+/** Implemented by interpreters that can say which file a line came from. */
+interface SourceLocating {
+  setSourceLocator(locator: {
+    entry: string;
+    locate(line: number): { file: string; line: number } | null;
+  }): void;
+}
+
+function locatesSources(
+  interpreter: Interpreter
+): interpreter is Interpreter & SourceLocating {
+  return (
+    typeof (interpreter as unknown as SourceLocating).setSourceLocator ===
+    'function'
+  );
+}
+
+/** Implemented by interpreters that hand `main` its arguments. */
+interface TakingArguments {
+  setProgramArguments(args: readonly string[]): void;
+}
+
+function takesArguments(
+  interpreter: Interpreter
+): interpreter is Interpreter & TakingArguments {
+  return (
+    typeof (interpreter as unknown as TakingArguments).setProgramArguments ===
+    'function'
+  );
+}
+
+/**
+ * `argv` as a run starts with it: the entry file's name without its
+ * directory and its `.c`, then the request's arguments. Anything in `args`
+ * that is not a string is left out rather than turned into one.
+ */
+export const programArgumentsOf = (request: Request): string[] => {
+  const file = (request.entry ?? '').split('/').pop() ?? '';
+  const name = file.replace(/\.c$/, '');
+  return [
+    name === '' ? 'main' : name,
+    ...(Array.isArray(request.args)
+      ? request.args.filter((arg): arg is string => typeof arg === 'string')
+      : []),
+  ];
+};
+
+/** What the console answers a waiting read with: a line, an end, or both. */
+interface StdinAnswer {
+  text: string;
+  end: boolean;
+}
+
+/** The answer a request carries for a waiting read, if it carries one. */
+const answerOf = (request: Request): StdinAnswer | undefined =>
+  request.endOfInput === true
+    ? { text: request.stdinText ?? '', end: true }
+    : typeof request.stdinText === 'undefined'
+      ? undefined
+      : { text: request.stdinText, end: false };
+
+/** Implemented by interpreters whose standard streams are PLIVET's own. */
+interface StreamSource {
+  endInput(): void;
+  errorSpans(): OutputSpan[];
+}
+
+function hasStreams(
+  interpreter: Interpreter
+): interpreter is Interpreter & StreamSource {
+  const source = interpreter as unknown as StreamSource;
+  return (
+    typeof source.endInput === 'function' &&
+    typeof source.errorSpans === 'function'
+  );
+}
+
 /**
  * How many steps a run takes before it lets the Worker read its messages. The
  * `Stop` button is the only thing waiting on the other side, and a run that
@@ -562,7 +667,8 @@ export class Server {
   }
 
   public async send(request: Request): Promise<Response> {
-    const { controlEvent, stdinText } = request;
+    const { controlEvent } = request;
+    const stdinText = answerOf(request);
     const requestedExecution = executionSourceOf(request);
     // Breakpoints arrive as zero-based, file-local rows. The interpreter
     // executes the composed source and reports one-based global lines, so
@@ -588,7 +694,11 @@ export class Server {
           return preflight;
         }
         this.execution = requestedExecution;
-        const started = await this.Start(requestedExecution.code, preflight);
+        const started = await this.Start(
+          requestedExecution.code,
+          preflight,
+          programArgumentsOf(request)
+        );
         return this.respond(
           started.step,
           requestedExecution,
@@ -641,7 +751,11 @@ export class Server {
           return preflight;
         }
         this.execution = requestedExecution;
-        const started = await this.Start(requestedExecution.code, preflight);
+        const started = await this.Start(
+          requestedExecution.code,
+          preflight,
+          programArgumentsOf(request)
+        );
         return this.respond(
           this.StepAll(requestedExecution, globalBreakpoints),
           requestedExecution,
@@ -714,6 +828,7 @@ export class Server {
       step: result.step,
       errors: [],
       runtime: this.runtimeDiagnostics(),
+      ...this.errorSpansFor(result.output),
       coverage:
         location === null ? [] : this.lineCounts(execution, location.path),
       constructs,
@@ -746,6 +861,24 @@ export class Server {
       ? this.interpreter.getRuntimeDiagnostics()
       : [];
   }
+  /**
+   * The `stderr` spans of an output. A step held in the history printed a
+   * prefix of what the run has printed since, so the run's spans cut at its
+   * length are that step's own.
+   */
+  private errorSpansFor(output: string): { errorSpans?: OutputSpan[] } {
+    if (this.interpreter === null || !hasStreams(this.interpreter)) {
+      return {};
+    }
+    const spans = this.interpreter
+      .errorSpans()
+      .filter((span) => span.start < output.length)
+      .map((span) => ({
+        start: span.start,
+        end: Math.min(span.end, output.length),
+      }));
+    return spans.length === 0 ? {} : { errorSpans: spans };
+  }
 
   /** The step held in the history, for the commands that only look back. */
   private held(step: number, debugState: DEBUG_STATE): StepResult {
@@ -762,11 +895,15 @@ export class Server {
 
   private async Start(
     sourcecode: string,
-    prepared?: PreparedStart
+    prepared?: PreparedStart,
+    args: readonly string[] = ['main']
   ): Promise<StartResult> {
     await this.reset(prepared);
     if (this.interpreter === null) {
       throw new Error('interpreter is not found');
+    }
+    if (takesArguments(this.interpreter)) {
+      this.interpreter.setProgramArguments(args);
     }
     // Reading constructs prepares the interpreter too. Do it before arming
     // the run: doing it after `startStepExecution` resets the engine's cached
@@ -774,6 +911,24 @@ export class Server {
     // text memory on the next step.
     const constructs = prepared?.constructs ?? this.constructs(sourcecode);
     const expansions = prepared?.expansions ?? this.expansions(sourcecode);
+    const execution = this.execution;
+    if (execution !== null && locatesSources(this.interpreter)) {
+      // What the program prints about a line (`assert`, a refusal) names the
+      // file the reader wrote it in, not the composed unit's line.
+      this.interpreter.setSourceLocator({
+        entry: execution.entry,
+        locate: (line) => {
+          const found = execution.locate({
+            begin: { x: 0, y: line },
+            end: { x: 0, y: line },
+          });
+          // A request that names no file has no name to give.
+          return found === null || found.path === ''
+            ? null
+            : { file: found.path, line: found.range.begin.y };
+        },
+      });
+    }
     const execState = this.interpreter.startStepExecution(sourcecode);
     this.announcedBreakpoint = null;
     const output = this.interpreter.getStdout();
@@ -808,7 +963,7 @@ export class Server {
     return this.held(this.count, 'Debugging');
   }
 
-  private Step(stdinText?: string): StepResult {
+  private Step(stdinText?: StdinAnswer): StepResult {
     ++this.count;
     if (this.count < this.history.length) {
       // Stepping forward out of a stretch that has been dropped - the run was
@@ -832,7 +987,10 @@ export class Server {
         --this.count;
         return this.held(this.count, 'stdin');
       }
-      this.interpreter.stdin(stdinText);
+      if (stdinText.end && hasStreams(this.interpreter)) {
+        this.interpreter.endInput();
+      }
+      this.interpreter.stdin(stdinText.text);
     }
     const state: ExecState | null = this.interpreter.stepExecute();
     if (state === null) {
@@ -873,7 +1031,7 @@ export class Server {
   private StepAll(
     execution: ExecutionSource,
     lineNumOfBreakpoint?: number[],
-    stdinText?: string
+    stdinText?: StdinAnswer
   ): StepResult {
     const executing = this.held(this.count, 'Executing');
     this.runToken += 1;
@@ -889,7 +1047,7 @@ export class Server {
   private StepOver(
     execution: ExecutionSource,
     lineNumOfBreakpoint?: number[],
-    stdinText?: string
+    stdinText?: StdinAnswer
   ): StepResult {
     const executing = this.held(this.count, 'Executing');
     this.runToken += 1;
@@ -901,7 +1059,7 @@ export class Server {
     token: number,
     execution: ExecutionSource,
     lineNumOfBreakpoint?: number[],
-    stdinText?: string
+    stdinText?: StdinAnswer
   ): Promise<void> {
     await pause();
     const initial = this.history.stateAt(this.count);
@@ -973,7 +1131,7 @@ export class Server {
     token: number,
     execution: ExecutionSource,
     lineNumOfBreakpoint?: number[],
-    stdinText?: string
+    stdinText?: StdinAnswer
   ): Promise<void> {
     // Let the `Executing` answer go out before the run begins.
     await pause();

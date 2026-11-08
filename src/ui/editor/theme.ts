@@ -448,6 +448,76 @@ export const debugTheme = EditorView.baseTheme({
     borderBottom:
       '1px solid var(--plivet-editable-line, rgba(70, 130, 180, 0.5))',
   },
+  // The lines of an exercise nothing of which may be edited: shaded, with a
+  // lock beside them. The tokens are the ones interactive-code.css defines
+  // for its own protected lines, so a block and the visualizer opened from it
+  // draw them alike.
+  '.plivet-protected-line': {
+    backgroundColor:
+      'var(--plivet-protected-bg, var(--interactive-editor-protected-bg, rgba(108, 117, 125, 0.12)))',
+  },
+  '&dark .plivet-protected-line': {
+    backgroundColor:
+      'var(--plivet-protected-bg, var(--interactive-editor-protected-bg, rgba(173, 181, 189, 0.1)))',
+  },
+  '.plivet-lock-gutter .cm-gutterElement': {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '0 3px',
+  },
+  // A padlock drawn from a colour token through a mask, so it follows the
+  // theme without an image per theme.
+  '.plivet-lock': {
+    display: 'inline-block',
+    width: '0.7em',
+    height: '0.85em',
+    backgroundColor:
+      'var(--plivet-protected-color, var(--interactive-editor-protected-color, #6c757d))',
+    mask: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 14'%3E%3Cpath d='M3 6V4a3 3 0 0 1 6 0v2h1a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1zm1.5 0h3V4a1.5 1.5 0 0 0-3 0z'/%3E%3C/svg%3E") center / contain no-repeat`,
+    WebkitMask: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 14'%3E%3Cpath d='M3 6V4a3 3 0 0 1 6 0v2h1a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1zm1.5 0h3V4a1.5 1.5 0 0 0-3 0z'/%3E%3C/svg%3E") center / contain no-repeat`,
+  },
+  '&dark .plivet-lock': {
+    backgroundColor:
+      'var(--plivet-protected-color, var(--interactive-editor-protected-color, #adb5bd))',
+  },
+  // A replacement refused because it would have changed protected text, said
+  // over the editor whose text was kept. CodeMirror stacks its panels above
+  // everything near the editor; this one goes under the floating debug
+  // toolbar, which must stay reachable - the shell lifts the control bar
+  // that holds it to 3 - and starts its text below where that toolbar opens.
+  // A host that moves the toolbar can set the clearance.
+  '.cm-panels:has(.plivet-load-notice)': {
+    zIndex: '2',
+  },
+  '.plivet-load-notice': {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: '0.5rem',
+    padding: '0.4rem 0.75rem',
+    paddingTop: 'var(--plivet-load-notice-clearance, 2.75rem)',
+    color:
+      'var(--plivet-refusal-color, var(--interactive-refusal-color, #b02a37))',
+    fontFamily: 'var(--bs-body-font-family, sans-serif)',
+    whiteSpace: 'normal',
+  },
+  '&dark .plivet-load-notice': {
+    color:
+      'var(--plivet-refusal-color, var(--interactive-refusal-color, #ea868f))',
+  },
+  '.plivet-load-notice__message': {
+    flex: '1 1 16rem',
+  },
+  '.plivet-load-notice__button': {
+    border: '1px solid currentColor',
+    borderRadius: '4px',
+    backgroundColor: 'transparent',
+    color: 'inherit',
+    padding: '2px 10px',
+    cursor: 'pointer',
+    font: 'inherit',
+  },
   // How often the run has been to a line, in four bands. The colour is the
   // step marker's, thinned: it is the same fact - where the program goes -
   // said about the whole run rather than about this step.

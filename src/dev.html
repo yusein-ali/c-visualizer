@@ -16,16 +16,20 @@
 
 			.pair {
 				display: flex;
+				flex-wrap: wrap;
 				align-items: flex-start;
 			}
 
 			/*
-       * Side by side, and each wide enough to be worked in: the page scrolls
-       * sideways rather than squeezing both instances into one viewport.
+       * Side by side where the window has room for two instances of 720px,
+       * one above the other where it has not. Each instance lays itself out
+       * against its pane, so a window narrower than 720px shows both stacked
+       * (editor, console, canvas in one column) and a wider one shows both in
+       * two columns: resize the window to watch them switch.
        */
 			.pane {
-				flex: 1 1 50%;
-				min-width: 720px;
+				flex: 1 1 720px;
+				min-width: 0;
 			}
 
 			.pane h1 {

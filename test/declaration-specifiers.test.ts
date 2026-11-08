@@ -241,7 +241,9 @@ int main(){
         execute(
           `#include<stdio.h>\nint main(){ ${type} a = 7; printf("%d\\n", (int)a); return 0; }`
         ).output
-      ).toBe('7\n');
+        // Converting 7 to `_Bool` gives 1 (C11 6.3.1.2): any nonzero value
+        // is true, and true is 1.
+      ).toBe(type === '_Bool' ? '1\n' : '7\n');
     }
   );
 });

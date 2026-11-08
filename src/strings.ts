@@ -21,6 +21,17 @@ const strings = {
   buildCodeHint:
     'Check all source files with the configured compiler and show its diagnostics',
   openedNotCode: 'That file could not be read as a program.',
+  // Protected text: the lock beside a line, and the notice a refused
+  // replacement leaves, read as `Line 7 of main.c is protected, ...`.
+  protectedLine: 'Protected line: it cannot be edited',
+  loadNoticeLine: 'Line',
+  loadNoticeOf: 'of',
+  loadNoticeRefused:
+    'is protected, and the text being loaded changes it. The editor kept the text it had.',
+  loadNoticeLocked:
+    'is protected, and this text has changed it. It may have been saved before parts of the exercise were locked. Editing stays locked until the default text is restored.',
+  restoreDefault: 'Restore default',
+  dismissNotice: 'Dismiss',
   savedFileName: 'program.c',
   preprocessedButton: 'Preprocessed',
   preprocessedTitle: 'Source after preprocessing',
@@ -48,6 +59,10 @@ const strings = {
   theme: 'theme',
   themeLight: 'Light theme',
   themeDark: 'Dark theme',
+  programArgs: 'Arguments',
+  programArgsLabel: 'program arguments',
+  programArgsHint:
+    'What main receives in argv after the program name, written as on a command line; quote an argument that contains spaces. A change applies at the next Start or Run.',
   debugStart: 'restart step execution',
   debugStop: 'stop execution',
   debugBackAll: 'go backward for all steps',
@@ -152,6 +167,9 @@ const strings = {
   // arguments fill, so the tree below reads as a call rather than an operator.
   graphCallHeading: 'Call',
   expressionCurrentValue: 'Current value',
+  // The hover text of an expression box and of a conversion pill on an edge.
+  expressionType: 'Type',
+  expressionConversion: 'Implicit conversion',
   statementNotRunning: 'no statement is being executed',
   statementCurrent: 'Current statement',
   statementNoActive: 'No current statement',
@@ -272,7 +290,7 @@ const strings = {
         'F12 goes to the declaration of the name at the cursor. Ctrl-click a name does the same with the pointer, and holding the key underlines the names that can be followed.',
         'Double-click a cell in the memory view to go to the object declaration or function definition it represents.',
         'Alt-click a name pins its tooltip as a live watch, and Alt-click it again removes the watch. Clicking the breakpoint gutter sets or removes a breakpoint.',
-        'In the console input field, Enter submits the line and Shift+Enter adds another line before submitting.',
+        'In the console input field, Enter submits the line and Shift+Enter adds another line before submitting. Ctrl+D, or the EOF button beside the field, ends the input: the waiting read returns EOF (fgets and gets return NULL), and a later read waits for new input. What a program writes to stderr is shown in the error colour.',
         'Debugger shortcuts follow the toolbar: F5 runs or continues, F6 steps into the next statement or function call, F7 steps over function calls, and F9 toggles a breakpoint on the line containing the cursor.',
         'Resize handles take keyboard focus: with a handle focused, the arrow keys resize the panes it separates and Enter restores the default size.',
         'Escape closes this dialog.',
@@ -287,7 +305,11 @@ const strings = {
   consoleInputLabel: 'standard input stream',
   // The console only accepts input while a read is blocked, so the hint is
   // also how the user learns that the program is waiting for one.
-  consoleInputHint: 'Enter to submit, Shift+Enter for another line',
+  consoleInputHint:
+    'Enter to submit, Shift+Enter for another line, Ctrl+D to end the input',
+  consoleEndInput: 'EOF',
+  consoleEndInputHint:
+    'End the input (Ctrl+D): the waiting read returns EOF, or NULL for fgets',
   atAddress: 'address',
   // Read out at every step, for a reader who is not watching the marker.
   announceStep: 'line',

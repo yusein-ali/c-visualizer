@@ -3,9 +3,12 @@
  *
  * This replaces the Bootstrap 3 `Grid`/`Row`/`Col` tree that `App`,
  * `EditorSide` and `Menu` used to render, and the four stylesheets under
- * `src/css/` that went with it. The column proportions are the ones those
- * components asked Bootstrap for - 4/8 on large screens, 5/7 on medium, 6/6 on
- * small, stacked below that - so the layout survived the framework leaving.
+ * `src/css/` that went with it. Bootstrap was asked for 4/8 on large screens,
+ * 5/7 on medium, 6/6 on small and one column below that - all measured
+ * against the window. They are measured against the shell's own width now,
+ * because inside a course chapter the window says nothing about the room the
+ * shell has: `PlivetShell` watches its width and puts `plivet--stacked` on
+ * the root below its threshold.
  *
  * Colours are named through the same fallback chain as the console and the
  * editor theme,
@@ -40,7 +43,18 @@
 
 	box-sizing: border-box;
 	display: grid;
-	grid-template-columns: minmax(0, 1fr);
+	/*
+   * Side by side, the two columns are separated by a handle, and the handle
+   * is a grid track of its own. `--plivet-side-width` is unset until somebody
+   * drags; until then the editor column is half of a narrow shell, 400px of
+   * a middling one and a third of a wide one - the curve Bootstrap's 6/6,
+   * 5/7 and 4/8 drew between those widths, without the steps. A drag
+   * replaces the first track with a length, and the canvas takes whatever
+   * is over.
+   */
+	grid-template-columns:
+		var(--plivet-side-width, max(33.333%, min(50%, 400px)))
+		auto minmax(0, 1fr);
 	gap: 5px;
 	padding: 5px;
 	background-color: var(--plivet-surface);
@@ -85,37 +99,31 @@
 }
 
 /*
- * Side by side, the two columns are separated by a handle, and the handle is a
- * grid track of its own. The proportions Bootstrap was asked for are still
- * here - as the fallback of `--plivet-side-width`, which is unset until
- * somebody drags. A drag replaces the first track with a length, the last one
- * is the only flexible track left, and the canvas takes whatever is over.
+ * Stacked: one column - the editor, the console under it, the canvas under
+ * that - in the order the boxes already have in the markup, so nothing is
+ * moved to get there and nothing loses its scroll position on the way. A
+ * dragged editor column is kept for when there are two columns again.
  */
-@media (min-width: 768px) {
-	.plivet {
-		grid-template-columns: var(--plivet-side-width, minmax(0, 6fr)) auto minmax(
-				0,
-				6fr
-			);
-	}
+.plivet.plivet--stacked {
+	grid-template-columns: minmax(0, 1fr);
 }
 
-@media (min-width: 992px) {
-	.plivet {
-		grid-template-columns: var(--plivet-side-width, minmax(0, 5fr)) auto minmax(
-				0,
-				7fr
-			);
-	}
+/*
+ * The canvas is as wide as the shell, and given a shape rather than a
+ * height: `--plivet-canvas-ratio`, width over height, which the handle under
+ * it writes and a host may set. `--plivet-graph-height` - the two-column
+ * height, the host's or a drag's - waits for two columns. The floor is the
+ * one a drag has, and stating it is also what keeps a tall drawing from
+ * stretching the box: an aspect ratio otherwise grows to fit its content.
+ */
+.plivet--stacked .plivet__column {
+	display: block;
 }
 
-@media (min-width: 1200px) {
-	.plivet {
-		grid-template-columns: var(--plivet-side-width, minmax(0, 4fr)) auto minmax(
-				0,
-				8fr
-			);
-	}
+.plivet--stacked .plivet__main {
+	height: auto;
+	min-height: 200px;
+	aspect-ratio: var(--plivet-canvas-ratio, 4 / 3);
 }
 
 .plivet__side {
@@ -159,16 +167,11 @@
 }
 
 /*
- * Stacked on a narrow screen there is no boundary between the columns to move.
- * This has to come after the rule it overrides: a media query carries no
- * specificity of its own, so between two rules naming one class, the later one
- * wins at every width - which is how the handle came to be hidden at all of
- * them.
+ * Stacked, there is no boundary between columns to move: the two handles
+ * left are both horizontal, under the editor and under the canvas.
  */
-@media (max-width: 767.98px) {
-	.plivet__splitter--x {
-		display: none;
-	}
+.plivet--stacked .plivet__splitter--x {
+	display: none;
 }
 
 .plivet__splitter--y {

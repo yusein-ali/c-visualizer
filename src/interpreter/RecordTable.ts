@@ -66,6 +66,8 @@ export interface Member {
   lengths: number[];
   baseQualifiers: TypeQualifier[];
   pointerQualifiers: TypeQualifier[][];
+  /** A bit-field's width in bits; absent for every other member. */
+  bits?: number;
 }
 
 /** Where each member sits: the shape `Engine.execClassDec` puts in scope. */
@@ -85,6 +87,8 @@ export interface RuntimeRecordInfo {
       alignment: number;
       baseQualifiers: TypeQualifier[];
       pointerQualifiers: TypeQualifier[][];
+      /** A bit-field's width, which the row shows as `a : 3`. */
+      bits?: number;
     };
   };
 }
@@ -99,6 +103,12 @@ export interface RuntimeRecordTypes {
  * size of any member that is itself a record.
  */
 export const STRUCT_INFO_SIZE = 4;
+
+/** A leading tag keyword, which a lookup by name ignores. */
+const TAG_KEYWORD: Record<'struct' | 'union', RegExp> = {
+  struct: /^\s*struct\s+/,
+  union: /^\s*union\s+/,
+};
 
 export abstract class RecordTable {
   /** `struct` or `union`: the keyword this table reads. */
@@ -209,6 +219,9 @@ export abstract class RecordTable {
           baseQualifiers: member.baseQualifiers,
           pointerQualifiers: member.pointerQualifiers,
         };
+        if (typeof member.bits === 'number') {
+          fields[member.name].bits = member.bits;
+        }
       }
       for (const runtimeName of this.namesFor(name)) {
         types[runtimeName] = {
@@ -340,9 +353,8 @@ export abstract class RecordTable {
 
   /** The key `name` stands for in this table, following typedefs. */
   private resolve(name: string): string | null {
-    const bare = name
-      .replace(new RegExp(`^\\s*${this.keyword}\\s+`), '')
-      .trim();
+    // Asked of every variable at every step, so the pattern is not rebuilt.
+    const bare = name.replace(TAG_KEYWORD[this.keyword], '').trim();
     if (this.members.has(bare)) {
       return bare;
     }
@@ -409,12 +421,31 @@ export abstract class RecordTable {
     let cursor = 0;
     let widest = 0;
     let recordAlignment = 1;
+    // The storage unit consecutive bit-fields are being packed into: gcc
+    // puts the next one in the same unit while its bits still fit there.
+    let unit: { offset: number; size: number; used: number } | null = null;
     for (const member of this.ownMembers(name)!) {
       const shape = this.displayShapeOfMember(member, new Set(path));
       recordAlignment = Math.max(recordAlignment, shape.alignment);
+      const bits = member.bits;
+      if (
+        this.keyword !== 'union' &&
+        typeof bits === 'number' &&
+        unit !== null &&
+        unit.size === shape.size &&
+        unit.used + bits <= unit.size * 8
+      ) {
+        unit.used += bits;
+        fields.set(member.name, { offset: unit.offset, ...shape });
+        continue;
+      }
       const offset =
         this.keyword === 'union' ? 0 : alignAddress(cursor, shape.alignment);
       fields.set(member.name, { offset, ...shape });
+      unit =
+        typeof bits === 'number'
+          ? { offset, size: shape.size, used: bits }
+          : null;
       cursor = offset + shape.size;
       widest = Math.max(widest, shape.size);
     }
@@ -539,14 +570,15 @@ function declaratorNames(text: string): string[] {
  * The members of one record body.
  *
  * Skipped, and recorded nowhere: anything with parentheses, which is a member
- * function or a function pointer, and anonymous nested records. A bitfield
- * keeps its declared type and loses its width - unicoen.ts has no bitfields at
- * all, so a whole `int` is the closest thing available.
+ * function or a function pointer, anonymous nested records, and an unnamed
+ * bit-field. A named bit-field keeps its declared type and records its width
+ * in `bits`: the engine gives it a whole object of that type, and wraps what
+ * is stored in it at the width (`CPP14Engine._execCast`).
  */
 export function parseMembers(body: string): Member[] {
   const members: Member[] = [];
   for (const raw of splitTopLevel(body, ';')) {
-    const declaration = raw.split(':')[0].trim();
+    const declaration = raw.trim();
     const normalizedDeclaration = declaration.replace(
       /\b_Atomic\s*\(([^)]+)\)/g,
       '_Atomic $1'
@@ -560,7 +592,12 @@ export function parseMembers(body: string): Member[] {
     const parts = splitTopLevel(normalizedDeclaration, ',');
     let baseType: string | null = null;
     let declarationQualifiers: TypeQualifier[] = [];
-    for (const part of parts) {
+    for (const declarator of parts) {
+      // `unsigned a : 3, b : 5`: each declarator carries its own width.
+      const width = /:\s*([^:]*)$/.exec(declarator);
+      const part =
+        width === null ? declarator : declarator.slice(0, width.index);
+      const bits = width === null ? NaN : Number(width[1].trim());
       const parsed = splitDeclarator(part);
       if (parsed === null) {
         continue;
@@ -572,13 +609,25 @@ export function parseMembers(body: string): Member[] {
       if (baseType === '') {
         continue;
       }
-      members.push({
+      const member: Member = {
         name: parsed.name,
         type: (baseType + ' ' + '*'.repeat(parsed.stars)).trim(),
         lengths: parsed.lengths,
         baseQualifiers: declarationQualifiers,
         pointerQualifiers: parsed.pointerQualifiers,
-      });
+      };
+      // A width wider than the type is a constraint violation the compiler
+      // reports; the member is then laid out as the whole type it says.
+      if (
+        Number.isInteger(bits) &&
+        bits > 0 &&
+        bits <= basicSizeof(member.type) * 8 &&
+        parsed.stars === 0 &&
+        parsed.lengths.length === 0
+      ) {
+        member.bits = bits;
+      }
+      members.push(member);
     }
   }
   return members;

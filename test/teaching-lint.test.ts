@@ -171,6 +171,84 @@ describe('a format string that disagrees with its arguments', () => {
     expect(found).toBeDefined();
     expect(found.message).toContain('points to');
   });
+
+  it('checks sprintf and snprintf after the destination and the size', () => {
+    const code = `int main(void) {
+  char buffer[16];
+  double d = 0.5;
+  sprintf(buffer, "%d", d);
+  snprintf(buffer, 16, "%s %d", buffer);
+  return 0;
+}
+`;
+    const found = only(code, 'format-arguments');
+    expect(found.map((one) => [one.line, one.help])).toEqual([
+      [4, 'sprintf'],
+      [5, 'snprintf'],
+    ]);
+  });
+
+  it('checks sscanf after the string it reads', () => {
+    const code = `int main(void) {
+  int n;
+  double d = 0.0;
+  sscanf("1 2", "%d %d", &d, n);
+  return 0;
+}
+`;
+    expect(only(code, 'format-arguments')[0].message).toContain('points to');
+    expect(only(code, 'scanf-address')[0].help).toBe('sscanf');
+  });
+
+  it('counts a * width or precision as an argument of its own', () => {
+    const fine = `int main(void) {
+  int width = 6;
+  double d = 0.5;
+  printf("%*.*f\\n", width, 2, d);
+  return 0;
+}
+`;
+    expect(rules(fine)).not.toContain('format-arguments');
+    const wrong = `int main(void) {
+  double d = 0.5;
+  printf("%*d\\n", d, 3);
+  return 0;
+}
+`;
+    const [found] = only(wrong, 'format-arguments');
+    expect(found.message).toContain('the * width in %*d');
+  });
+
+  it('reads a scanset as a string conversion', () => {
+    const code = `int main(void) {
+  char line[32];
+  sscanf("a b", "%[^\\n]", line);
+  return 0;
+}
+`;
+    expect(rules(code)).not.toContain('format-arguments');
+  });
+
+  it('accepts a char array or pointer for a scanf string conversion', () => {
+    const fine = `int main(void) {
+  char word[16];
+  char *p = word;
+  scanf("%s", word);
+  sscanf("x y", "%s %s", word, p);
+  return 0;
+}
+`;
+    expect(rules(fine)).not.toContain('format-arguments');
+    const wrong = `int main(void) {
+  int *numbers;
+  scanf("%s", numbers);
+  return 0;
+}
+`;
+    expect(only(wrong, 'format-arguments')[0].message).toContain(
+      'points to an integer'
+    );
+  });
 });
 
 describe('an object evaluated while its value is indeterminate', () => {
@@ -502,4 +580,41 @@ int main(void) {
     expect(response.errors).toEqual([]);
     expect(response.debugState).not.toBe('Stop');
   }, 30000);
+});
+
+describe('the stream functions of the printf and scanf families', () => {
+  it('checks fprintf against the arguments after its stream and format', () => {
+    const code = `#include <stdio.h>
+int main(void) {
+  double d = 0.5;
+  fprintf(stderr, "%d %s\\n", d);
+  fprintf(stdout, "%d\\n", d);
+  fprintf(stdout, "%f\\n", d);
+  return 0;
+}
+`;
+    const found = only(code, 'format-arguments');
+    expect(found.map((one) => one.line)).toEqual([4, 5]);
+    expect(found[0].message).toContain('fprintf');
+    expect(found[1].message).toContain('%d');
+  });
+
+  it('checks fscanf, and asks for the address of what it stores', () => {
+    const code = `#include <stdio.h>
+int main(void) {
+  FILE *in = fopen("data.txt", "r");
+  int n;
+  double d;
+  fscanf(in, "%d", n);
+  fscanf(in, "%d", &d);
+  fscanf(in, "%lf", &d);
+  return 0;
+}
+`;
+    const address = only(code, 'scanf-address');
+    expect(address.map((one) => one.line)).toEqual([6]);
+    expect(address[0].message).toContain('fscanf');
+    const mismatch = only(code, 'format-arguments');
+    expect(mismatch.map((one) => one.line)).toEqual([7]);
+  });
 });

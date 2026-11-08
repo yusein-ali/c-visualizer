@@ -1,4 +1,4 @@
-import { EditorState, Extension } from '@codemirror/state';
+import { EditorState, Extension, Transaction } from '@codemirror/state';
 import {
   drawSelection,
   dropCursor,
@@ -234,8 +234,11 @@ export class PlivetEditor {
     this.view.dispatch({
       changes: { from: 0, to: this.view.state.doc.length, insert: code },
       // A host handing PLIVET a new program is not a student typing outside
-      // the blank, so the protected-region filter lets this one through.
-      annotations: unprotected.of(true),
+      // the blank, so the protected-region filter lets this one through. Nor
+      // is it an edit to undo: undo is dispatched past the filters, and
+      // undoing a replacement would put back text - another tab's, or text
+      // that lost protected lines - the filter never got to judge.
+      annotations: [unprotected.of(true), Transaction.addToHistory.of(false)],
     });
   }
 

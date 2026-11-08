@@ -13,6 +13,7 @@ import {
   RuntimeRecordInfo,
   RuntimeRecordTypes,
 } from './RecordTable';
+import { libraryTypedefIn } from './library/types';
 
 /** What the visualizer shows for a variable that holds a function. */
 export interface FunctionPointerVariableInfo {
@@ -40,6 +41,7 @@ interface VariableWithTypeInfo extends Variable {
   plivetAddress?: number;
   plivetSize?: number;
   plivetPointerValue?: number;
+  plivetBitField?: number;
 }
 
 /** A string literal, as the read-only memory it occupies. */
@@ -67,6 +69,7 @@ export interface RuntimeFunctionLocation {
 interface ExecStateWithTypeInfo extends ExecState {
   plivetFunctions?: RuntimeFunctionLocation[];
   plivetStrings?: RuntimeStringLiteral[];
+  plivetDisplayAddresses?: Map<number, number>;
 }
 
 export type DeclarationInfoLookup = (
@@ -183,7 +186,12 @@ export function annotateRuntimeVariables(
     // a word, as a compiler laying out `.rodata` would place it.
     readOnly += alignAddress(literal.size, MEMORY_ALIGNMENT);
     if (literal.address !== null) {
-      displayAddresses.set(literal.address, displayAddress);
+      // Every byte, not only the first: `strchr` and `strtol`'s end pointer
+      // point into the middle of a literal, and an address the table does
+      // not know is shown as the engine's own.
+      for (let offset = 0; offset < literal.size; offset += 1) {
+        displayAddresses.set(literal.address + offset, displayAddress + offset);
+      }
     }
     return { ...literal, displayAddress };
   });
@@ -194,7 +202,22 @@ export function annotateRuntimeVariables(
       annotateFunctionPointers(variable, functionPointerTypes, functionAt);
     }
   }
+  (state as ExecStateWithTypeInfo).plivetDisplayAddresses = displayAddresses;
   return state;
+}
+
+/**
+ * Where this step draws each engine address, taken off the state: the table
+ * `annotateRuntimeVariables` translated the pointer values through, for the
+ * one caller that spells recorded addresses with it. Taken rather than read,
+ * so the history does not keep a table per step.
+ */
+export function takeDisplayAddresses(
+  state: ExecState
+): Map<number, number> | null {
+  const table = (state as ExecStateWithTypeInfo).plivetDisplayAddresses;
+  delete (state as ExecStateWithTypeInfo).plivetDisplayAddresses;
+  return typeof table === 'undefined' ? null : table;
 }
 
 /** The string literals this step's memory holds. */
@@ -219,7 +242,16 @@ export function displayTypeOf(variable: Variable): string {
     return enumInfo.displayType;
   }
   const recordInfo = recordInfoOf(variable);
-  return recordInfo === null ? variable.type : recordInfo.displayType;
+  // A bit-field is filed as `unsigned:3`; the width is the name's to show.
+  return recordInfo === null
+    ? variable.type.replace(/\s*:\s*\d+$/, '')
+    : recordInfo.displayType;
+}
+
+/** A bit-field member's width, or null for every other variable. */
+export function bitFieldWidthOf(variable: Variable): number | null {
+  const bits = (variable as VariableWithTypeInfo).plivetBitField;
+  return typeof bits === 'number' ? bits : null;
 }
 
 export function functionPointerInfoOf(
@@ -320,6 +352,9 @@ function annotateVariable(
         typeof field === 'undefined'
           ? alignAddress(childCursor, childShape.alignment)
           : displayAddress + field.offset;
+      if (typeof field?.bits === 'number') {
+        (child as VariableWithTypeInfo).plivetBitField = field.bits;
+      }
       const childEngineAddress =
         typeof field === 'undefined'
           ? variable.type.indexOf('[') !== -1
@@ -439,7 +474,8 @@ function annotatePointerValues(
 ): void {
   const value = variable.getValue();
   if (
-    variable.type.indexOf('*') !== -1 &&
+    (variable.type.indexOf('*') !== -1 ||
+      libraryTypedefIn(variable.type)?.pointer === true) &&
     value !== null &&
     typeof value !== 'undefined' &&
     !Array.isArray(value)
@@ -467,7 +503,14 @@ function displayShapeOf(
   if (typeof record !== 'undefined' && suffix === '') {
     return { size: record.size, alignment: record.alignment };
   }
-  if (suffix.indexOf('*') !== -1 || variable.type.indexOf('*') !== -1) {
+  // An array of pointers (`char*[3]`) is an array, as wide as its elements
+  // together; only a type that ends in `*` is one pointer.
+  const elementIsPointer =
+    suffix.endsWith(']') && suffix.slice(0, suffix.indexOf('[')).includes('*');
+  if (
+    !elementIsPointer &&
+    (suffix.indexOf('*') !== -1 || variable.type.indexOf('*') !== -1)
+  ) {
     return { size: 4, alignment: 4 };
   }
   const dimensions: number[] = [];
@@ -478,10 +521,13 @@ function displayShapeOf(
     dimension = dimensionPattern.exec(variable.type);
   }
   if (dimensions.length > 0) {
-    const elementSize =
-      typeof record === 'undefined' ? basicSizeof(baseType) : record.size;
+    const elementSize = elementIsPointer
+      ? 4
+      : typeof record === 'undefined'
+        ? basicSizeof(baseType)
+        : record.size;
     const alignment =
-      typeof record === 'undefined'
+      elementIsPointer || typeof record === 'undefined'
         ? Math.max(1, Math.min(elementSize, 8))
         : record.alignment;
     return {

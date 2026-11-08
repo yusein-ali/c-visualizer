@@ -9,6 +9,7 @@ import {
   functionPointerInfoOf,
 } from '../interpreter/RuntimeTypeInfo';
 import { basicSizeof } from '../interpreter/RecordTable';
+import { libraryTypedefIn } from '../interpreter/library/types';
 import { VariableModel } from './model';
 import type { MemoryRegion } from './model';
 
@@ -38,10 +39,12 @@ export const formatAddress = (address: number): string =>
  * wraps it, signed or not; floating types and anything that is not a plain
  * integer are left alone.
  */
-export function narrowToType(value: number, type: string): number | null {
+export function narrowToType(value: number, spelled: string): number | null {
   if (!Number.isFinite(value) || Number.isNaN(value)) {
     return null;
   }
+  // The engine glues a sign to the word after it: `unsignedint`.
+  const type = spelled.replace(/\b(unsigned|signed)(?=[a-z_])/g, '$1 ');
   if (
     type.indexOf('*') !== -1 ||
     type.indexOf('[') !== -1 ||
@@ -49,18 +52,29 @@ export function narrowToType(value: number, type: string): number | null {
   ) {
     return null;
   }
-  if (!/\b(char|short|int|long|unsigned|signed|bool|_Bool)\b/.test(type)) {
+  // `size_t` and the library's other integer typedefs have no header here
+  // to say what they stand for, so their width and signedness are looked up.
+  const typedef = libraryTypedefIn(type);
+  if (typedef?.pointer === true) {
     return null;
   }
-  const bits = basicSizeof(type) * 8;
+  if (
+    typedef === null &&
+    !/\b(char|short|int|long|unsigned|signed|bool|_Bool)\b/.test(type)
+  ) {
+    return null;
+  }
+  const bits = /\blong\s+long\b/.test(type)
+    ? 64
+    : (typedef === null ? basicSizeof(type) : typedef.bytes) * 8;
   if (bits >= 64) {
     return null;
   }
   const whole = BigInt(Math.trunc(value));
+  const unsigned =
+    typedef === null ? type.indexOf('unsigned') !== -1 : typedef.unsigned;
   return Number(
-    type.indexOf('unsigned') === -1
-      ? BigInt.asIntN(bits, whole)
-      : BigInt.asUintN(bits, whole)
+    unsigned ? BigInt.asUintN(bits, whole) : BigInt.asIntN(bits, whole)
   );
 }
 
@@ -117,7 +131,10 @@ function formatValue(value: any, type: string): string {
       );
     return `[${shown.join(', ')}${value.length > SHOWN_MEMBERS ? ', …' : ''}]`;
   }
-  if (typeof value === 'number' && type.indexOf('*') !== -1) {
+  if (
+    typeof value === 'number' &&
+    (type.indexOf('*') !== -1 || libraryTypedefIn(type)?.pointer === true)
+  ) {
     return formatAddress(value);
   }
   if (typeof value === 'number' && type.indexOf('char') !== -1) {
@@ -195,6 +212,46 @@ function targetOf(
     }
   }
   return undefined;
+}
+
+/**
+ * What every structure and union member holds, under its path: `pt.x`,
+ * `o.inner.x`. Innermost frame last, as `extractVariables` lists them, so a
+ * map built from this resolves a path to the frame being executed.
+ *
+ * Kept apart from `extractVariables`, whose names are the bare words a reader
+ * can hover: a member is only ever reached through its object, and the
+ * expression tree asks for it by the path the source spells.
+ */
+export function extractMemberValues(
+  execState?: ExecState | null
+): Map<string, string> {
+  const values = new Map<string, string>();
+  if (execState === undefined || execState === null) {
+    return values;
+  }
+  const walk = (variable: Variable): void => {
+    const held = variable.getValue();
+    // An array's elements are `a[0]`, not members, and no path names them.
+    if (!Array.isArray(held) || variable.type.indexOf('[') !== -1) {
+      return;
+    }
+    for (const member of held) {
+      if (!isVariable(member)) {
+        continue;
+      }
+      values.set(member.getName(), valueOf(member, displayTypeOf(member)));
+      walk(member);
+    }
+  };
+  for (const stack of execState.getStacks()) {
+    for (const variable of stack.getVariables()) {
+      if (typeof variable.parentName === 'undefined') {
+        walk(variable);
+      }
+    }
+  }
+  return values;
 }
 
 /**

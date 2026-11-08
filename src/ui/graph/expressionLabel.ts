@@ -1,4 +1,4 @@
-import { ExpressionNodeModel } from '../../core';
+import type { ExpressionNodeModel } from '../../core';
 
 /**
  * The primary label in one expression box. The current value is deliberately

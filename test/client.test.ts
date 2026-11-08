@@ -133,6 +133,85 @@ describe('the interpreter client', () => {
     ).toBe(false);
   });
 
+  it('carries the end of input to the Worker, and stderr spans back', async () => {
+    const client = new InterpreterClient();
+    const answered = client.send({
+      controlEvent: 'StepAll',
+      sourcecode: 'int main(){}',
+      stdinText: 'last',
+      endOfInput: true,
+    });
+    const worker = FakeWorker.spawned[0];
+    expect(sent(worker)).toEqual([
+      {
+        kind: 'send',
+        id: 1,
+        request: {
+          controlEvent: 'StepAll',
+          sourcecode: 'int main(){}',
+          stdinText: 'last',
+          endOfInput: true,
+        },
+      },
+    ]);
+    // Plain data, as everything crossing a Worker boundary has to be.
+    expect(JSON.parse(JSON.stringify(sent(worker)[0]))).toEqual(
+      sent(worker)[0]
+    );
+
+    worker.answer({
+      kind: 'response',
+      id: 1,
+      response: {
+        ...responseWith('ok\noops\n'),
+        errorSpans: [{ start: 3, end: 8 }],
+      },
+    });
+    expect((await answered).errorSpans).toEqual([{ start: 3, end: 8 }]);
+  });
+
+  it("carries the program's arguments to the Worker", () => {
+    const client = new InterpreterClient();
+    void client.send({
+      controlEvent: 'Start',
+      sourcecode: 'int main(int argc, char *argv[]){}',
+      entry: 'main.c',
+      args: ['input.txt', 'two words'],
+    });
+    const [message] = sent(FakeWorker.spawned[0]);
+    expect(message).toMatchObject({
+      kind: 'send',
+      request: { controlEvent: 'Start', args: ['input.txt', 'two words'] },
+    });
+    expect(JSON.parse(JSON.stringify(message))).toEqual(message);
+  });
+
+  it('reports files a program removed or renamed', () => {
+    const client = new InterpreterClient();
+    const seen: string[][] = [];
+    const created: boolean[] = [];
+    client.onFilesChanged = (files, hasCreatedFile) => {
+      seen.push(Array.from(files.keys()));
+      created.push(hasCreatedFile);
+    };
+    void client.send(request);
+    const worker = FakeWorker.spawned[0];
+    worker.answer({
+      kind: 'files',
+      version: 0,
+      files: new Map([['a.txt', new ArrayBuffer(1)]]),
+    });
+    worker.answer({
+      kind: 'files',
+      version: 0,
+      files: new Map([['b.txt', new ArrayBuffer(1)]]),
+    });
+    worker.answer({ kind: 'files', version: 0, files: new Map() });
+
+    expect(seen).toEqual([['a.txt'], ['b.txt'], []]);
+    expect(created).toEqual([true, true, false]);
+  });
+
   it('receives files created by its own Worker', () => {
     const one = new InterpreterClient();
     const other = new InterpreterClient();

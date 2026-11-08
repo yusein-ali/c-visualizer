@@ -19,6 +19,9 @@ import { UniSwitch } from 'unicoen.ts/dist/node/UniSwitch';
 import { UniUnaryOp } from 'unicoen.ts/dist/node/UniUnaryOp';
 import { UniVariableDec } from 'unicoen.ts/dist/node/UniVariableDec';
 import { UniWhile } from 'unicoen.ts/dist/node/UniWhile';
+import { decodeEscapes } from './Escapes';
+import { libraryTypedefIn } from './library/types';
+import { mask } from './scan';
 
 /**
  * The checks a compiler would make, said the way a teacher would say them.
@@ -114,6 +117,10 @@ const withoutStars = (name: string): string => name.replace(/^\**/, '');
 
 const classOf = (declared: Declared): TypeClass => {
   const isCharacter = /\bchar\b/.test(declared.type);
+  if (libraryTypedefIn(declared.type)?.pointer === true) {
+    // `va_list`: a pointer here, and nothing a conversion should print.
+    return 'pointer';
+  }
   if (declared.pointer || declared.array) {
     return isCharacter ? 'string' : 'pointer';
   }
@@ -121,7 +128,12 @@ const classOf = (declared: Declared): TypeClass => {
     return 'floating';
   }
   if (
-    /\b(char|short|int|long|signed|unsigned|_Bool|bool)\b/.test(declared.type)
+    /\b(char|short|int|long|signed|unsigned|_Bool|bool)\b/.test(
+      declared.type
+    ) ||
+    // `size_t`, `ptrdiff_t`, `time_t`, `clock_t`: the library's integer
+    // typedefs, which no header here spells out for the lint to follow.
+    libraryTypedefIn(declared.type) !== null
   ) {
     return 'integer';
   }
@@ -148,8 +160,7 @@ const NAMES: Record<TypeClass, string> = {
 
 /**
  * The `printf` and `scanf` family, and where each one keeps its format string.
- * Only the first two are interpreted today; the rest cost a table row and stop
- * the rule from going quiet the day one of them is.
+ * The stream functions put the `FILE *` first, so their format is argument 1.
  */
 const FORMAT_FUNCTIONS: Record<
   string,
@@ -176,18 +187,38 @@ interface Conversion {
 }
 
 /**
- * The conversions in a format string, in order. `%%` is not one - it prints a
- * per cent sign and takes no argument - and neither is a scanf field whose
- * value is suppressed with `*`.
+ * The arguments a format string consumes, in order. `%%` takes none - it
+ * prints a per cent sign - and neither does a scanf field whose value is
+ * suppressed with `*`. In a printf format `*` means the opposite: the width
+ * or precision is an `int` argument of its own, before the value. A scanf
+ * scanset, `%[a-z]`, reads a string.
  */
-const conversionsIn = (format: string): Conversion[] => {
-  const pattern =
-    /%(\*?)[-+ #0]*(?:\d+|\*)?(?:\.(?:\d+|\*))?(?:hh|h|ll|l|L|z|j|t)?([diouxXeEfFgGaAcspn%])/g;
+const conversionsIn = (format: string, reads: boolean): Conversion[] => {
   const conversions: Conversion[] = [];
+  if (reads) {
+    const pattern =
+      /%(\*?)[-+ #0]*\d*(?:\.\d+)?(?:hh|h|ll|l|L|z|j|t)?(\[\^?\]?[^\]]*\]|[diouxXeEfFgGaAcspn%])/g;
+    let found = pattern.exec(format);
+    while (found !== null) {
+      if (found[2] !== '%' && found[1] !== '*') {
+        conversions.push({ kind: found[2][0], text: found[0] });
+      }
+      found = pattern.exec(format);
+    }
+    return conversions;
+  }
+  const pattern =
+    /%[-+ #0]*(\d+|\*)?(?:\.(\d*|\*))?(?:hh|h|ll|l|L|z|j|t)?([diouxXeEfFgGaAcspn%])/g;
   let found = pattern.exec(format);
   while (found !== null) {
-    if (found[2] !== '%' && found[1] !== '*') {
-      conversions.push({ kind: found[2], text: found[0] });
+    if (found[1] === '*') {
+      conversions.push({ kind: '*', text: `the * width in ${found[0]}` });
+    }
+    if (found[2] === '*') {
+      conversions.push({ kind: '*', text: `the * precision in ${found[0]}` });
+    }
+    if (found[3] !== '%') {
+      conversions.push({ kind: found[3], text: found[0] });
     }
     found = pattern.exec(format);
   }
@@ -196,13 +227,13 @@ const conversionsIn = (format: string): Conversion[] => {
 
 /** What a conversion expects of its argument once C has promoted it. */
 const expectedClass = (kind: string): TypeClass | null => {
-  if ('diouxXc'.indexOf(kind) !== -1) {
+  if ('diouxXc*'.indexOf(kind) !== -1) {
     return 'integer';
   }
   if ('eEfFgGaA'.indexOf(kind) !== -1) {
     return 'floating';
   }
-  if (kind === 's') {
+  if (kind === 's' || kind === '[') {
     return 'string';
   }
   if (kind === 'p') {
@@ -636,17 +667,20 @@ const formatArguments: Rule = {
     if (!(format instanceof UniStringLiteral)) {
       return;
     }
-    const conversions = conversionsIn(String(format.value));
+    const conversions = conversionsIn(String(format.value), shape.reads);
     const given = args.slice(shape.first);
     const callRange = rangeOf(node);
     if (conversions.length !== given.length && callRange !== null) {
+      const stars = conversions.filter((one) => one.kind === '*').length;
+      const asks =
+        stars === 0
+          ? `contains ${count(conversions.length, 'conversion specification')}`
+          : `asks for ${count(conversions.length, 'argument')} (each * ` +
+            `width or precision takes one of its own)`;
       pass.report(
         this,
         callRange,
-        `The ${name} format contains ${count(
-          conversions.length,
-          'conversion specification'
-        )}, but the call supplies ${count(
+        `The ${name} format ${asks}, but the call supplies ${count(
           given.length,
           'corresponding argument'
         )}. The mismatch has undefined behavior.`,
@@ -661,9 +695,18 @@ const formatArguments: Rule = {
       if (expected === null || range === null) {
         return;
       }
-      const actual = shape.reads
-        ? pass.pointeeClassOf(argument)
-        : pass.classOfExpression(argument);
+      // A string conversion of the scanf family stores into the characters a
+      // char array or pointer designates: the argument itself is the string,
+      // where every other conversion's argument points to its object.
+      const storesString =
+        shape.reads &&
+        expected === 'string' &&
+        pass.classOfExpression(argument) === 'string';
+      const actual = storesString
+        ? 'string'
+        : shape.reads
+          ? pass.pointeeClassOf(argument)
+          : pass.classOfExpression(argument);
       if (actual === 'unknown' || actual === expected) {
         return;
       }
@@ -908,10 +951,59 @@ const undeclaredIdentifier: Rule = {
   },
 };
 
+/** The `v*printf` family, and the position of the `va_list` each takes. */
+const VA_LIST_FUNCTIONS: Record<string, number> = {
+  vprintf: 1,
+  vfprintf: 2,
+  vsprintf: 2,
+  vsnprintf: 3,
+};
+
+/**
+ * The `v*printf` family formats the arguments a `va_list` stands for, not
+ * arguments of its own: after the format comes one `va_list`, started with
+ * `va_start` in a function declared with `...`. Handing it the values is the
+ * mistake this catches - the format rule above has nothing to check here.
+ */
+const vaListArgument: Rule = {
+  name: 'va-list-argument',
+  severity: 'error',
+  enter(node, pass) {
+    const name = calleeName(node);
+    const position = VA_LIST_FUNCTIONS[name];
+    if (typeof position === 'undefined') {
+      return;
+    }
+    const args: any[] = Array.isArray(node.args) ? node.args : [];
+    const list = args[position];
+    const declared = list instanceof UniIdent ? pass.declared(list.name) : null;
+    if (list instanceof UniIdent && declared === null) {
+      return;
+    }
+    const isList =
+      declared !== null &&
+      !declared.array &&
+      libraryTypedefIn(declared.type)?.pointer === true;
+    const range = rangeOf(list ?? node);
+    if ((isList && args.length === position + 1) || range === null) {
+      return;
+    }
+    pass.report(
+      this,
+      range,
+      `${name} takes a va_list as its last argument - one va_start has ` +
+        `started in a function declared with ... - not the values to format; ` +
+        `pass those to ${name.slice(1)} instead.`,
+      { help: name }
+    );
+  },
+};
+
 const RULES: Rule[] = [
   scanfAddress,
   assignmentAsCondition,
   formatArguments,
+  vaListArgument,
   uninitializedRead,
   missingReturn,
 ];
@@ -958,7 +1050,68 @@ export function teachingDiagnostics(
   root: UniNode,
   source: string
 ): LintDiagnostic[] {
-  return runRules(RULES, root, source);
+  return runRules(RULES, root, source)
+    .concat(unknownEscapes(source))
+    .sort(
+      (left, right) => left.line - right.line || left.column - right.column
+    );
+}
+
+/**
+ * Escape sequences C does not define, in the literals of one source file.
+ *
+ * `"C:\qfile"` written with a single backslash is the usual way to meet one.
+ * gcc and clang warn and keep the character after the backslash, which is
+ * what the interpreter does too (`Escapes.ts`); saying so beside the literal
+ * is what stops the missing backslash from passing unnoticed.
+ */
+export function unknownEscapes(source: string): LintDiagnostic[] {
+  const masked = mask(source);
+  const found: LintDiagnostic[] = [];
+  const lineStarts = [0];
+  for (let i = 0; i < source.length; i += 1) {
+    if (source[i] === '\n') {
+      lineStarts.push(i + 1);
+    }
+  }
+  const position = (offset: number): { line: number; column: number } => {
+    let line = 0;
+    while (line + 1 < lineStarts.length && lineStarts[line + 1] <= offset) {
+      line += 1;
+    }
+    return { line: line + 1, column: offset - lineStarts[line] };
+  };
+  for (let i = 0; i < masked.length; i += 1) {
+    const quote = masked[i];
+    if (quote !== '"' && quote !== "'") {
+      continue;
+    }
+    const close = masked.indexOf(quote, i + 1);
+    if (close === -1) {
+      break;
+    }
+    const lineStart = lineStarts[position(i).line - 1];
+    const directive = /^\s*#\s*include\b/.test(source.slice(lineStart, i));
+    if (!directive) {
+      for (const escape of decodeEscapes(source.slice(i + 1, close)).unknown) {
+        const at = position(i + 1 + escape.offset);
+        found.push({
+          rule: 'unknown-escape',
+          severity: 'warning',
+          message:
+            `${escape.text} is not an escape sequence C defines, so it stands ` +
+            `for ${escape.text.slice(1)} alone and the backslash is lost. ` +
+            `Write \\\\ for a backslash.`,
+          line: at.line,
+          column: at.column,
+          endLine: at.line,
+          endColumn: at.column + escape.text.length,
+        });
+      }
+    }
+    i = close;
+  }
+  return found;
 }
 
 /**

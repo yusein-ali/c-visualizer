@@ -25,10 +25,19 @@ import { Construct } from '../interpreter/Construct';
 import { Expansion, originalRange } from '../interpreter/Expansion';
 import {
   DeclarationRequest,
+  DocumentSessionJSON,
   EditableRegion,
   LibraryFunction,
+  ProgramSessionJSON,
+  SessionFileJSON,
   SessionJSON,
   containsMainDefinition,
+  documentSelection,
+  documentSessionFor,
+  documentText,
+  isDocumentSession,
+  loadNoticeOf,
+  locateSegments,
   PlivetEditor,
   ProgramCompletions,
   goTo,
@@ -59,10 +68,19 @@ import type {
   CodeMirrorConfig,
   DiagnosticOptions,
   ExternalDiagnostic,
+  SnapshotFile,
   SourceSnapshot,
   Unsubscribe,
 } from './host';
 import { codeMirrorSettings } from './host';
+import { accepted, judgeText, protectionsFor } from './protection';
+import type {
+  EditableRegionsOption,
+  FileProtection,
+  LoadDecision,
+  LoadOrigin,
+  LoadRefusal,
+} from './protection';
 
 const HEADER_EXTENSION = /\.(?:h|hh|hpp|hxx|h\+\+)$/i;
 /** The text size a host that configured none opens at, and Reset returns to. */
@@ -111,11 +129,18 @@ export interface EditorControllerOptions {
   /** Which of `files` is the translation unit. Defaults to the first. */
   entry?: string;
   /**
-   * The spans of that program the reader may edit. Left out, the whole file
-   * is theirs; given, everything outside them is fixed, which is the shape an
-   * exercise usually takes.
+   * The spans of the program the reader may edit: offsets into the entry
+   * file, or line ranges per file. Left out, every file is theirs; given,
+   * everything outside them is fixed, which is the shape an exercise usually
+   * takes. See `protection.ts`.
    */
-  editableRegions?: EditableRegion[];
+  editableRegions?: EditableRegionsOption;
+  /**
+   * A session to apply once the files are open: their text where it keeps
+   * the protected segments, and the cursor, marks and pins wherever they
+   * still fit.
+   */
+  session?: SessionJSON;
   /**
    * How the host's own editors are built, in either of the two spellings
    * `codeMirrorSettings` reads. What it names is what this editor is built
@@ -126,6 +151,13 @@ export interface EditorControllerOptions {
   onSourceChange?: (snapshot: SourceSnapshot) => void;
   /** Reports tab changes, which do not themselves change the source revision. */
   onActiveFileChange?: (path: string) => void;
+  /** Reports a replacement refused because it would change protected text. */
+  onLoadRefused?: (refusal: LoadRefusal) => void;
+  /**
+   * The program's arguments, `argv[1]` onwards, asked for when a run starts
+   * (Start or Exec), so what the reader typed since applies to the next run.
+   */
+  programArgs?: () => readonly string[];
 }
 
 /** One file's share of what a checker found. */
@@ -262,7 +294,7 @@ const libraryFunctions = (): LibraryFunction[] =>
 interface OpenFile {
   path: string;
   text: string;
-  session: SessionJSON | null;
+  session: DocumentSessionJSON | null;
 }
 
 export class EditorController {
@@ -291,9 +323,18 @@ export class EditorController {
   /**
    * The size the text returns to, which is the size it opened at: a host that
    * set one meant that one, and Reset that went to 14 would be a way out of
-   * the page's own configuration rather than back to it.
+   * the page's own configuration rather than back to it. A host that sets
+   * the size later moves it with the text.
    */
-  private readonly defaultFontSize: number;
+  private defaultFontSize: number;
+  /**
+   * Every protected file's segments, by path rather than by open tab: a file
+   * a host removes and adds back, or a reader closes and loads again, comes
+   * back held to the same text.
+   */
+  private protections = new Map<string, FileProtection>();
+  private readonly onLoadRefused?: (refusal: LoadRefusal) => void;
+  private readonly programArgs?: () => readonly string[];
   /**
    * The three things the linter shows, kept apart because they arrive apart:
    * the parser answers on every edit, the teaching rules with it, and the run
@@ -367,11 +408,16 @@ export class EditorController {
       doc,
       files,
       entry,
-      editableRegions = [],
+      editableRegions,
+      session,
       codeMirror,
       onSourceChange,
       onActiveFileChange,
+      onLoadRefused,
+      programArgs,
     } = options;
+    this.onLoadRefused = onLoadRefused;
+    this.programArgs = programArgs;
     const settings = codeMirrorSettings(codeMirror);
     this.defaultFontSize = settings.fontSize ?? DEFAULT_FONT_SIZE;
     this.fontSize = this.defaultFontSize;
@@ -430,17 +476,44 @@ export class EditorController {
         this.declarationRange(request),
       completions: this.completions.source,
       onChange: (code: string) => this.edited(code),
+      onRestoreDefault: (path: string) => this.restoreDefault(path),
     });
 
-    if (editableRegions.length !== 0) {
-      this.editor.debug.setEditableRegions(this.editor.view, editableRegions);
-    }
+    // The segments are cut from the files as they opened, and the session -
+    // which may replace their text - is applied after them, so that what it
+    // replaces is held to the same rule as any later replacement.
+    this.protections = protectionsFor(
+      this.openFiles(),
+      this.entryPath,
+      editableRegions
+    );
+    this.showProtection();
     this.showTabs();
+    if (typeof session !== 'undefined') {
+      this.restoreSession(session, 'session');
+    }
+    this.refreshLockNotice();
+    // A file handed over with its protected text already changed, and not
+    // put right by the session, is held: the host is told, as for any other
+    // replacement that could not stand.
+    for (const [path, protection] of this.protections) {
+      if (protection.locked) {
+        this.onLoadRefused?.({
+          path,
+          line: protection.altered ?? 1,
+          origin: 'files',
+        });
+      }
+    }
 
     this.bus.slot(
       'debug',
-      (controlEvent: CONTROL_EVENT, stdinText?: string) => {
-        this.send(controlEvent, stdinText);
+      (
+        controlEvent: CONTROL_EVENT,
+        stdinText?: string,
+        endOfInput?: boolean
+      ) => {
+        this.send(controlEvent, stdinText, endOfInput);
       }
     );
     // A run stops on its own at the end of the program, at a read or at a
@@ -472,16 +545,16 @@ export class EditorController {
     this.checkOnApproach();
     this.bus.slot('zoom', (command: ZOOM_COMMAND) => {
       if (command === 'In') {
-        this.setFontSize(this.fontSize + 1);
+        this.applyFontSize(this.fontSize + 1);
       } else if (command === 'Out') {
-        this.setFontSize(
+        this.applyFontSize(
           Math.max(
             this.fontSize - 1,
             Math.min(MINIMUM_FONT_SIZE, this.defaultFontSize)
           )
         );
       } else {
-        this.setFontSize(this.defaultFontSize);
+        this.applyFontSize(this.defaultFontSize);
       }
     });
   }
@@ -531,34 +604,352 @@ export class EditorController {
    * program runs - and checked afterwards, so the editor's marks belong to
    * the program that is now in it.
    */
-  replaceCode(code: string): void {
+  replaceCode(code: string): boolean {
+    const decision = this.judge(this.activePath, code, 'updateFiles');
+    if (!decision.accepted) {
+      return false;
+    }
     this.bus.signal('debug', 'Stop');
-    this.withSuppressedEditorChange(() => this.editor.replaceCode(code));
+    this.acceptProtection(this.activePath, decision.editable);
+    this.withSuppressedEditorChange(() => {
+      this.editor.replaceCode(code);
+      this.showProtection();
+    });
     this.sourcecode = code;
     this.fileAt(this.activePath).text = code;
+    this.clearRefusalNotice();
+    this.refreshLockNotice();
     this.sourceChanged();
     this.bus.signal('debug', 'SyntaxCheck');
+    return true;
   }
 
-  /** Everything a saved session holds: the program and what is marked on it. */
-  session(): SessionJSON {
+  /**
+   * Everything a saved session holds: every file with its text, its cursor,
+   * its breakpoints and its pinned names, the entry and the file on screen.
+   */
+  session(): ProgramSessionJSON {
+    return {
+      version: 2,
+      files: this.files.map((file) => {
+        const active = file.path === this.activePath;
+        const document = active ? this.documentSession() : file.session;
+        const selection =
+          document === null ? null : documentSelection(document);
+        return {
+          path: file.path,
+          text: active ? this.sourcecode : file.text,
+          ...(selection === null ? {} : { selection }),
+          breakpoints: document?.breakpoints ?? [],
+          disabledBreakpoints: document?.disabledBreakpoints ?? [],
+          watches: document?.watches ?? [],
+        };
+      }),
+      entry: this.entryPath,
+      active: this.activePath,
+    };
+  }
+
+  /** What the file on screen remembers: its text and what is marked on it. */
+  private documentSession(): DocumentSessionJSON {
     return this.editor.debug.session(this.editor.view.state);
   }
 
   /**
-   * Puts one back. The interpreter is stopped first: the session being
-   * restored is a program, and a running one is a different program with the
-   * document held against edits.
+   * Puts a session back: version 1 into the file on screen, version 2 into
+   * every open file it names. A file the session names that is not open is
+   * not opened by it; a session names files of a program, and which files
+   * the program has is the host's.
+   *
+   * A file's text is replaced only when the replacement keeps the file's
+   * protected segments. Through the API or the Load control a session one of
+   * whose texts would not is refused whole, and nothing changes. As the
+   * `session` option, applied while the instance opens, a refused file keeps
+   * the text it was given and the rest of the session still applies. Either
+   * way the cursor, the breakpoints and the pins are applied to the text the
+   * file ends up with, and those that no longer fit it are dropped.
+   *
+   * The interpreter is stopped first: the session being restored is a
+   * program, and a running one is a different program with the document held
+   * against edits.
    */
-  restore(session: SessionJSON): void {
+  restoreSession(
+    session: SessionJSON,
+    origin: 'restoreSession' | 'session' | 'load' = 'restoreSession'
+  ): boolean {
+    const initial = origin === 'session';
+    const entries = isDocumentSession(session)
+      ? [this.documentEntry(session)]
+      : this.openEntries(session.files);
+    if (entries.length === 0) {
+      return false;
+    }
+    const decisions = new Map<string, LoadDecision & { accepted: true }>();
+    const refusals: LoadRefusal[] = [];
+    for (const entry of entries) {
+      if (
+        typeof entry.text === 'undefined' ||
+        entry.text === this.currentText(entry.path)
+      ) {
+        continue;
+      }
+      const decision = judgeText(this.protections.get(entry.path), entry.text);
+      if (decision.accepted) {
+        decisions.set(entry.path, decision);
+      } else {
+        refusals.push({ path: entry.path, line: decision.line, origin });
+      }
+    }
+    if (refusals.length !== 0 && !initial) {
+      this.refuse(refusals);
+      return false;
+    }
+    if (!initial) {
+      this.bus.signal('debug', 'Stop');
+    }
+    const previousEntry = this.entryPath;
+    const previousActive = this.activePath;
+    this.parkActive();
+    let textChanged = false;
+    for (const entry of entries) {
+      const file = this.fileAt(entry.path);
+      const decision = decisions.get(entry.path);
+      if (typeof decision !== 'undefined' && typeof entry.text === 'string') {
+        textChanged = true;
+        file.text = entry.text;
+        this.acceptProtection(entry.path, decision.editable);
+      }
+      file.session = documentSessionFor(file.text, entry);
+    }
+    if (!isDocumentSession(session)) {
+      const entryFile = this.files.find((file) => file.path === session.entry);
+      if (typeof entryFile !== 'undefined' && canBeEntry(entryFile)) {
+        this.entryPath = entryFile.path;
+      }
+      if (this.files.some((file) => file.path === session.active)) {
+        this.activePath = session.active as string;
+      }
+    }
+    if (textChanged) {
+      this.clearRefusalNotice();
+    }
+    this.loadActive();
+    const programChanged = textChanged || this.entryPath !== previousEntry;
+    if (programChanged || !initial) {
+      this.clearLocalDiagnostics();
+    }
+    this.hover.setConstructs([]);
+    this.completions.setConstructs([]);
+    this.setExpansions([]);
+    this.showTabs();
+    this.showDiagnostics();
+    if (this.activePath !== previousActive) {
+      this.signalActiveFileChanged();
+    }
+    this.signalBreakpointsChanged();
+    if (!initial || programChanged) {
+      this.sourceChanged();
+    }
+    if (!initial) {
+      this.bus.signal('debug', 'SyntaxCheck');
+    }
+    this.refuse(refusals);
+    return refusals.length === 0;
+  }
+
+  /** A version 1 session as one file of a version 2 one: the file on screen. */
+  private documentEntry(session: DocumentSessionJSON): SessionFileJSON {
+    const text = documentText(session);
+    const selection = documentSelection(session);
+    return {
+      path: this.activePath,
+      ...(text === null ? {} : { text }),
+      ...(selection === null ? {} : { selection }),
+      breakpoints: session.breakpoints,
+      disabledBreakpoints: session.disabledBreakpoints ?? [],
+      watches: session.watches,
+    };
+  }
+
+  /** The files of a session that are open, the first entry for each path. */
+  private openEntries(files: SessionFileJSON[]): SessionFileJSON[] {
+    const seen = new Set<string>();
+    return files.filter((file) => {
+      if (
+        seen.has(file.path) ||
+        !this.files.some((open) => open.path === file.path)
+      ) {
+        return false;
+      }
+      seen.add(file.path);
+      return true;
+    });
+  }
+
+  /** A file's text as it stands, whether or not it is the one on screen. */
+  private currentText(path: string): string {
+    return path === this.activePath ? this.sourcecode : this.fileAt(path).text;
+  }
+
+  /**
+   * The load policy asked about one file, with the refusal reported when it
+   * says no. See `protection.ts`.
+   */
+  private judge(path: string, text: string, origin: LoadOrigin): LoadDecision {
+    const decision = judgeText(this.protections.get(path), text);
+    if (!decision.accepted) {
+      this.refuse([{ path, line: decision.line, origin }]);
+    }
+    return decision;
+  }
+
+  /** A replacement of a protected file stood: these are its regions now. */
+  private acceptProtection(path: string, editable: EditableRegion[]): void {
+    const protection = this.protections.get(path);
+    if (typeof protection !== 'undefined') {
+      this.protections.set(path, accepted(protection, editable));
+    }
+  }
+
+  /**
+   * Say that replacements were refused: the first over the editor, every one
+   * to the host. The editor has already kept its text.
+   */
+  private refuse(refusals: LoadRefusal[]): void {
+    if (refusals.length === 0) {
+      return;
+    }
+    const [first] = refusals;
+    this.editor.debug.showLoadNotice(this.editor.view, {
+      path: first.path,
+      line: first.line,
+      locked: false,
+    });
+    for (const refusal of refusals) {
+      this.onLoadRefused?.(refusal);
+    }
+  }
+
+  /** A refusal notice is about a text that has since been replaced. */
+  private clearRefusalNotice(): void {
+    const notice = loadNoticeOf(this.editor.view);
+    if (notice !== null && !notice.locked) {
+      this.editor.debug.showLoadNotice(this.editor.view, null);
+    }
+  }
+
+  /**
+   * The notice of a locked file: shown while that file is on screen, and
+   * while any file is locked unless a refusal is being reported. It has no
+   * dismiss button, so it goes when the lock does.
+   */
+  private refreshLockNotice(): void {
+    const notice = loadNoticeOf(this.editor.view);
+    const active = this.protections.get(this.activePath);
+    const lockedPath =
+      active?.locked === true
+        ? this.activePath
+        : notice !== null && !notice.locked
+          ? null
+          : (this.files.find(
+              (file) => this.protections.get(file.path)?.locked === true
+            )?.path ?? null);
+    if (lockedPath === null) {
+      if (notice?.locked === true) {
+        this.editor.debug.showLoadNotice(this.editor.view, null);
+      }
+      return;
+    }
+    const protection = this.protections.get(lockedPath);
+    this.editor.debug.showLoadNotice(this.editor.view, {
+      path: lockedPath,
+      line: protection?.altered ?? 1,
+      locked: true,
+    });
+  }
+
+  /**
+   * Put a file's default text back: what the notice's button does. A
+   * protected file's default is the text its segments were cut from; a file
+   * that is not open any more is opened again.
+   */
+  restoreDefault(path: string): boolean {
+    const protection = this.protections.get(path);
+    if (typeof protection === 'undefined') {
+      return false;
+    }
+    const decision = judgeText(protection, protection.defaultText);
+    if (!decision.accepted) {
+      return false;
+    }
     this.bus.signal('debug', 'Stop');
-    this.withSuppressedEditorChange(() =>
-      this.editor.debug.restore(this.editor.view, session)
-    );
-    this.sourcecode = this.editor.getCode();
-    this.fileAt(this.activePath).text = this.sourcecode;
+    this.parkActive();
+    const existing = this.files.find((file) => file.path === path);
+    if (typeof existing === 'undefined') {
+      this.files = this.files.concat({
+        path,
+        text: protection.defaultText,
+        session: null,
+      });
+    } else {
+      existing.text = protection.defaultText;
+      existing.session = null;
+    }
+    this.acceptProtection(path, decision.editable);
+    const previousActive = this.activePath;
+    this.activePath = path;
+    this.editor.debug.showLoadNotice(this.editor.view, null);
+    this.loadActive();
+    this.showActiveFile(previousActive !== path, false);
     this.sourceChanged();
     this.bus.signal('debug', 'SyntaxCheck');
+    return true;
+  }
+
+  /**
+   * Show the protection of the file on screen: its regions, or its lock. A
+   * file with none is editable everywhere, which is also what clears the
+   * regions of the file shown before it.
+   */
+  private showProtection(): void {
+    const protection = this.protections.get(this.activePath);
+    this.editor.debug.setProtection(this.editor.view, {
+      regions: protection?.editable ?? [],
+      locked: protection?.locked ?? false,
+    });
+  }
+
+  /**
+   * Keep the regions the reader's edits have moved, for when the file is
+   * next shown. Called while the file is still on screen.
+   */
+  private rememberProtection(path: string): void {
+    const protection = this.protections.get(path);
+    if (typeof protection !== 'undefined' && !protection.locked) {
+      this.protections.set(path, {
+        ...protection,
+        editable: this.editor.debug.editableRegions(this.editor.view.state),
+      });
+    }
+  }
+
+  /** The text size of the editor, in pixels. */
+  getFontSize(): number {
+    return this.fontSize;
+  }
+
+  /**
+   * The text size a host chose. It is also what Reset returns to from now
+   * on: a host that drives the size from its own preferences means that
+   * size, not the one the page opened with.
+   */
+  setFontSize(fontSize: number): boolean {
+    if (!Number.isFinite(fontSize) || fontSize <= 0) {
+      return false;
+    }
+    this.defaultFontSize = fontSize;
+    this.applyFontSize(fontSize);
+    return true;
   }
 
   destroy(): void {
@@ -584,10 +975,34 @@ export class EditorController {
   /** The complete value a host compiles, saves or submits. */
   sourceSnapshot(): SourceSnapshot {
     return {
-      files: this.openFiles(),
+      files: this.openFiles().map((file) => this.snapshotFile(file)),
       entry: this.entryPath,
       active: this.activePath,
       revision: this.revision,
+    };
+  }
+
+  /**
+   * A file as a snapshot carries it: with its protected spans where it has
+   * any, located through the regions the editor kept, so a host can check a
+   * submission without cutting the segments again.
+   */
+  private snapshotFile(file: SourceFile): SnapshotFile {
+    const protection = this.protections.get(file.path);
+    if (typeof protection === 'undefined') {
+      return file;
+    }
+    const editable =
+      file.path === this.activePath
+        ? this.editor.debug.editableRegions(this.editor.view.state)
+        : protection.editable;
+    return {
+      ...file,
+      protected: locateSegments(
+        file.text,
+        protection.segments,
+        protection.locked ? [] : editable
+      ),
     };
   }
 
@@ -611,7 +1026,9 @@ export class EditorController {
 
   /**
    * Replace the complete source set with a host-provided version.
-   * Invalid or empty file sets are refused without changing the editor.
+   * Invalid or empty file sets are refused without changing the editor, and
+   * so is a set in which a protected file has lost a protected segment: the
+   * editor keeps every file it had, and says which line was protected.
    */
   updateFiles(files: SourceFile[], entry?: string): boolean {
     const paths = new Set<string>();
@@ -629,15 +1046,37 @@ export class EditorController {
       }
       paths.add(file.path);
     }
+    const decisions = new Map<string, EditableRegion[]>();
+    const refusals: LoadRefusal[] = [];
+    for (const file of files) {
+      const decision = judgeText(this.protections.get(file.path), file.text);
+      if (decision.accepted) {
+        decisions.set(file.path, decision.editable);
+      } else {
+        refusals.push({
+          path: file.path,
+          line: decision.line,
+          origin: 'updateFiles',
+        });
+      }
+    }
+    if (refusals.length !== 0) {
+      this.refuse(refusals);
+      return false;
+    }
     this.bus.signal('debug', 'Stop');
-    this.files = files.map((file) => ({ ...file, session: null }));
+    for (const [path, editable] of decisions) {
+      this.acceptProtection(path, editable);
+    }
+    this.files = files.map((file) => ({
+      path: file.path,
+      text: file.text,
+      session: null,
+    }));
     this.entryPath = entryPathFor(this.files, entry);
     this.activePath = this.entryPath;
-    this.sourcecode = this.fileAt(this.activePath).text;
-    this.withSuppressedEditorChange(() => {
-      this.editor.replaceCode(this.sourcecode);
-      this.editor.debug.setBreakpointStates(this.editor.view, []);
-    });
+    this.clearRefusalNotice();
+    this.loadActive();
     this.clearLocalDiagnostics();
     this.showTabs();
     this.sourceChanged();
@@ -698,7 +1137,15 @@ export class EditorController {
    * over them. A path that is already open is replaced and shown, which is
    * what re-opening a file a reader has edited means.
    */
-  openInTab(path: string, text: string): void {
+  openInTab(path: string, text: string, origin: LoadOrigin = 'load'): boolean {
+    const decision = this.judge(path, text, origin);
+    if (!decision.accepted) {
+      return false;
+    }
+    // The file on screen is put away first, so that re-opening the file the
+    // reader is looking at replaces its text rather than being overwritten by
+    // the text it is replacing.
+    this.parkActive();
     const existing = this.files.find((file) => file.path === path);
     if (typeof existing === 'undefined') {
       this.files = this.files.concat({ path, text, session: null });
@@ -706,8 +1153,13 @@ export class EditorController {
       existing.text = text;
       existing.session = null;
     }
-    this.activate(path, true);
+    this.acceptProtection(path, decision.editable);
+    this.activePath = path;
+    this.clearRefusalNotice();
+    this.loadActive();
+    this.showActiveFile(true, true);
     this.sourceChanged();
+    return true;
   }
 
   /**
@@ -720,24 +1172,54 @@ export class EditorController {
     if (path === this.activePath && !force) {
       return;
     }
+    this.parkActive();
+    this.activePath = path;
+    this.loadActive();
+    this.showActiveFile(true, syntaxCheck);
+  }
+
+  /**
+   * Put the file on screen away: its text, its marks and the regions the
+   * reader's edits have moved, kept until it is shown again.
+   */
+  private parkActive(): void {
     const leaving = this.files.find((file) => file.path === this.activePath);
     if (typeof leaving !== 'undefined') {
       leaving.text = this.sourcecode;
-      leaving.session = this.session();
+      leaving.session = this.documentSession();
+      this.rememberProtection(leaving.path);
     }
-    const arriving = this.fileAt(path);
-    this.activePath = path;
-    if (arriving.session === null) {
-      this.withSuppressedEditorChange(() => {
+  }
+
+  /**
+   * Put `activePath` on screen: its remembered session if it has one, its
+   * text otherwise, and its protection either way.
+   */
+  private loadActive(): void {
+    const arriving = this.fileAt(this.activePath);
+    const session = arriving.session;
+    this.withSuppressedEditorChange(() => {
+      if (session === null) {
+        // A file never shown opens with the cursor at its start, not where
+        // the document it replaces mapped the last one.
         this.editor.replaceCode(arriving.text);
+        this.editor.view.dispatch({ selection: { anchor: 0 } });
         this.editor.debug.setBreakpointStates(this.editor.view, []);
-      });
-    } else {
-      this.withSuppressedEditorChange(() =>
-        this.editor.debug.restore(this.editor.view, arriving.session!)
-      );
-    }
+      } else {
+        this.editor.debug.restore(this.editor.view, session);
+      }
+      this.showProtection();
+    });
     this.sourcecode = this.editor.getCode();
+    this.refreshLockNotice();
+  }
+
+  /**
+   * What follows a different file coming on screen: the marks that belong
+   * to it, the tabs, the findings, and the listeners told.
+   */
+  private showActiveFile(changed: boolean, syntaxCheck: boolean): void {
+    const path = this.activePath;
     if (this.isDebugging) {
       this.showExecutionSourceFor(path);
     } else {
@@ -748,7 +1230,9 @@ export class EditorController {
     }
     this.showTabs();
     this.showDiagnostics();
-    this.signalActiveFileChanged();
+    if (changed) {
+      this.signalActiveFileChanged();
+    }
     this.signalBreakpointsChanged();
     // A file that is not the one that runs has no marks of its own to show:
     // the parser is answering about the translation unit, and drawing its
@@ -802,7 +1286,7 @@ export class EditorController {
     );
   }
 
-  private setFontSize(fontSize: number) {
+  private applyFontSize(fontSize: number) {
     this.fontSize = fontSize;
     this.editor.setFontSize(fontSize);
   }
@@ -916,7 +1400,7 @@ export class EditorController {
     this.preflightErrors.clear();
   }
 
-  send(controlEvent: CONTROL_EVENT, stdinText?: string) {
+  send(controlEvent: CONTROL_EVENT, stdinText?: string, endOfInput?: boolean) {
     const files = this.openFiles();
     const entry = this.fileAt(this.entryPath);
     const checkedPath = this.activePath;
@@ -927,12 +1411,19 @@ export class EditorController {
         this.entryPath === this.activePath ? this.sourcecode : entry.text,
       controlEvent,
       stdinText,
+      ...(endOfInput === true ? { endOfInput } : {}),
       lineNumOfBreakpoint: this.breakpoints(),
       breakpoints: this.markedRows(),
       files,
       entry: this.entryPath,
       active: checkedPath,
     };
+    if (
+      (controlEvent === 'Start' || controlEvent === 'Exec') &&
+      typeof this.programArgs !== 'undefined'
+    ) {
+      request.args = [...this.programArgs()];
+    }
     if (controlEvent === 'Preprocess' || controlEvent === 'SyntaxCheck') {
       const requestRevision = this.revision;
       // The parser pass is the one a reader waits on: the preprocessor pass
@@ -1263,7 +1754,7 @@ export class EditorController {
       if (debugState === 'Executing') {
         return;
       }
-      this.bus.signal('changeOutput', output);
+      this.bus.signal('changeOutput', output, response.errorSpans ?? []);
       this.bus.signal(
         'draw',
         editorModel,

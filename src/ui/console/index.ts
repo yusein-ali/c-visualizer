@@ -8,4 +8,4 @@
  * nothing alongside it.
  */
 export { PlivetConsole } from './PlivetConsole';
-export type { PlivetConsoleOptions } from './PlivetConsole';
+export type { ConsoleSpan, PlivetConsoleOptions } from './PlivetConsole';

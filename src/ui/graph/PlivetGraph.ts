@@ -21,8 +21,8 @@ import {
   memoryGeometry,
   variableMemoryGeometry,
 } from './geometry';
-import { expressionGeometry } from './expressionLayout';
-import { expressionNodeOf } from './ExpressionNode';
+import { EXPRESSION_LAYOUT, expressionGeometry } from './expressionLayout';
+import { expressionCells } from './ExpressionNode';
 import { ViewPanelHandle, viewPanel } from './ViewPanel';
 import { callStackRows } from './callStack';
 import { callHeading } from './callSection';
@@ -1634,37 +1634,13 @@ export class PlivetGraph {
     originX: number,
     originY: number
   ): dia.Cell[] {
-    const nodeWidth = 138;
-    const nodeHeight = 54;
-    const gapX = 18;
-    const gapY = 30;
     const treeTop = originY;
     const geometry = expressionGeometry(
       expression.root,
       { x: originX, y: treeTop },
-      { nodeWidth, nodeHeight, gapX, gapY }
+      EXPRESSION_LAYOUT
     );
-    const cells: dia.Cell[] = [];
-    for (const placed of geometry.nodes) {
-      cells.push(expressionNodeOf(placed));
-    }
-    for (const connected of geometry.links) {
-      const link = new shapes.standard.Link({ z: 3 });
-      link.source(connected.source);
-      link.target(connected.target);
-      if (connected.vertices.length !== 0) {
-        link.vertices(connected.vertices);
-      }
-      link.connector('rounded', { radius: 5 });
-      link.attr({
-        line: {
-          stroke: 'var(--plivet-graph-expression-link, #5c6773)',
-          strokeWidth: 1.5,
-          targetMarker: { type: 'none' },
-        },
-      });
-      cells.push(link);
-    }
+    const cells = expressionCells(geometry);
 
     this.contentWidth = Math.max(
       this.contentWidth,

@@ -11,11 +11,15 @@ Two places register them:
   `node_modules/unicoen.ts/dist/interpreter/CPP14/CPP14Engine.js` — the base
   set, from the upstream engine.
 - `includeStdio` / `includeStdlib` in `src/interpreter/CPP14Engine.ts` — Plivet
-  wraps `printf`, replaces `scanf`, and wraps `malloc`. It adds no new names.
+  replaces every `<stdio.h>` registration with `library/stdio.ts` (adding the
+  stream functions and the standard streams), and wraps `malloc`.
 
 `src/app/libraryHelp.ts` is the third place: it carries the signature and the
 one-line description the editor shows in completions and hover help. Adding a
-function means touching both the engine and that file.
+function means touching both the engine and that file. Since V0 that file is
+the callable set's source of truth: `test/library-manifest.test.ts` fails when
+the engine registers a name it leaves out or it lists a name nothing
+registers, and the deploy writes it out as `library.json`.
 
 ## How a missing function fails
 
@@ -31,15 +35,29 @@ The practical consequence for course material: an exercise that calls
 
 ## Currently callable
 
-For reference, the complete set.
+For reference, the complete set. Since the L packages, a third place
+registers names: `src/interpreter/library/` (`ctype.ts`, `string.ts`,
+`stdlib.ts`, `realloc.ts`, `search.ts`, `stdarg.ts`, `math.ts`, `time.ts`,
+`assert.ts`, `stddef.ts`, `constants.ts`),
+installed by `PlivetCPP14Engine.loadLibarary` after the upstream set. It
+replaces `strlen` `strcpy` `strcat` `strcmp` `atoi` `abs` `rand` `exit` and
+every `<math.h>` function rather than wrapping them, and the engine now puts
+back any name a program defines itself, so a student's own `strlen` wins.
 
 | Header | Callable |
 |---|---|
-| `<stdio.h>` | `printf` `scanf` `gets` `getchar` `fopen` `fclose` `fgetc` `fputc` `fgets` `fputs` `fflush` |
-| `<stdlib.h>` | `malloc` `free` `exit` `atoi` `rand` `abs` |
-| `<string.h>` | `strlen` `strcpy` `strcat` `strcmp` |
-| `<math.h>` | `sqrt` `cbrt` `pow` `exp` `exp2` `expm1` `log` `log10` `log1p` `fabs` `floor` `ceil` `round` `rint` `fmod` `fmax` `fmin` `fdim` `hypot` `sin` `cos` `tan` `asin` `acos` `atan` `sinh` `cosh` `tanh` |
-| macros | `NULL` only (`setSystemVariable('SYSTEM', 'NULL', 0)`) |
+| `<stdio.h>` | `printf` `fprintf` `sprintf` `snprintf` `scanf` `fscanf` `sscanf` `puts` `putchar` `getchar` `gets` `fopen` `fclose` `fflush` `fgetc` `fgets` `fputc` `fputs` `ungetc` `fread` `fwrite` `fseek` `ftell` `rewind` `feof` `ferror` `clearerr` `perror` `remove` `rename` `vprintf` `vfprintf` `vsprintf` `vsnprintf` — every one PLIVET's own, in `library/stdio.ts` over `printf.ts`, `scanf.ts` and `stream.ts`; upstream's registrations are all replaced |
+| `<stdlib.h>` | `malloc` `calloc` `realloc` `free` `exit` `atoi` `atol` `atoll` `atof` `strtol` `strtoul` `strtoll` `strtoull` `strtod` `rand` `srand` `abs` `labs` `llabs` `div` `ldiv` `qsort` `bsearch` (`realloc` grows the last block in place and otherwise moves the block, which the canvas and the mutation view show; `qsort` and `bsearch` call the comparator as interpreted code, so stepping enters it) |
+| `<stdarg.h>` | `va_start` `va_arg` `va_copy` `va_end` - predefined macros (`preprocess.ts`) over `library/stdarg.ts`. A function declared with `...` keeps its unnamed arguments in its frame as rows `...[0]`, `...[1]`, with their promoted types, and a `va_list` is a pointer that walks them (`Variadic.ts`) |
+| `<string.h>` | `strlen` `strcpy` `strncpy` `strcat` `strncat` `strcmp` `strncmp` `strchr` `strrchr` `strstr` `strtok` `strspn` `strcspn` `strpbrk` `memcpy` `memmove` `memset` `memcmp` `memchr` `strerror` |
+| `<ctype.h>` | `isalpha` `isdigit` `isalnum` `isspace` `isupper` `islower` `ispunct` `isprint` `isgraph` `iscntrl` `isxdigit` `isblank` `toupper` `tolower` |
+| `<math.h>` | `sqrt` `cbrt` `pow` `exp` `exp2` `expm1` `log` `log10` `log1p` `log2` `fabs` `floor` `ceil` `round` `rint` `nearbyint` `trunc` `fmod` `remainder` `fmax` `fmin` `fdim` `hypot` `sin` `cos` `tan` `asin` `acos` `atan` `atan2` `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` `modf` `frexp` `ldexp` `copysign` `fma` `isnan` `isinf` `isfinite` `signbit` |
+| `<time.h>` | `time` `clock` `difftime` |
+| `<assert.h>` | `assert` |
+| `<stddef.h>` | `offsetof` (a predefined macro over the engine's record layout) |
+| macros | `NULL`; `CHAR_BIT` `SCHAR_MIN` `SCHAR_MAX` `UCHAR_MAX` `CHAR_MIN` `CHAR_MAX` `SHRT_MIN` `SHRT_MAX` `USHRT_MAX` `INT_MIN` `INT_MAX` `UINT_MAX` `LONG_MIN` `LONG_MAX` `ULONG_MAX` `LLONG_MIN` `LLONG_MAX` `ULLONG_MAX`; `FLT_MIN` `FLT_MAX` `FLT_EPSILON` `FLT_DIG` `DBL_MIN` `DBL_MAX` `DBL_EPSILON` `DBL_DIG`; `EDOM` `ERANGE` `EINVAL` `ENOENT`; `EXIT_SUCCESS` `EXIT_FAILURE` `RAND_MAX` `CLOCKS_PER_SEC`; `NAN` `INFINITY` `HUGE_VAL` - all system variables from `library/constants.ts`; `EOF` `SEEK_SET` `SEEK_CUR` `SEEK_END` from `STDIO_CONSTANTS` in `stream.ts`. `true` and `false` are predefined preprocessor macros (`preprocess.ts`) |
+| objects | `errno`, an `int` among the program's globals when the program names it; `stdin` `stdout` `stderr`, each a `FILE *` among the globals (data segment) when the program names it, pointing at its stream's `FILE` object (the streams exist, undrawn, for every program) |
+| types | `size_t` `ptrdiff_t` `time_t` `clock_t` `div_t` `ldiv_t` `va_list` (`library/types.ts`; widths follow the engine's ILP32 data model) |
 
 `sizeof` is an operator the engine handles in `execUnaryOp`, not a registered
 function.
@@ -92,70 +110,28 @@ sharpest gap in the current set.
 
 ## Missing — `<stdio.h>`
 
-**Formatted output to a buffer or stream — none are implemented.** `printf` to
-standard output is the only formatting path that works.
+The L1, L6, L7, L8 and L14 packages implemented the rest of the header a
+course meets (see the table above). What is still absent:
 
 | Function | Note |
 |---|---|
-| `sprintf` | format into a buffer; unbounded |
-| `snprintf` | format into a buffer; bounded |
-| `fprintf` | format to a stream; also needs `stdout`/`stderr` to exist |
-| `vprintf` `vfprintf` `vsprintf` `vsnprintf` | `va_list` variants; `<stdarg.h>` is not supported at all |
-
-`src/interpreter/TeachingLint.ts` already carries format-string argument
-positions for `sprintf` and `snprintf`, so the lint side is prepared for them;
-the rule simply can never fire today.
-
-**Formatted input from a buffer or stream.**
-
-| Function | Note |
-|---|---|
-| `sscanf` | parse from a string |
-| `fscanf` | parse from a stream |
-
-Both are named in `TeachingLint`'s `SCANNING` list alongside `scanf`, and
-neither is callable. `scanf` itself is Plivet's own `plivetScanf`, so a new
-implementation should be built on that rather than on the upstream one.
-
-**Character output — none are implemented.** Note that the input side
-(`getchar`, `fgetc`, `fgets`, `gets`) exists but the matching output side
-mostly does not.
-
-| Function | Note |
-|---|---|
-| `puts` | write a string and a newline to standard output |
-| `putchar` | write one character to standard output |
-| `ungetc` | push a character back onto a stream |
-
-**Binary and positioning — none are implemented.**
-
-| Function | Note |
-|---|---|
-| `fread` `fwrite` | block I/O |
-| `fseek` `ftell` `rewind` | positioning |
+| `getc` `putc` | the macro spellings of `fgetc` and `fputc` |
 | `fgetpos` `fsetpos` | positioning with an opaque type |
-| `setbuf` `setvbuf` | buffering control |
-
-**Stream state and files — none are implemented.**
-
-| Function | Note |
-|---|---|
-| `feof` `ferror` `clearerr` | stream state |
-| `perror` | print an error message; needs `errno` |
+| `setbuf` `setvbuf` | buffering control; a file's writes are buffered until `fflush`, `fclose` or the end of the program |
 | `freopen` | reopen a stream |
-| `remove` `rename` | file operations |
 | `tmpfile` `tmpnam` | temporary files |
 
-**Objects and macros.** `stdin`, `stdout`, `stderr` and `errno` do not exist as
-objects. `src/interpreter/TeachingLint.ts` knows all four by name only so that
-the `undeclared-identifier` rule does not flag them — using one still evaluates
-to nothing at run time.
-
-`EOF` is not defined. It reaches the tree as a bare identifier and is not
-flagged, because `undeclared-identifier` exempts anything spelled in macro
-case. So `while ((c = getchar()) != EOF)` compares against nothing rather than
-against -1. This is worth fixing ahead of most of the function list: it is
-silent, and it breaks the standard input loop every C course teaches.
+How the streams behave, briefly: `stdin` is the console, a line at a time,
+and the console's end-of-input action (Ctrl+D, or its EOF button) makes the
+waiting read return `EOF` (`fgets`/`gets`: a null pointer); a later read
+waits for new input rather than returning `EOF` again. `stderr` is the same
+transcript as `stdout`, drawn in the error colour. Files are the uploaded
+ones plus those the program creates; `fopen` with `w` or `a` creates or
+empties the file at once, writes reach the file system at `fflush`,
+`fclose` and the end of the program, and `remove`/`rename` change the set
+the files panel shows. `fseek`/`ftell` on a console stream fail with
+`EINVAL` (a terminal would say `ESPIPE`, which `strerror` has no text for
+here).
 
 ## Missing — `<stdlib.h>`
 
@@ -164,7 +140,7 @@ silent, and it breaks the standard input loop every C course teaches.
 | Function | Note |
 |---|---|
 | `calloc` | allocate and zero; the zeroing is directly visible on the memory canvas |
-| `realloc` | resize a block; the engine's heap cursor only moves forward, so this needs thought |
+| `realloc` | done (L5): grows the last block in place, otherwise moves it - new block, cells copied, old block freed - and the mutation view says "moved from A to B" |
 | `aligned_alloc` | C11 |
 
 Plivet already wraps `malloc` to blank fresh blocks, and that wrapper is where
@@ -193,13 +169,14 @@ seeded or made reproducible — a real problem for a graded exercise.
 | `srand` | seed the generator |
 | `RAND_MAX` | not defined either |
 
-**Searching and sorting — none are implemented.** Both take a function pointer,
-and `src/interpreter/FunctionPointerTable.ts` means the machinery exists.
+**Searching and sorting — done (L12).** Both call the program's comparator
+through the pointer as interpreted code (`library/search.ts`); `qsort` is an
+insertion sort by adjacent swaps, each swap two ordinary writes.
 
 | Function | Note |
 |---|---|
-| `qsort` | sort with a comparison callback |
-| `bsearch` | binary search with a comparison callback |
+| `qsort` | done; an array of `char *` initialised with literals cannot be sorted, because the engine cannot represent that array (it stores it as one `char *`) |
+| `bsearch` | done |
 
 **Program control and environment.** Only `exit` exists.
 
@@ -245,7 +222,7 @@ The math set is the best covered. What is absent:
 | Header | Note |
 |---|---|
 | `<assert.h>` | `assert` — useful for teaching, and easy: it needs a diagnostic path, not a computation |
-| `<stdarg.h>` | `va_list` `va_start` `va_arg` `va_end`; blocks every `v*printf` and any user-written variadic function |
+| `<stdarg.h>` | done (L14): `va_list` `va_start` `va_arg` `va_copy` `va_end` and user-written variadic functions; a structure passed through `...` is refused |
 | `<limits.h>` | `INT_MAX` `INT_MIN` `CHAR_BIT` `LONG_MAX` …; silently undefined, same failure mode as `EOF` |
 | `<float.h>` | `DBL_MAX` `FLT_EPSILON` …; same |
 | `<time.h>` | `time` `clock` `difftime` `mktime` `localtime` `strftime`; `time(NULL)` is the usual `srand` seed |
@@ -290,21 +267,19 @@ the arguments whose specifier is `%s` fixes defects two and three together.
 ### `scanf`
 
 `scanf` is Plivet's own implementation — `src/interpreter/scanf.ts`, with the
-storing half in `plivetScanf`. It accepts `d i u o x X e E f F g G a A c s n %
-[`, with `*` suppression, field widths, and scansets including ranges and `^`
-negation. Length modifiers `h l L j z t` are parsed and skipped, repeats
-included, so `hh` and `ll` are accepted; the destination address decides the
-size instead.
-
-| Defect | Detail |
-|---|---|
-| **`%p` is not supported** | It is the one conversion character missing from the accepted set. It falls through to the literal branch, so `scanf("%p", &q)` waits for the characters `%` and `p` to appear in the input. |
+storing half in `library/stdio.ts` (shared with `fscanf` and `sscanf`). It
+accepts `d i u o x X p e E f F g G a A c s n % [`, with `*` suppression, field
+widths, and scansets including ranges and `^` negation. `%p` reads what `%p`
+prints: `0x` and hexadecimal, or `(nil)` for a null pointer. Length modifiers
+`h l L j z t` are parsed and skipped, repeats included, so `hh` and `ll` are
+accepted; the destination address decides the size instead.
 
 Two departures from C are deliberate and documented at the top of `scanf.ts` —
 whitespace in the format never waits for more input, and a numeric conversion
-keeps the longest valid prefix rather than failing on a partial match. There is
-also no `EOF` return, because standard input in this page has no end. Leave all
-three alone.
+keeps the longest valid prefix rather than failing on a partial match. A third
+is documented there too: end of input is a single event, as Ctrl+D at a
+terminal is, so a read after `EOF` waits for new input instead of returning
+`EOF` again. Leave all three alone.
 
 Worth recording on the other side of the ledger: a failed conversion writes
 `[scanf] %d did not match 'a' - it stays in the input, so the next read starts
@@ -360,3 +335,6 @@ undocumented." Four callable functions are currently undocumented:
 
 All four are registered by `includeMath` in the upstream engine and have no
 entry in `libraryHelp.ts`, so they are missing from completions and hover help.
+
+Fixed with L15: all four have entries now, as has every name the library
+packages added.

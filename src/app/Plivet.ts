@@ -8,8 +8,9 @@ import {
   StepModel,
   emptyStepModel,
 } from '../core';
-import { PlivetShell } from '../ui/shell';
-import type { EditableRegion, SessionJSON } from '../ui/editor';
+import { PlivetShell, STACKED_BELOW } from '../ui/shell';
+import type { ShellLayout, ShellLayoutMode } from '../ui/shell';
+import type { ProgramSessionJSON, SessionJSON } from '../ui/editor';
 import type { SourceFile, ViewSelection } from '../core';
 import type { StatementExplanation } from '../ui/records';
 import { isSession } from '../ui/editor';
@@ -20,7 +21,7 @@ import {
   runCommand,
   stepCommand,
 } from '../ui/controls';
-import { PlivetConsole } from '../ui/console';
+import { ConsoleSpan, PlivetConsole } from '../ui/console';
 import { DebuggerDock } from '../ui/debugger';
 import { BreakpointTable } from '../ui/breakpoints';
 import type { BreakpointEntry } from '../ui/breakpoints';
@@ -46,6 +47,8 @@ import type {
   SourceSnapshot,
   Unsubscribe,
 } from './host';
+import type { EditableRegionsOption, LoadRefusal } from './protection';
+import { joinArgs, programArgsOption, splitArgs } from './programArgs';
 
 /**
  * The optional parts of PLIVET a page chooses before it opens.
@@ -66,7 +69,32 @@ export interface PlivetFeatures {
    * `fopen`. A page whose exercises read no files leaves it out.
    */
   loadFile?: boolean;
+  /**
+   * A field in the control bar holding the program's arguments, which the
+   * reader may edit; an edit applies at the next Start or Run. Off by
+   * default: the `args` option still applies without it.
+   */
+  programArgs?: boolean;
 }
+
+/**
+ * Control-bar items a host drives itself and so takes off the bar. A hidden
+ * item is not built at all - absent from the DOM, not disabled - and the
+ * method behind it (`setTheme`, `setFontSize`) still works. Left out, every
+ * item is there.
+ */
+export interface PlivetControls {
+  /** The light/dark switch. */
+  theme?: boolean;
+  /** The three text-size buttons. */
+  textSize?: boolean;
+}
+
+/** How the boxes are arranged: side by side, or one above the other. */
+export type PlivetLayout = ShellLayout;
+
+/** The `layout` option: one of the two arrangements, or `auto`. */
+export type PlivetLayoutMode = ShellLayoutMode;
 
 /**
  * One PLIVET: a shell, six widgets, and the bus and interpreter between them.
@@ -98,8 +126,16 @@ export interface PlivetOptions {
   entry?: string;
   /** Which theme to open in. The switch in the control bar changes it after. */
   theme?: Theme;
-  /** Optional capabilities. Source loading is the only one defaulting off. */
+  /** Optional capabilities. Source loading and program arguments default off. */
   features?: PlivetFeatures;
+  /**
+   * The program's arguments, `argv[1]` onwards: an array of strings, or one
+   * string split as a shell splits a command line (`'a "b c"'` is `a` and
+   * `b c`). `int main(int argc, char *argv[])` receives them, with `argv[0]`
+   * the entry file's name without `.c`; a `main` without parameters ignores
+   * them. Left out, none. `features.programArgs` lets the reader change them.
+   */
+  args?: string[] | string;
   /** Whether to show the copyright and licence footer. Defaults to true. */
   footer?: boolean;
   /**
@@ -108,13 +144,50 @@ export interface PlivetOptions {
    */
   views?: ViewSelection;
   /**
-   * The parts of the program the reader may edit, as offsets into
-   * `sourceCode`. Left out, all of it. This is how a page hands over a
-   * fill-in-the-blank exercise: everything outside these spans is fixed, and
-   * the filter that holds them is the editor's own behaviour rather than an
-   * instruction in a comment.
+   * The parts of the program the reader may edit. Left out, all of it. This
+   * is how a page hands over a fill-in-the-blank exercise: everything outside
+   * these spans is fixed, and the filter that holds them is the editor's own
+   * behaviour rather than an instruction in a comment.
+   *
+   * Either `{ from, to }` offsets into the entry file (`sourceCode`, or the
+   * entry of `files`), or 1-based inclusive line ranges per file path, the
+   * syntax of the Sphinx `:editable-lines:` option:
+   * `{ "main.c": [[7, 12], [20, 20]] }`. A file's entry may also be
+   * `{ "lines": [[7, 12]], "text": "..." }`, where `text` is the default
+   * source the lines count: the file's own text is then checked against the
+   * segments cut from it, and "Restore default" puts it back.
+   *
+   * Either way the text between the editable ranges is the file's protected
+   * segments, found again by their exact text whenever the file is replaced;
+   * a replacement that has lost one is refused (`onLoadRefused`).
    */
-  editableRegions?: EditableRegion[];
+  editableRegions?: EditableRegionsOption;
+  /**
+   * A session to open with, applied after `files`: a version 1 session
+   * applies to the entry file, a version 2 one to every file it names that
+   * is one of `files` (the others are ignored). A file's text is replaced
+   * only where the session's text keeps the file's protected segments; the
+   * cursor, breakpoints and pinned watches are applied to the text the file
+   * ends up with, and those that no longer fit it are dropped.
+   */
+  session?: SessionJSON;
+  /** Control-bar items to leave off, for a host that drives them itself. */
+  controls?: PlivetControls;
+  /**
+   * How the editor, console and canvas are arranged: `columns` side by side,
+   * `stacked` one above the other, or `auto` - stacked while the
+   * visualizer's own width, which is its container's, is below
+   * `stackedBelow`. Default `auto`. The visualizer measures its box, not the
+   * window, so a host should give it a width (block-level, or `width: 100%`)
+   * rather than let it size itself to its content.
+   */
+  layout?: PlivetLayoutMode;
+  /**
+   * The width in pixels below which `auto` stacks. Default 720. Going back
+   * to two columns takes 48 pixels more, so a width on the threshold does not
+   * switch back and forth.
+   */
+  stackedBelow?: number;
   /**
    * How the editor is built: indentation, the line-number gutter, bracket
    * matching, completion and text size. A host page that has editors of its
@@ -136,6 +209,13 @@ export interface PlivetOptions {
   onWindowClose?: (snapshot: SourceSnapshot) => void;
   /** Called when the visible source tab changes. */
   onActiveFileChange?: (path: string) => void;
+  /**
+   * Called when a replacement of a file's text is refused because it would
+   * change protected text: by `updateFiles`, `restoreSession`, the `session`
+   * option, the Load control, or - origin `files` - a file handed over
+   * already altered against the default its lines count.
+   */
+  onLoadRefused?: (refusal: LoadRefusal) => void;
   /** Add the host-backed Build button. Requires `diagnosticProviders`. */
   supportBuild?: boolean;
   /** Compiler callbacks supplied by the host, keyed by diagnostic source. */
@@ -153,6 +233,54 @@ const parseSession = (text: string): unknown => {
   } catch {
     return null;
   }
+};
+
+/**
+ * The `layout` option, if it is one. Like `session` below, a value from a
+ * programmatic host is checked rather than trusted: anything else is dropped
+ * with a warning, and the instance arranges itself as `auto` would.
+ */
+const layoutOption = (value: unknown): PlivetLayoutMode | undefined => {
+  if (typeof value === 'undefined') {
+    return undefined;
+  }
+  if (value !== 'auto' && value !== 'columns' && value !== 'stacked') {
+    console.warn(
+      'c-visualizer: layout must be "auto", "columns" or "stacked" and was ignored'
+    );
+    return undefined;
+  }
+  return value;
+};
+
+/** The `stackedBelow` option, if it is a width: a number of pixels, 0 or more. */
+const stackedBelowOption = (value: unknown): number => {
+  if (typeof value === 'undefined') {
+    return STACKED_BELOW;
+  }
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    console.warn(
+      'c-visualizer: stackedBelow must be a number of pixels, 0 or more, and was ignored'
+    );
+    return STACKED_BELOW;
+  }
+  return value;
+};
+
+/**
+ * The `session` option, if it is one. A programmatic host is trusted with
+ * its types no more than a configuration element is: a value that is not a
+ * session is dropped with a warning and the instance opens without it.
+ */
+const sessionOption = (value: unknown): SessionJSON | undefined => {
+  if (typeof value === 'undefined') {
+    return undefined;
+  }
+  if (!isSession(value)) {
+    console.warn('c-visualizer: session is not a session and was ignored');
+    return undefined;
+  }
+  return value;
 };
 
 export class Plivet {
@@ -181,10 +309,18 @@ export class Plivet {
   private debugState: DEBUG_STATE = 'Stop';
   private stdinCommand: CONTROL_EVENT = 'StepAll';
   private theme: Theme;
+  private readonly themeListeners = new Set<(theme: Theme) => void>();
+  private readonly layoutListeners = new Set<(layout: PlivetLayout) => void>();
   private breakpointCount = 0;
+  /** What the next run hands `main`, `argv[1]` onwards. */
+  private programArgs: string[] = [];
 
   constructor(parent: HTMLElement, options: PlivetOptions = {}) {
     this.theme = options.theme ?? 'light';
+    this.programArgs =
+      programArgsOption(options.args, (message) =>
+        console.warn(`c-visualizer: ${message}, and was ignored`)
+      ) ?? [];
     this.lifecycleWindow = parent.ownerDocument.defaultView;
     this.onWindowClose = options.onWindowClose;
     const features = options.features ?? {};
@@ -207,6 +343,9 @@ export class Plivet {
       files: features.loadFile !== false,
       footer: options.footer !== false,
       licenses: options.licenses,
+      layout: layoutOption(options.layout),
+      stackedBelow: stackedBelowOption(options.stackedBelow),
+      onLayoutChange: (layout) => this.layoutChanged(layout),
     });
 
     this.controls = new ControlBar(this.shell.controls, {
@@ -229,6 +368,17 @@ export class Plivet {
       dark: isDark(this.theme),
       preprocessor: features.preprocessor !== false,
       build: options.supportBuild === true,
+      theme: options.controls?.theme !== false,
+      textSize: options.controls?.textSize !== false,
+      programArgs: features.programArgs === true,
+      // The host's own spelling where it wrote a line, so its quoting stays.
+      args:
+        typeof options.args === 'string'
+          ? options.args
+          : joinArgs(this.programArgs),
+      onArgs: (text) => {
+        this.programArgs = splitArgs(text);
+      },
     });
 
     this.editor = new EditorController(this.shell.editor, {
@@ -239,9 +389,12 @@ export class Plivet {
       files: options.files,
       entry: options.entry,
       editableRegions: options.editableRegions,
+      session: sessionOption(options.session),
       codeMirror: options.codeMirror,
       onSourceChange: options.onSourceChange,
       onActiveFileChange: options.onActiveFileChange,
+      onLoadRefused: options.onLoadRefused,
+      programArgs: () => this.programArgs,
     });
     this.controls.setDebugToolbarTabs(this.editor.tabBarElement);
 
@@ -263,6 +416,9 @@ export class Plivet {
       // breakpoint or at EOF, so the console re-opens on its own for the next
       // value instead of waiting for a Step press that is easy to miss.
       onInput: (text: string) => this.signalDebug(this.stdinCommand, text),
+      // The same resume, telling the waiting read that the input has ended.
+      onEndOfInput: (text: string) =>
+        this.signalDebug(this.stdinCommand, text, true),
     });
 
     this.graph = new PlivetGraph(this.shell.main, {
@@ -327,8 +483,8 @@ export class Plivet {
         this.debugger.showBreakpoints();
       }
     });
-    bus.slot('changeOutput', (output: string) =>
-      this.console.setOutput(output)
+    bus.slot('changeOutput', (output: string, errorSpans?: ConsoleSpan[]) =>
+      this.console.setOutput(output, errorSpans)
     );
     bus.slot('changeState', (debugState: DEBUG_STATE) =>
       // Typable exactly while the program is blocked on a read.
@@ -373,10 +529,14 @@ export class Plivet {
     const parsed = parseSession(text);
     if (parsed !== null) {
       // JSON, so it was meant to be a session. One this version cannot read
-      // is refused rather than dropped into the editor as text.
-      if (!this.restoreSession(parsed)) {
+      // is refused rather than dropped into the editor as text; one that
+      // would change protected text is refused by the editor, which says so
+      // over itself.
+      if (!isSession(parsed)) {
         alert(strings.openedNotCode);
+        return;
       }
+      this.editor.restoreSession(parsed, 'load');
       return;
     }
     if (text.trim() === '') {
@@ -384,8 +544,9 @@ export class Plivet {
       return;
     }
     // Beside what is open rather than over it: a reader who opens a second
-    // file has two files, and which of them runs is theirs to say.
-    this.editor.openInTab(file.name, text);
+    // file has two files, and which of them runs is theirs to say. A file of
+    // the same name as a protected one must keep its protected text.
+    this.editor.openInTab(file.name, text, 'load');
   }
 
   /**
@@ -399,11 +560,12 @@ export class Plivet {
   }
 
   /**
-   * The session, for a page that wants to store it or hand it in: the
-   * program, the cursor, the breakpoints and the pinned names, as JSON that
-   * survives `JSON.stringify`.
+   * The session, for a page that wants to store it or hand it in: every
+   * file with its text, its cursor, its breakpoints (the disabled ones too)
+   * and its pinned names, the entry and the file on screen, as version 2
+   * JSON that survives `JSON.stringify`.
    */
-  session(): SessionJSON {
+  session(): ProgramSessionJSON {
     return this.editor.session();
   }
 
@@ -420,7 +582,11 @@ export class Plivet {
     return this.editor.onActiveFileChanged(listener);
   }
 
-  /** Replace the complete program after a host-side load or update. */
+  /**
+   * Replace the complete program after a host-side load or update. False
+   * when the set is invalid, or when it would change a file's protected text;
+   * the editor then keeps everything it had.
+   */
   updateFiles(files: SourceFile[], entry?: string): boolean {
     return this.editor.updateFiles(files, entry);
   }
@@ -508,17 +674,19 @@ export class Plivet {
   }
 
   /**
-   * Puts a saved session back. What arrives from outside is checked rather
-   * than trusted - it may be another version's, another tool's, or half of
-   * one - and a value that is not a session is refused rather than half
-   * applied.
+   * Puts a saved session back, version 1 or 2. What arrives from outside is
+   * checked rather than trusted - it may be another version's, another
+   * tool's, or half of one - and a value that is not a session is refused
+   * rather than half applied. So is one whose text would change a file's
+   * protected text: false, the editor keeps its text, and `onLoadRefused`
+   * is told which file and line. A version 2 session that names none of the
+   * open files has nothing to restore, and is false too.
    */
   restoreSession(session: unknown): boolean {
     if (!isSession(session)) {
       return false;
     }
-    this.editor.restore(session);
-    return true;
+    return this.editor.restoreSession(session);
   }
 
   /**
@@ -557,6 +725,8 @@ export class Plivet {
     this.lifecycleWindow?.removeEventListener('pagehide', this.windowClosing);
     this.shell.root.removeEventListener('keydown', this.debugShortcut);
     this.diagnosticProviders.clear();
+    this.themeListeners.clear();
+    this.layoutListeners.clear();
     this.bus.destroy();
     this.help.destroy();
     this.preprocessed?.destroy();
@@ -575,8 +745,14 @@ export class Plivet {
     this.onWindowClose?.(this.sourceSnapshot());
   };
 
-  /** Apply a theme selected by this instance or by its embedding host. */
+  /**
+   * Apply a theme selected by this instance or by its embedding host. The
+   * `onThemeChange` listeners hear of it when it is a change, whichever of
+   * the two made it - so a host that answers a change by calling this back
+   * is not told again.
+   */
   setTheme(theme: Theme): void {
+    const changed = theme !== this.theme;
     this.theme = theme;
     this.shell.setDark(isDark(theme));
     this.controls.setDark(isDark(theme));
@@ -584,6 +760,72 @@ export class Plivet {
     this.console.setDark(isDark(theme));
     this.graph.setDark(isDark(theme));
     this.preprocessed?.setDark(isDark(theme));
+    if (changed) {
+      for (const listener of this.themeListeners) {
+        listener(theme);
+      }
+    }
+  }
+
+  /** The theme this instance is drawn in now. */
+  getTheme(): Theme {
+    return this.theme;
+  }
+
+  /**
+   * Be told when the theme changes: from the control bar's switch or from
+   * `setTheme`. The returned function stops only this listener.
+   */
+  onThemeChange(listener: (theme: Theme) => void): Unsubscribe {
+    this.themeListeners.add(listener);
+    return () => this.themeListeners.delete(listener);
+  }
+
+  /**
+   * The editor's text size, in pixels, for a host that drives it from its
+   * own preferences. It is also what the Reset text-size button returns to
+   * from then on. False, and nothing changes, for a size that is not a
+   * positive number.
+   */
+  setFontSize(px: number): boolean {
+    return this.editor.setFontSize(px);
+  }
+
+  /** The editor's text size now, in pixels. */
+  getFontSize(): number {
+    return this.editor.getFontSize();
+  }
+
+  /**
+   * How the editor, console and canvas are arranged now: `columns` or
+   * `stacked`. With `layout: 'auto'` it follows the visualizer's width.
+   */
+  getLayout(): PlivetLayout {
+    return this.shell.layout();
+  }
+
+  /**
+   * Be told when the arrangement changes, after it has. Not called for the
+   * one the instance opens with, which `getLayout` reports. The returned
+   * function stops only this listener.
+   */
+  onLayoutChange(listener: (layout: PlivetLayout) => void): Unsubscribe {
+    this.layoutListeners.add(listener);
+    return () => this.layoutListeners.delete(listener);
+  }
+
+  /**
+   * Nothing is rebuilt when the shell changes arrangement: the editor, the
+   * console and the canvas stay in the boxes they were mounted in, with
+   * their scroll positions, folds and session. Only the floating debug
+   * toolbar, which holds a position measured against the old arrangement,
+   * has to be put back over the editor.
+   */
+  private layoutChanged(layout: PlivetLayout): void {
+    this.controls.relayout();
+    for (const listener of this.layoutListeners) {
+      listener(layout);
+    }
   }
 
   /** Debugger function keys, scoped to the PLIVET instance that has focus. */
@@ -633,13 +875,17 @@ export class Plivet {
     }
   };
 
-  private signalDebug(command: CONTROL_EVENT, stdinText?: string): void {
+  private signalDebug(
+    command: CONTROL_EVENT,
+    stdinText?: string,
+    endOfInput?: boolean
+  ): void {
     if (command === 'Step' || command === 'StepOver') {
       this.stdinCommand = command;
     } else if (command === 'StepAll' || command === 'Exec') {
       this.stdinCommand = 'StepAll';
     }
-    this.bus.signal('debug', command, stdinText);
+    this.bus.signal('debug', command, stdinText, endOfInput);
   }
 
   private async upload(files: FileList): Promise<void> {

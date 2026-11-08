@@ -176,9 +176,50 @@ interface Macro {
   /** Declared with a trailing `...`, so extra arguments become __VA_ARGS__. */
   variadic: boolean;
   body: string;
-  /** Line of the directive that defined it, for the editor's tooltip. */
-  definedAt: number;
+  /**
+   * Line of the directive that defined it, for the editor's tooltip.
+   * Undefined for a macro the implementation predefines.
+   */
+  definedAt?: number;
 }
+
+/**
+ * The macros a hosted implementation defines without being asked.
+ *
+ * `true` and `false` are `<stdbool.h>`'s macros for the `int` constants 1
+ * and 0, and they have to be replaced before the parser sees them: unicoen's
+ * C++14 grammar lexes both as keywords and then accepts neither as an
+ * expression, so `int done = false;` failed to parse.
+ *
+ * `va_start`, `va_arg`, `va_copy` and `va_end` are `<stdarg.h>`'s, and
+ * modify the list they are given, which a function cannot do with a value:
+ * each becomes a call with the list's address, and `va_arg`'s type, like
+ * `offsetof`'s operands, is spelled as a string.
+ *
+ * `offsetof(type, member)` is `<stddef.h>`'s, and its operands are a type
+ * and a member name, which no expression can hold. It expands to a call of
+ * the library's `offsetof` with both spelled as strings - the macro's own
+ * name is not expanded again inside it - and the engine answers from the
+ * layout it draws the structure with.
+ *
+ * All of them are always defined, as `bool` is always accepted, and a
+ * program's own `#define` or `#undef` of one still takes precedence.
+ */
+const PREDEFINED: Record<string, { params: string[] | null; body: string }> = {
+  true: { params: null, body: '1' },
+  false: { params: null, body: '0' },
+  offsetof: { params: ['type', 'member'], body: 'offsetof(#type, #member)' },
+  // `<stdarg.h>`: the list a macro modifies goes by its address, and the
+  // type and the parameter name as strings (see `library/stdarg.ts`).
+  va_start: { params: ['ap', 'last'], body: 'va_start(&ap, #last)' },
+  va_arg: { params: ['ap', 'type'], body: 'va_arg(&ap, #type)' },
+  va_copy: { params: ['dest', 'src'], body: 'va_copy(&dest, src)' },
+  va_end: { params: ['ap'], body: 'va_end(&ap)' },
+};
+
+/** The macros above by name, for the library table's registration test. */
+export const PREDEFINED_MACRO_NAMES: readonly string[] =
+  Object.keys(PREDEFINED);
 
 const IDENT_START = /[A-Za-z_]/;
 const IDENT_CHAR = /[A-Za-z0-9_]/;
@@ -192,7 +233,12 @@ interface ConditionalFrame {
 }
 
 class Preprocessor {
-  private macros = new Map<string, Macro>();
+  private macros = new Map<string, Macro>(
+    Object.entries(PREDEFINED).map(([name, { params, body }]) => [
+      name,
+      { params, variadic: false, body },
+    ])
+  );
   private conditionals: ConditionalFrame[] = [];
   private inBlockComment = false;
   /**

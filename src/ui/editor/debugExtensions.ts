@@ -30,14 +30,17 @@ import {
   coverageField,
   showCoverage as markCoverage,
 } from './coverage';
-import { SessionJSON, restoreSession, sessionOf } from './session';
+import { DocumentSessionJSON, restoreSession, sessionOf } from './session';
 import {
   EditableRegion,
+  Protection,
   editableRegions,
-  protectedField,
-  protectedRegions,
+  protectedExtensions,
+  protectionLocked,
   showEditableRegions,
+  showProtection,
 } from './protected';
+import { LoadNotice, loadNotice, showLoadNotice } from './loadNotice';
 import { inlineValueField } from './inlineValues';
 import {
   showStep as markStep,
@@ -87,6 +90,12 @@ export interface DebugExtensionOptions {
   onWatchesChanged?: () => void;
   /** The breakpoint set or one of its enabled states changed. */
   onBreakpointsChanged?: () => void;
+  /**
+   * The reader asked for a file's default text back, from the notice a
+   * refused replacement leaves. Left out, the notice offers no button: what
+   * a file's default is, is the application's.
+   */
+  onRestoreDefault?: (path: string) => void;
 }
 
 export class DebugExtensions {
@@ -107,8 +116,8 @@ export class DebugExtensions {
       coverageField,
       // Where the reader may type. Declared always and empty by default, so a
       // program with no blanks is editable everywhere.
-      protectedField,
-      protectedRegions,
+      protectedExtensions,
+      loadNotice(options.onRestoreDefault),
       // The gutter is what makes a warning visible without hovering for one.
       // A reader who does not know a rule exists never hovers to find out.
       lintGutter(),
@@ -196,11 +205,11 @@ export class DebugExtensions {
    * The session as plain JSON: the program, the cursor, the breakpoints and
    * the pinned names. What it deliberately leaves out is the run.
    */
-  session(state: EditorState): SessionJSON {
+  session(state: EditorState): DocumentSessionJSON {
     return sessionOf(state);
   }
 
-  restore(view: EditorView, session: SessionJSON): void {
+  restore(view: EditorView, session: DocumentSessionJSON): void {
     restoreSession(view, session);
   }
 
@@ -215,6 +224,23 @@ export class DebugExtensions {
 
   editableRegions(state: EditorState): EditableRegion[] {
     return editableRegions(state);
+  }
+
+  /**
+   * The regions and the lock together: what the application worked out for
+   * the file it has just put on screen. `locked` holds the whole document.
+   */
+  setProtection(view: EditorView, protection: Protection): void {
+    showProtection(view, protection);
+  }
+
+  locked(state: EditorState): boolean {
+    return protectionLocked(state);
+  }
+
+  /** Say why a replacement was refused, or take the notice down with null. */
+  showLoadNotice(view: EditorView, notice: LoadNotice | null): void {
+    showLoadNotice(view, notice);
   }
 
   /**

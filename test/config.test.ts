@@ -135,6 +135,29 @@ describe('what a configuration may say', () => {
     });
   });
 
+  it('reads the program arguments as written, and the field that edits them', () => {
+    expect(
+      parseConfig(
+        '{"args": "input.txt \\"two words\\"", "features": {"programArgs": true}}'
+      )
+    ).toEqual({
+      args: 'input.txt "two words"',
+      features: { programArgs: true },
+    });
+    expect(parseConfig('{"args": ["a", "b c"]}')).toEqual({
+      args: ['a', 'b c'],
+    });
+    expect(parseConfig('{"args": []}')).toEqual({ args: [] });
+    expect(warnings).toEqual([]);
+    expect(
+      parseConfig('{"args": ["a", 2], "features": {"programArgs": "yes"}}')
+    ).toEqual({ features: {} });
+    expect(warnings).toEqual([
+      'c-visualizer-config: features.programArgs must be true or false',
+      'c-visualizer-config: args must be an array of strings or one string of arguments',
+    ]);
+  });
+
   it('configures whether the footer is shown', () => {
     expect(parseConfig('{"footer": false}')).toEqual({ footer: false });
     expect(parseConfig('{"footer": "no"}')).toEqual({});
@@ -496,5 +519,126 @@ describe('a view selection applied to the canvas state', () => {
     // A region it did not name keeps the answer the canvas works out itself.
     expect(view.isRegionShown('bss', false)).toBe(false);
     expect(view.isRegionShown('bss', true)).toBe(true);
+  });
+});
+
+describe('the host-integration keys', () => {
+  it('reads editable lines per file, with or without their default text', () => {
+    expect(
+      parseConfig(
+        JSON.stringify({
+          editableRegions: {
+            'main.c': [
+              [7, 12],
+              [20, 20],
+            ],
+            'helper.c': { lines: [[2, 3]], text: 'a\nb\nc\nd\n' },
+          },
+        })
+      )
+    ).toEqual({
+      editableRegions: {
+        'main.c': [
+          [7, 12],
+          [20, 20],
+        ],
+        'helper.c': { lines: [[2, 3]], text: 'a\nb\nc\nd\n' },
+      },
+    });
+    expect(warnings).toEqual([]);
+  });
+
+  it('drops a line range that is not one and keeps the rest', () => {
+    expect(
+      parseConfig(
+        JSON.stringify({
+          editableRegions: {
+            'main.c': [[3, 1], [0, 2], [4, 4], 'x'],
+            'other.c': 'all of it',
+          },
+        })
+      )
+    ).toEqual({ editableRegions: { 'main.c': [[4, 4]] } });
+    expect(warnings).toHaveLength(4);
+  });
+
+  it('reads a session of either version, and refuses anything else', () => {
+    const v2 = {
+      version: 2,
+      files: [{ path: 'main.c', breakpoints: [3], selection: { anchor: 4 } }],
+      entry: 'main.c',
+    };
+    expect(parseConfig(JSON.stringify({ session: v2 }))).toEqual({
+      session: v2,
+    });
+    const v1 = {
+      version: 1,
+      editor: { doc: '' },
+      breakpoints: [],
+      watches: [],
+    };
+    expect(parseConfig(JSON.stringify({ session: v1 }))).toEqual({
+      session: v1,
+    });
+    expect(
+      parseConfig(
+        JSON.stringify({
+          session: {
+            version: 2,
+            files: [{ path: 'main.c', breakpoints: [-1] }],
+          },
+        })
+      )
+    ).toEqual({});
+    expect(parseConfig('{"session": {"version": 3, "files": []}}')).toEqual({});
+    expect(warnings).toHaveLength(2);
+  });
+
+  it('reads which control-bar items a host drives itself', () => {
+    expect(
+      parseConfig('{"controls": {"theme": false, "textSize": false}}')
+    ).toEqual({ controls: { theme: false, textSize: false } });
+    expect(parseConfig('{"controls": {"theme": "no", "help": false}}')).toEqual(
+      { controls: {} }
+    );
+    expect(parseConfig('{"controls": false}')).toEqual({});
+    expect(warnings).toHaveLength(3);
+  });
+
+  it('applies a configured session and hidden controls when it opens', () => {
+    configElement(
+      JSON.stringify({
+        files: [{ path: 'main.c', text: 'int main(void) {\n  return 0;\n}\n' }],
+        editableRegions: { 'main.c': [[2, 2]] },
+        session: { version: 2, files: [{ path: 'main.c', breakpoints: [1] }] },
+        controls: { theme: false },
+      })
+    );
+    const parent = parentOf();
+    const plivet = new Plivet(parent, readConfig());
+    expect(parent.querySelector('.plivet-controls__theme')).toBeNull();
+    expect(plivet.session().files[0].breakpoints).toEqual([1]);
+    expect(plivet.sourceSnapshot().files[0].protected).toEqual([
+      { text: 'int main(void) {\n', from: 0, to: 17 },
+      { text: '\n}\n', from: 28, to: 31 },
+    ]);
+    plivet.destroy();
+  });
+});
+
+describe('the reference configuration', () => {
+  it('is read whole, every key of it, without a warning', () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { readFileSync } = require('fs') as typeof import('fs');
+    const written = readFileSync(
+      `${__dirname}/../visualizer.reference.json`,
+      'utf8'
+    );
+    const options = parseConfig(written) as Record<string, unknown>;
+    expect(warnings).toEqual([]);
+    const keys = Object.keys(JSON.parse(written)).map((key) =>
+      key === 'support-build' ? 'supportBuild' : key
+    );
+    expect(Object.keys(options).sort()).toEqual(keys.sort());
   });
 });

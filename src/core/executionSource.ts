@@ -45,9 +45,12 @@ const isHeader = (path: string): boolean => /\.(h|hh|hpp|hxx)$/i.test(path);
  */
 export class ExecutionSource {
   readonly code: string;
+  /** The file the program starts in. */
+  readonly entry: string;
   private readonly segments: Segment[];
 
   constructor(files: ExecutionFile[], entry: string, fallback: string) {
+    this.entry = entry;
     const usable = files.some((file) => file.path === entry)
       ? [
           ...files.filter((file) => isHeader(file.path)),
