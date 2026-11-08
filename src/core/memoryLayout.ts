@@ -345,34 +345,43 @@ function columnWidths(
       (widths.get('value') as number) + Math.ceil(caption - objectWidth)
     );
   }
-  // A node is at least as wide as its own title bar: the name of a segment and
-  // the addresses it covers are written on one line, and `Zero-initialized
-  // data (BSS)` is a long name.
+  // A node is as wide as its own title bar where there is room for it: the
+  // name of a segment and the addresses it covers are written on one line, and
+  // `Zero-initialized data (BSS)` is a long name. Where the map has been given
+  // columns that cannot hold it, the title takes a second line instead
+  // (`titleFitsOnOneLine`). Widening for it regardless ran the right-hand
+  // column past the canvas, and with it the values that column right-aligns -
+  // the file-scope objects', which then looked as if nothing had set them.
   const title = segments.reduce(
     (widest, segment) =>
       Math.max(widest, titleWidth(segment.name, addressLabelOf(segment))),
     0
   );
-  const nodeWidth = COLUMN_ORDER.reduce(
-    (sum, column) => sum + (widths.get(column) as number),
-    0
-  );
-  if (nodeWidth < title) {
+  const titleRoom =
+    typeof maxNodeWidth === 'number' ? Math.min(title, maxNodeWidth) : title;
+  const nodeWidth = totalWidth(widths);
+  if (nodeWidth < titleRoom) {
     // Spread the slack rather than leave one gaping column: the table is
     // being widened for the sake of its heading, not its contents.
-    const slack = Math.ceil((title - nodeWidth) / COLUMN_ORDER.length);
+    const slack = Math.ceil((titleRoom - nodeWidth) / COLUMN_ORDER.length);
     for (const column of COLUMN_ORDER) {
       widths.set(column, (widths.get(column) as number) + slack);
     }
   }
-  if (typeof maxNodeWidth === 'number' && nodeWidth > maxNodeWidth) {
-    const scale = maxNodeWidth / nodeWidth;
+  // Measured again: the slack is rounded up, and the cap is on what is drawn.
+  const drawnWidth = totalWidth(widths);
+  if (typeof maxNodeWidth === 'number' && drawnWidth > maxNodeWidth) {
+    const scale = maxNodeWidth / drawnWidth;
     for (const column of COLUMN_ORDER) {
       widths.set(column, (widths.get(column) as number) * scale);
     }
   }
   return widths;
 }
+
+/** The width of a node whose columns are these. */
+const totalWidth = (widths: Map<MemoryColumnKey, number>): number =>
+  COLUMN_ORDER.reduce((sum, column) => sum + (widths.get(column) as number), 0);
 
 /** Where the rows of each group start, so a frame is announced once. */
 function groupStarts(
