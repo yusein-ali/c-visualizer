@@ -215,6 +215,8 @@ export interface FrameModel {
   name: string;
   /** 1-based line the function is defined on. */
   line: number;
+  /** The source file defining it, when the application has mapped `line`. */
+  file?: string;
   /** The line containing the call; null for the initial function invocation. */
   calledFrom: number | null;
   /** The source file containing the call, when the application has mapped it. */

@@ -96,6 +96,7 @@ const strings = {
   viewNothingWritten: 'no object has been written yet',
   viewCalledFrom: 'called from line',
   viewCalledFromFile: 'called from',
+  viewInFile: 'in',
   viewLine: 'line',
   viewColumnFrame: 'Function invocation',
   viewColumnObject: 'Object',

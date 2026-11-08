@@ -253,6 +253,64 @@ describe('the editor with several files', () => {
     host.remove();
   });
 
+  it('maps every call stack line, the entry function’s too, back to its file', () => {
+    // The entry frame shows its own definition line, which used to stay in
+    // the composed numbering: `main() on line 117` for line 10 of main.c.
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const bus = new Bus();
+    const { client } = fakeClient();
+    const controller = new EditorController(host, { bus, client });
+    const program = defaultProgram();
+    const source = new ExecutionSource(
+      program.files,
+      program.entry,
+      program.files[0].text
+    );
+    const mainLine = source.globalLine('main.c', 10)!;
+    const helperLine = source.globalLine('tour.c', 3)!;
+    const callLine = source.globalLine('main.c', 12)!;
+    expect(mainLine).not.toBe(10);
+    const model = emptyStepModel();
+    model.codeRange = {
+      begin: { x: 0, y: helperLine },
+      end: { x: 1, y: helperLine },
+    };
+    model.frames = [
+      {
+        name: 'main',
+        line: mainLine,
+        calledFrom: null,
+        arguments: [],
+        timesEntered: 1,
+      },
+      {
+        name: 'helper',
+        line: helperLine,
+        calledFrom: callLine,
+        arguments: [],
+        timesEntered: 1,
+      },
+    ];
+
+    const local = (controller as any).editorStep(model, {
+      path: 'tour.c',
+      range: { begin: { x: 0, y: 3 }, end: { x: 1, y: 3 } },
+    });
+
+    expect(local.frames).toEqual([
+      expect.objectContaining({ line: 10, file: 'main.c', calledFrom: null }),
+      expect.objectContaining({
+        line: 3,
+        file: 'tour.c',
+        calledFrom: 12,
+        calledFromFile: 'main.c',
+      }),
+    ]);
+    controller.destroy();
+    host.remove();
+  });
+
   it('draws the statement with the entry file line rather than the composed line', () => {
     const files = [
       { path: 'main.c', text: '#include "defs.h"\nreturn 0;' },

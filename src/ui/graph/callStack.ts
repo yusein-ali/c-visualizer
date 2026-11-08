@@ -30,7 +30,9 @@ export function callStackRows(frames: FrameModel[]): CallStackRow[] {
         name: `${frame.name}(${argumentsText})`,
         where:
           frame.calledFrom === null
-            ? `${strings.onLine} ${frame.line}`
+            ? typeof frame.file === 'undefined'
+              ? `${strings.onLine} ${frame.line}`
+              : `${strings.viewInFile} ${frame.file} ${strings.viewLine} ${frame.line}`
             : typeof frame.calledFromFile === 'undefined'
               ? `${strings.viewCalledFrom} ${frame.calledFrom}`
               : `${strings.viewCalledFromFile} ${frame.calledFromFile} ${strings.viewLine} ${frame.calledFrom}`,

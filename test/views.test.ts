@@ -76,6 +76,20 @@ describe('the call stack beside the statement', () => {
     const rows = callStackRows(stepOn(2).frames);
     expect(rows[1].where).toBe('on line 5');
   });
+
+  it('includes the source file for a mapped entry frame', () => {
+    const [entry] = callStackRows([
+      {
+        name: 'main',
+        line: 10,
+        file: 'main.c',
+        calledFrom: null,
+        arguments: [],
+        timesEntered: 1,
+      },
+    ]);
+    expect(entry.where).toBe('in main.c line 10');
+  });
 });
 
 describe('object writes over time under the canvas', () => {

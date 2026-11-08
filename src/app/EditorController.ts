@@ -1866,20 +1866,26 @@ export class EditorController {
       ...model,
       codeRange: codeRange ?? location.range,
       frames: model.frames.map((frame) => {
-        if (frame.calledFrom === null) {
-          return frame;
-        }
-        const caller = source.locate({
-          begin: { x: 0, y: frame.calledFrom },
-          end: { x: 0, y: frame.calledFrom },
-        });
-        return caller === null
-          ? frame
-          : {
-              ...frame,
-              calledFrom: caller.range.begin.y,
-              calledFromFile: caller.path,
-            };
+        // Both lines arrive numbered in the composed program. Only the
+        // caller's used to be mapped, so the entry function - which has no
+        // caller and shows its own line - said `main() on line 117` in a
+        // three-file program whose `main` is on line 10 of main.c.
+        const at = (line: number) =>
+          source.locate({ begin: { x: 0, y: line }, end: { x: 0, y: line } });
+        const defined = at(frame.line);
+        const caller = frame.calledFrom === null ? null : at(frame.calledFrom);
+        return {
+          ...frame,
+          ...(defined === null
+            ? {}
+            : { line: defined.range.begin.y, file: defined.path }),
+          ...(caller === null
+            ? {}
+            : {
+                calledFrom: caller.range.begin.y,
+                calledFromFile: caller.path,
+              }),
+        };
       }),
       expression: this.localExpression(source, path, model.expression),
       callExpansions: model.callExpansions.flatMap((call) => {
