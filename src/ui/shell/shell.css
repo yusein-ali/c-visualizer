@@ -146,6 +146,11 @@
 	min-width: 0;
 }
 
+/* Empty, and so no height, until a host hands over a task to show in it. */
+.plivet__description {
+	min-width: 0;
+}
+
 /*
  * The handles between the boxes.
  *

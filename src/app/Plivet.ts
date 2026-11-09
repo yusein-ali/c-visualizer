@@ -33,6 +33,7 @@ import type {
   RunStatus,
 } from '../ui/graph';
 import { FilePanel, download } from '../ui/files';
+import { DescriptionPanel } from '../ui/description';
 import { HowToDialog } from '../ui/help';
 import type { PreprocessedDialog } from '../ui/preprocessed';
 import strings from '../strings';
@@ -138,6 +139,15 @@ export interface PlivetOptions {
   args?: string[] | string;
   /** Whether to show the copyright and licence footer. Defaults to true. */
   footer?: boolean;
+  /**
+   * The task the program is written for, as HTML, shown in a Task panel
+   * above the editor that the reader can fold away. A course page that opens
+   * the visualizer in a window of its own hands over the task its exercise
+   * describes, so the reader has it beside the code. The markup is trusted
+   * and set as written; links in it open in a new tab. Left out or blank, no
+   * panel. `setDescription` changes it later.
+   */
+  description?: string;
   /**
    * What the canvas opens with drawn. The View panel still holds the switches,
    * so this is where the reader starts rather than what they are held to.
@@ -268,6 +278,24 @@ const stackedBelowOption = (value: unknown): number => {
 };
 
 /**
+ * The `description` option, or `setDescription`'s argument, as markup. Like
+ * the options above, a value from a programmatic host is checked: anything
+ * but a string is no description, with a warning, and null - a host that has
+ * none to give - is no description without one.
+ */
+const descriptionOption = (value: unknown): string => {
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (typeof value !== 'undefined' && value !== null) {
+    console.warn(
+      'c-visualizer: description must be a string of HTML and was ignored'
+    );
+  }
+  return '';
+};
+
+/**
  * The `session` option, if it is one. A programmatic host is trusted with
  * its types no more than a configuration element is: a value that is not a
  * session is dropped with a warning and the instance opens without it.
@@ -295,6 +323,8 @@ export class Plivet {
   private readonly graph: PlivetGraph;
   /** Null where the page has switched the upload panel off. */
   private readonly files: FilePanel | null;
+  /** Always built; hidden while there is no task to show. */
+  private readonly description: DescriptionPanel;
   private readonly help: HowToDialog;
   /** The browsing context this instance belongs to, if it has one. */
   private readonly lifecycleWindow: Window | null;
@@ -348,6 +378,10 @@ export class Plivet {
       onLayoutChange: (layout) => this.layoutChanged(layout),
     });
 
+    this.description = new DescriptionPanel(this.shell.description, {
+      html: descriptionOption(options.description),
+    });
+
     this.controls = new ControlBar(this.shell.controls, {
       onDebug: (command) => this.signalDebug(command),
       onZoom: (command: ZOOM_COMMAND) => bus.signal('zoom', command),
@@ -396,7 +430,11 @@ export class Plivet {
       onLoadRefused: options.onLoadRefused,
       programArgs: () => this.programArgs,
     });
-    this.controls.setDebugToolbarTabs(this.editor.tabBarElement);
+    // The toolbar opens over the code, below the task panel and the tabs.
+    this.controls.setDebugToolbarTabs(
+      this.shell.description,
+      this.editor.tabBarElement
+    );
 
     this.debugger = new DebuggerDock(this.shell.debugger);
     this.breakpointTable = new BreakpointTable(this.debugger.breakpoints, {
@@ -733,6 +771,7 @@ export class Plivet {
     this.help.destroy();
     this.preprocessed?.destroy();
     this.files?.destroy();
+    this.description.destroy();
     this.graph.destroy();
     this.console.destroy();
     this.breakpointTable.destroy();
@@ -796,6 +835,14 @@ export class Plivet {
   /** The editor's text size now, in pixels. */
   getFontSize(): number {
     return this.editor.getFontSize();
+  }
+
+  /**
+   * Replace the task shown above the editor, as HTML; blank hides the panel.
+   * Whether the reader has folded it away is kept.
+   */
+  setDescription(html: string): void {
+    this.description.setDescription(descriptionOption(html));
   }
 
   /**

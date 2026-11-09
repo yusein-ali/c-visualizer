@@ -1,0 +1,139 @@
+/*
+ * The task panel: a disclosure above the editor, holding the markup the host
+ * handed over.
+ *
+ * That markup arrives without the page it was written for. In a window of its
+ * own the visualizer has none of the course's stylesheets, so the panel gives
+ * the common parts of a task - paragraphs, lists, headings, code, tables,
+ * figures and the admonitions docutils writes - a plain style of its own.
+ * Every content rule is wrapped in `:where()`, so it weighs nothing against a
+ * host page's rules: in a dialog over the chapter, the chapter's own style
+ * wins.
+ *
+ * The body scrolls past `--plivet-description-max-height` (30% of the
+ * window), so a long task does not push the editor off the screen.
+ */
+
+.plivet-description {
+	--plivet-description-link: var(
+		--plivet-link-color,
+		var(--bs-link-color, #0b62c4)
+	);
+	--plivet-description-tint: rgb(127 127 127 / 12%);
+
+	margin: 1px;
+	border: 1px solid var(--plivet-line, #dddddd);
+	border-radius: 0.25rem;
+	font-size: 14px;
+}
+
+.plivet--dark .plivet-description {
+	--plivet-description-link: var(
+		--plivet-link-color,
+		var(--bs-link-color, #6cb6ff)
+	);
+}
+
+.plivet-description[hidden] {
+	display: none;
+}
+
+.plivet-description__summary {
+	padding: 0.5rem 0.75rem;
+	background: var(--plivet-button-bg, #f5f5f5);
+	color: var(--plivet-button-color, #333333);
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.plivet-description__body {
+	max-height: var(--plivet-description-max-height, 30vh);
+	overflow: auto;
+	padding: 0.5rem 0.75rem;
+	border-top: 1px solid var(--plivet-line, #dddddd);
+	line-height: 1.5;
+	overflow-wrap: break-word;
+}
+
+.plivet-description__body > :first-child {
+	margin-top: 0;
+}
+
+.plivet-description__body > :last-child {
+	margin-bottom: 0;
+}
+
+.plivet-description__body
+	:where(p, ul, ol, dl, pre, table, blockquote, figure, .admonition) {
+	margin: 0 0 0.75em;
+}
+
+.plivet-description__body :where(ul, ol) {
+	padding-left: 1.5em;
+}
+
+.plivet-description__body :where(h1, h2, h3, h4, h5, h6, .rubric) {
+	margin: 1em 0 0.5em;
+	font-size: 1em;
+	font-weight: 600;
+}
+
+.plivet-description__body :where(a) {
+	color: var(--plivet-description-link);
+}
+
+.plivet-description__body :where(code, kbd, samp, pre) {
+	font-family: var(
+		--plivet-code-font,
+		ui-monospace,
+		SFMono-Regular,
+		Menlo,
+		Consolas,
+		monospace
+	);
+	font-size: 0.9em;
+}
+
+.plivet-description__body :where(code) {
+	padding: 0.1em 0.3em;
+	border-radius: 0.2em;
+	background: var(--plivet-description-tint);
+}
+
+.plivet-description__body :where(pre) {
+	padding: 0.5em 0.75em;
+	overflow: auto;
+	border-radius: 0.25rem;
+	background: var(--plivet-description-tint);
+}
+
+.plivet-description__body :where(pre code) {
+	padding: 0;
+	background: none;
+}
+
+.plivet-description__body :where(table) {
+	border-collapse: collapse;
+}
+
+.plivet-description__body :where(th, td) {
+	padding: 0.25em 0.5em;
+	border: 1px solid var(--plivet-line, #dddddd);
+	text-align: left;
+}
+
+.plivet-description__body :where(img, svg, video) {
+	max-width: 100%;
+	height: auto;
+}
+
+.plivet-description__body :where(blockquote, .admonition) {
+	padding: 0.5em 0.75em;
+	border-left: 3px solid var(--plivet-line, #dddddd);
+	background: var(--plivet-description-tint);
+}
+
+.plivet-description__body :where(.admonition-title) {
+	margin-bottom: 0.25em;
+	font-weight: 600;
+}

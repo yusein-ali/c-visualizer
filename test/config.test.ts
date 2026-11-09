@@ -164,6 +164,18 @@ describe('what a configuration may say', () => {
     expect(warnings).toHaveLength(1);
   });
 
+  it('carries the task description as markup', () => {
+    expect(parseConfig('{"description": "<p>Sum the readings.</p>"}')).toEqual({
+      description: '<p>Sum the readings.</p>',
+    });
+    expect(parseConfig('{"description": ""}')).toEqual({ description: '' });
+    expect(warnings).toEqual([]);
+    expect(parseConfig('{"description": false}')).toEqual({});
+    expect(warnings).toEqual([
+      'c-visualizer-config: description must be a string',
+    ]);
+  });
+
   it('opts into the host-backed Build button with its deployed key', () => {
     expect(parseConfig('{"support-build": true}')).toEqual({
       supportBuild: true,

@@ -41,6 +41,7 @@
   "stackedBelow": 720,
   "support-build": true,
   "footer": true,
+  "description": "",
   "licenses": "./licenses.html",
   "features": {
     "preprocessor": true,

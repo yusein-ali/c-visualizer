@@ -92,8 +92,11 @@ export class ControlBar {
   /** Null unless the page asked for the program-arguments field. */
   private readonly args: HTMLInputElement | null = null;
   private readonly fileInput: HTMLInputElement;
-  /** The tab strip whose height keeps the toolbar below the file names. */
-  private toolbarTabs: HTMLElement | null = null;
+  /**
+   * What sits between the bar and the editor's text - the task panel, the
+   * tab strip - whose heights keep the toolbar below them, over the code.
+   */
+  private toolbarTabs: HTMLElement[] = [];
   private toolbarTabsObserver: ResizeObserver | null = null;
   /** The pointer that currently owns the toolbar drag. */
   private pointer: number | null = null;
@@ -356,15 +359,21 @@ export class ControlBar {
     }
   }
 
-  /** Keep the toolbar's CSS opening position below a possibly wrapped tab bar. */
-  setDebugToolbarTabs(tabs: HTMLElement): void {
+  /**
+   * Keep the toolbar's CSS opening position below what sits between the bar
+   * and the code: the task panel, which the reader folds and unfolds, and a
+   * possibly wrapped tab bar. Their heights are added up, and followed.
+   */
+  setDebugToolbarTabs(...boxes: HTMLElement[]): void {
     this.toolbarTabsObserver?.disconnect();
-    this.toolbarTabs = tabs;
+    this.toolbarTabs = boxes;
     this.syncDebugToolbarTabs();
 
     if (typeof ResizeObserver !== 'undefined') {
       this.toolbarTabsObserver = new ResizeObserver(this.syncDebugToolbarTabs);
-      this.toolbarTabsObserver.observe(tabs);
+      for (const box of boxes) {
+        this.toolbarTabsObserver.observe(box);
+      }
     }
   }
 
@@ -397,7 +406,10 @@ export class ControlBar {
   }
 
   private readonly syncDebugToolbarTabs = (): void => {
-    const height = this.toolbarTabs?.getBoundingClientRect().height ?? 0;
+    const height = this.toolbarTabs.reduce(
+      (total, box) => total + box.getBoundingClientRect().height,
+      0
+    );
     this.debugToolbar.style.setProperty(
       '--plivet-debug-tabs-height',
       `${height}px`

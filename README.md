@@ -687,6 +687,7 @@ virtual file system.
 | `stackedBelow`    | The width in pixels, of the visualizer itself rather than the window, below which `"auto"` stacks. Defaults to `720`.                                                                                                                                                 |
 | `features`        | `preprocessor` shows preprocessed source; `loadSource` enables loading source/session files (off by default); `loadFile` controls the independent runtime data-file panel used by `fopen` (on by default); `programArgs` shows the program-arguments field (off).     |
 | `footer`          | Whether to show the copyright and licence footer. Defaults to `true`; set it to `false` for an embedding that provides this information elsewhere.                                                                                                                    |
+| `description`     | The task the program is written for, as HTML, shown in a Task panel above the editor that the reader can fold away. Blank or left out, no panel. See [Task description](#task-description).                                                                           |
 | `support-build`   | Whether to construct the host-backed Build button. A programmatic host must also provide at least one `diagnosticProviders` callback; JSON cannot contain callbacks.                                                                                                  |
 | `licenses`        | Where the footer's third-party licence report is. The deployed bundle points at its own copy; a host that publishes one elsewhere names it here.                                                                                                                      |
 | `codeMirror`      | How the editor itself is built: `indent_unit`, `indent_with_tabs`, `electric_chars`, `match_brackets`, `line_numbers`, `autocomplete`, `font_size`, `light_theme`, `dark_theme`. A host that has editors of its own hands over the configuration it built those with. |
@@ -723,7 +724,7 @@ course page cannot leave a reader with a blank pane.
 written as a configuration: every key the parser reads, in one object. Each
 preference carries the value it has when nobody sets it - `theme` light,
 `loadSource` and `programArgs` off, `loadFile` and `preprocessor` on, `footer`
-on, no `args`, every view and every memory region visible - so a host that would rather delete the lines it
+on, no `args`, no `description`, every view and every memory region visible - so a host that would rather delete the lines it
 does not want than assemble the ones it does starts from that file. It is also
 the list to check a configuration against when a setting appears to be ignored:
 a key that is not there is a key nothing reads, whatever it was meant to say.
@@ -897,6 +898,27 @@ sets the editor's text size (and what the Reset button returns to), returning
 `controls: { theme: false, textSize: false }` leaves the switch and the
 text-size buttons out of the bar - absent from the DOM, not disabled - for a
 host that drives them itself.
+
+#### Task description
+
+`description` is the task the program is written for, as HTML. It is shown
+in a Task panel between the control bar and the editor, open when the
+visualizer opens; the reader folds it away and back by its heading. A course
+page that opens the visualizer in a window of its own hands over the task its
+exercise describes, so the reader has it beside the code rather than in the
+chapter behind the window. `setDescription(html)` replaces it, keeping the
+panel open or folded as the reader left it; a blank one, like none, hides the
+panel and gives its room back to the editor.
+
+The markup is trusted: it is set as written, as a page renders its own text,
+so a host hands over only what it would put on its own page. Links in it
+open in a new tab, so following one does not take the window the session is
+in with it; a `#` link within the description stays. In a window of its own
+the visualizer has none of the host page's stylesheets, so the panel gives
+paragraphs, lists, headings, code, tables, images and docutils admonitions a
+plain style of its own, at no specificity: in a dialog over the host page,
+the page's own rules win. Past `--plivet-description-max-height` (30% of the
+window) the panel scrolls rather than pushing the editor down.
 
 #### Layout
 

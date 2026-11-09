@@ -277,6 +277,7 @@ const strings = {
     {
       title: 'Adjust the workspace',
       items: [
+        'When the page that opened the visualizer describes a task for the program, Task above the editor shows it. Click its heading to fold it away, and again to bring it back.',
         'The text-size buttons change the editor font, and the theme menu switches between light and dark. Canvas zoom is controlled separately in the canvas toolbar.',
         'Drag the handles between the editor, console, columns, and canvas to resize them, or double-click a handle to restore its default size.',
       ],
@@ -299,6 +300,7 @@ const strings = {
       ],
     },
   ],
+  taskDescription: 'Task',
   fileUpload: 'Program Files',
   uploadFile: 'Uploaded and program-created files will be displayed here.',
   downloadFile: 'download',

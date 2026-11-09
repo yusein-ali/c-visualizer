@@ -93,11 +93,12 @@ src/index.ts                 the public entry: `new Plivet(element, options)`
   └─ src/main.ts             the standalone page, mounting one into #c-visualizer (or #root)
   └─ src/embed.ts            `npm run deploy`: the same mount, plus `window.CVisualizer`, for a host page
   └─ app/Plivet.ts           owns the bus, the interpreter client and the theme
-       ├─ ui/shell/          two-column CSS grid, stacked by its own width (ResizeObserver): five mount points, three drag handles, the footer
+       ├─ ui/shell/          two-column CSS grid, stacked by its own width (ResizeObserver): six mount points, three drag handles, the footer
        ├─ ui/controls/       six debug buttons, text size, theme switch, step counter
        ├─ app/EditorController.ts → ui/editor/  (CodeMirror 6)
        ├─ ui/console/        a `pre` and a `textarea`
        ├─ ui/files/          a `details` panel, the upload input and the list
+       ├─ ui/description/    the host's task, as HTML, in a `details` panel above the editor
        ├─ ui/help/           the instructions, in a `dialog`
        └─ ui/graph/          PlivetGraph (JointJS paper and graph)
 ```

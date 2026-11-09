@@ -114,6 +114,20 @@ describe('the debug controls', () => {
     );
   });
 
+  it('opens below the task panel as well as the file tabs', () => {
+    const { bar, toolbar } = mount();
+    const task = document.createElement('div');
+    task.getBoundingClientRect = () => ({ height: 120 }) as DOMRect;
+    const tabs = document.createElement('div');
+    tabs.getBoundingClientRect = () => ({ height: 42 }) as DOMRect;
+
+    bar.setDebugToolbarTabs(task, tabs);
+
+    expect(toolbar.style.getPropertyValue('--plivet-debug-tabs-height')).toBe(
+      '162px'
+    );
+  });
+
   it('offers keyboard movement from a named grip', () => {
     const { toolbar, dragHandle } = mount();
 
