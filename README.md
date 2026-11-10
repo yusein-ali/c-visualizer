@@ -974,19 +974,23 @@ program with a diagnostic on the line. The constructs it refuses are one list,
 which the editor's messages come from and which the deploy writes into
 [`library.json`](#what-a-program-may-use-libraryjson) for a course's lint:
 
-| `id`                 | Construct | What the editor says                                                        |
-| -------------------- | --------- | --------------------------------------------------------------------------- |
-| `goto`               | `goto`    | `'goto' cannot be stepped`                                                  |
-| `label`              | `label:`  | `a labelled statement cannot be stepped, so this program cannot use 'goto'` |
-| `shift-right-assign` | `>>=`     | `'>>=' cannot be stepped; write it as 'x = x >> n'`                         |
+| `id`    | Construct | What the editor says                                                        |
+| ------- | --------- | --------------------------------------------------------------------------- |
+| `goto`  | `goto`    | `'goto' cannot be stepped`                                                  |
+| `label` | `label:`  | `a labelled statement cannot be stepped, so this program cannot use 'goto'` |
 
-They are kept as limits rather than implemented. `<<=` is not on the list: it
-runs correctly - on plain variables, through pointers, on members, in a `for`
-step and as a value - and the tests hold it to that; only `>>=` loses its
-operator in the grammar. A pattern in the list may also find text the
-interpreter would accept (a conditional expression broken after its `?` with
-a name and the `:` on a line of their own reads as a label), but it never
-misses a construct the interpreter refuses.
+They are kept as limits rather than implemented. The compound shifts `<<=`
+and `>>=` are not on the list: both run - on plain variables, through
+pointers, on members, in a `for` step and as a value, signed and unsigned -
+and the tests hold them to that. `>>=` was on the list, as
+`shift-right-assign`, while the grammar could not read it: unicoen's C++14
+grammar has no `>>=` token, its lexer read one as `>` and `>=`, and the
+statement was dropped from the tree. [`ShiftAssignLexer`](src/interpreter/ShiftAssignLexer.ts)
+now hands the parser the `>`, `>` and `=` its rule asks for, and the id is
+retired. A pattern in the list may also find text the interpreter would
+accept (a conditional expression broken after its `?` with a name and the
+`:` on a line of their own reads as a label), but it never misses a
+construct the interpreter refuses.
 
 The other limits are described where they apply: the data model is ILP32
 (`int`, `long`, pointers and `size_t` are four bytes, `long long` is eight

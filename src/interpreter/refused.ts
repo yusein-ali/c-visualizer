@@ -27,13 +27,19 @@ import strings from '../strings';
  * label to the pattern; the usual layout, `c\n  ? a\n  : b`, does not.
  *
  * Kept as limits rather than implemented, as the course's feature table
- * says: `goto` and a labelled statement cannot be stepped, and neither can
- * `>>=`. `<<=` is not here because it runs correctly (unicoen maps it; only
- * `>>=` loses its operator), which `test/refused-constructs.test.ts` checks.
+ * says: `goto` and a labelled statement cannot be stepped. The compound
+ * shifts are not here because both run, which
+ * `test/refused-constructs.test.ts` checks. `>>=` was on the list, as
+ * `shift-right-assign`, until `ShiftAssignLexer.ts` gave the grammar the
+ * tokens it wants for it; that id is retired and is not to be reused for
+ * anything else.
  */
 
-/** A construct's name in the list, which does not change once published. */
-export type RefusedConstructId = 'goto' | 'label' | 'shift-right-assign';
+/**
+ * A construct's name in the list, which does not change once published.
+ * `shift-right-assign` was one and is retired; see above.
+ */
+export type RefusedConstructId = 'goto' | 'label';
 
 export interface RefusedConstruct {
   id: RefusedConstructId;
@@ -78,12 +84,6 @@ export const REFUSED_CONSTRUCTS: readonly RefusedConstruct[] = [
     construct: 'label:',
     pattern: `(?:^|[\\n;{}])\\s*(?!(?:${NOT_LABELS.join('|')})\\b)[A-Za-z_]\\w*\\s*:`,
     message: strings.labelUnsupported,
-  },
-  {
-    id: 'shift-right-assign',
-    construct: '>>=',
-    pattern: '>>=',
-    message: strings.shiftAssignUnsupported,
   },
 ];
 

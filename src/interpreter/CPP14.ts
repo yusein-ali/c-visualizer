@@ -1,14 +1,16 @@
 import { Interpreter } from 'unicoen.ts/dist/interpreter/Interpreter';
 import { CPP14Mapper } from 'unicoen.ts/dist/interpreter/CPP14/CPP14Mapper';
+import { CPP14Parser } from 'unicoen.ts/dist/interpreter/CPP14/CPP14Parser';
 import type {
   FloatingliteralContext,
   IntegerliteralContext,
+  TranslationunitContext,
 } from 'unicoen.ts/dist/interpreter/CPP14/CPP14Parser';
 import { ExecState } from 'unicoen.ts/dist/interpreter/Engine/ExecState';
 import { SyntaxErrorData } from 'unicoen.ts/dist/interpreter/mapper/SyntaxErrorData';
 import { SyntaxErrorListener } from 'unicoen.ts/dist/interpreter/mapper/SyntaxErrorListener';
 import { UniProgram } from 'unicoen.ts/dist/node/UniProgram';
-import { CommonTokenStream } from 'antlr4ts';
+import { ANTLRInputStream, CommonTokenStream } from 'antlr4ts';
 import type { ParserRuleContext } from 'antlr4ts';
 import { PlivetCPP14Engine, SourceLocator } from './CPP14Engine';
 import { Construct } from './Construct';
@@ -30,6 +32,7 @@ import {
   takeDisplayAddresses,
 } from './RuntimeTypeInfo';
 import { RuntimeDiagnostic } from './RuntimeDiagnostic';
+import { ShiftAssignLexer } from './ShiftAssignLexer';
 import { OutputSpan } from './stream';
 import { StructTable } from './StructTable';
 import {
@@ -101,9 +104,20 @@ class PlivetCPP14Mapper extends CPP14Mapper {
   /** The text being parsed, for the typedef pass below. */
   private parsing = '';
 
-  parseToANTLRTree(code: string) {
+  /**
+   * unicoen's parse, read through `ShiftAssignLexer`, without which a `>>=`
+   * statement is dropped from the tree.
+   */
+  parseToANTLRTree(code: string): TranslationunitContext {
     this.parsing = code;
-    return super.parseToANTLRTree(code);
+    const lexer = new ShiftAssignLexer(
+      new ANTLRInputStream(this.preProcess(code))
+    );
+    const parser = new CPP14Parser(new CommonTokenStream(lexer));
+    parser.addErrorListener(new SyntaxErrorListener());
+    const tree = parser.translationunit();
+    this.parser = parser;
+    return tree;
   }
 
   /**

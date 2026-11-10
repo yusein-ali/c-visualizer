@@ -262,6 +262,14 @@ comments and literals blanked; the `>>=` refusal itself now matches with
 its pattern. Course-lint rule 8 should take the list from the manifest
 rather than hard-coding `<<=`.
 
+Later: `>>=` runs and is off the list. The grammar's `rightShiftAssign` rule
+wants the tokens `>`, `>` and `=`, while unicoen's lexer read `>>=` as `>`
+and `>=`, so the statement never parsed and the recovery dropped it - the
+operator was not lost in the mapper. `src/interpreter/ShiftAssignLexer.ts`
+splits a `>=` that touches the `>` before it, and the engine's compound
+assignment computes the rest. The id `shift-right-assign` is retired, and
+the list is `goto` and `label`.
+
 ### L10 `srand`, `RAND_MAX`, `time`, `clock`, `assert`
 
 Today `rand` returns `Math.random() * Math.pow(0, ...)`, which is always 0.

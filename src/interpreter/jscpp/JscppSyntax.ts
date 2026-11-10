@@ -485,36 +485,6 @@ const specifierError = (
 };
 
 /**
- * `>>=`, which unicoen's mapper drops on the floor.
- *
- * Its C++14 grammar splits `>>` so that nested template arguments close, and
- * the compound assignment does not survive it: `y >>= 1` maps to the two
- * halves `y` and `1` as separate statements, with no operator between them.
- * The shift then never happens and nothing says so - `y` keeps its old value
- * and the program runs on to a wrong answer, which is worse than stopping.
- *
- * `<<=` maps correctly and is left alone. Read from the source because the
- * grammar parses `>>=` perfectly well; it is only the tree behind it that
- * loses the operator - with the pattern the refused-construct list gives a
- * host, so the editor and the course's lint find the same thing.
- */
-const unsupportedShiftAssign = (code: string): JscppSyntaxError | null => {
-  const shiftAssign = refusedConstruct('shift-right-assign');
-  const found = new RegExp(shiftAssign.pattern).exec(mask(code));
-  if (found === null) {
-    return null;
-  }
-  // Counted in `code`, where the offset was found: the two agree by line and
-  // column but not by offset, since a directive's line is emptied there.
-  const before = code.slice(0, found.index).split(/\r?\n/);
-  return {
-    line: before.length,
-    column: before[before.length - 1].length,
-    message: shiftAssign.message,
-  };
-};
-
-/**
  * A `goto`, which the grammar reads and the interpreter cannot run.
  *
  * The label it jumps to is refused by rule 3 of `describe`, so a complete
@@ -772,7 +742,7 @@ export const jscppCheck = (code: string, source: string = code): JscppCheck => {
   return {
     error: earlier(
       earlier(specifierError(tree, source), emptyCharacterConstant(tree)),
-      earlier(unsupportedGoto(tree), unsupportedShiftAssign(code))
+      unsupportedGoto(tree)
     ),
     warnings: emptyDeclarations(tree, source).concat(
       duplicateStorageClasses(tree, source)

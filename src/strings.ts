@@ -137,7 +137,6 @@ const strings = {
     'a labelled statement cannot be stepped, so this program cannot use ' +
     "'goto'",
   gotoUnsupported: "'goto' cannot be stepped",
-  shiftAssignUnsupported: "'>>=' cannot be stepped; write it as 'x = x >> n'",
   diagnosticsRunStoppedOnError: 'Run stopped because of a runtime error',
   diagnosticsRunStoppedAt: 'Execution stopped at',
   diagnosticsRunInvalidStatement: 'because the statement is not valid.',

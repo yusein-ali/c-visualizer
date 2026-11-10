@@ -255,25 +255,25 @@ describe('a jump the interpreter cannot make', () => {
   });
 });
 
-describe('a compound shift the mapper loses', () => {
+describe('the right shift assignment', () => {
   /**
-   * ANTLR's C++14 grammar splits `>>` so nested template arguments close, and
-   * `>>=` does not survive it: the tree holds the two halves as separate
-   * statements with no operator between them. The shift never happens, `y`
-   * keeps its old value, and the program runs on to a wrong answer - which is
-   * worse than stopping, because nothing about the run looks wrong. Refused
-   * rather than repaired: the operator is gone before any pass here can see
-   * it.
+   * ANTLR's C++14 grammar has no `>>=` token, and its lexer read one as `>`
+   * and `>=`, which no rule takes: the statement did not parse, and the
+   * recovery dropped it from the tree. It was refused here for that reason
+   * until `ShiftAssignLexer` handed the grammar the `>`, `>` and `=` it asks
+   * for; ANTLR now parses it without an error to recover from.
    */
-  it('refuses it, and says what to write instead', () => {
+  it('passes the preflight, ANTLR included', () => {
     expect(
       preflight('int main(void){\n  int y = 14;\n  y >>= 1;\n  return y;\n}')
-    ).toEqual([
-      "3:4 line 3:4 '>>=' cannot be stepped; write it as 'x = x >> n'",
-    ]);
+    ).toEqual([]);
   });
 
   it.each([
+    [
+      'a right shift assignment',
+      'int main(void){ int y = 14; y >>= 1; return y; }',
+    ],
     ['the shift itself', 'int main(void){ int y = 28; return y >> 2; }'],
     [
       'a left shift assignment',
@@ -286,6 +286,12 @@ describe('a compound shift the mapper loses', () => {
     ],
   ])('says nothing about %s', (_name, code) => {
     expect(report(code)).toBe('OK');
+  });
+
+  it('still refuses a > and a >= apart, which is not C', () => {
+    expect(report('int main(void){ int y = 1; return y > >= 1; }')).not.toBe(
+      'OK'
+    );
   });
 });
 
