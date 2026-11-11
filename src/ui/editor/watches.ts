@@ -1,6 +1,12 @@
 import { Facet, MapMode, StateEffect, StateField } from '@codemirror/state';
-import { EditorView, showTooltip, Tooltip } from '@codemirror/view';
-import { HoverRecord, hoverDom } from './tooltip';
+import {
+  closeHoverTooltips,
+  EditorView,
+  showTooltip,
+  Tooltip,
+} from '@codemirror/view';
+import { HoverContext, HoverRecord, hoverDom } from './tooltip';
+import strings from '../../strings';
 
 /**
  * Watches: the tooltips a reader has pinned to a name, kept on the screen and
@@ -12,7 +18,8 @@ import { HoverRecord, hoverDom } from './tooltip';
  * the program in their head to use it. A pinned tooltip stays where the name
  * is written, so what it says is read in the place it is about.
  *
- * The gesture is alt-click on a name, and alt-click again to take it away.
+ * The pin on a hover keeps it standing. Alt-click on a name is a shortcut,
+ * and alt-click again takes it away.
  * Not a plain click: a plain click is how a reader moves the cursor, and a
  * watch pinned by every cursor move is not a watch window but a mess.
  *
@@ -128,9 +135,10 @@ const pinButton = (view: EditorView, watch: Watch): HTMLButtonElement => {
   button.type = 'button';
   button.className = 'plivet-watch__pin';
   button.setAttribute('aria-pressed', released ? 'false' : 'true');
-  const label = released
-    ? `Pin ${watch.name} again`
-    : `Pinned - click to unpin ${watch.name}`;
+  const label = (released ? strings.watchPin : strings.watchUnpin).replace(
+    '{name}',
+    watch.name
+  );
   button.title = label;
   button.setAttribute('aria-label', label);
   button.textContent = '\u{1F4CC}\uFE0E';
@@ -144,17 +152,43 @@ const pinButton = (view: EditorView, watch: Watch): HTMLButtonElement => {
     event.preventDefault();
     if (released) {
       view.dispatch({
-        effects: toggleWatch.of({ name: watch.name, pos: watch.pos }),
+        effects: [
+          toggleWatch.of({ name: watch.name, pos: watch.pos }),
+          closeHoverTooltips,
+        ],
       });
     } else {
       // A press from the keyboard has no pointer resting on the tooltip to
       // wait for, so there the watch simply goes.
       const effect = event.detail === 0 ? removeWatch : releaseWatch;
-      view.dispatch({ effects: effect.of(watch.name) });
+      view.dispatch({ effects: [effect.of(watch.name), closeHoverTooltips] });
     }
     notify(view);
   });
   return button;
+};
+
+/** The same pin, initially released, on an identifier's ordinary hover. */
+export const decorateWatchHover = (
+  dom: HTMLElement,
+  view: EditorView,
+  context: HoverContext
+): void => {
+  const word = view.state.wordAt(context.pos);
+  if (word === null || !/^[A-Za-z_]\w*$/.test(context.word)) {
+    return;
+  }
+  const pinned = pinnedWatches(view.state).find(
+    (watch) => watch.name === context.word
+  );
+  dom.classList.add('plivet-watch');
+  dom.classList.toggle('plivet-watch--latched', pinned !== undefined);
+  dom.prepend(
+    pinButton(
+      view,
+      pinned ?? { name: context.word, pos: word.from, released: true }
+    )
+  );
 };
 
 export const watchField = StateField.define<WatchState>({

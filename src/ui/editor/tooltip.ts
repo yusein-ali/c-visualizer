@@ -40,6 +40,12 @@ export interface HoverTooltipOptions {
    * closes. The canvas listens for it.
    */
   onFocus?: (object: string | null) => void;
+  /** Add controls to a hover, such as the pin for a live watch. */
+  decorate?: (
+    dom: HTMLElement,
+    view: EditorView,
+    context: HoverContext
+  ) => void;
 }
 
 /** The record, as a small table: the headline, then a row per fact. */
@@ -99,13 +105,14 @@ export const plivetHoverSource =
   (view: EditorView, pos: number): Tooltip | null => {
     const line = view.state.doc.lineAt(pos);
     const word = view.state.wordAt(pos);
-    const record = options.text({
+    const context: HoverContext = {
       state: view.state,
       pos,
       row: rowAt(view.state.doc, pos),
       column: pos - line.from,
       word: word === null ? '' : view.state.sliceDoc(word.from, word.to),
-    });
+    };
+    const record = options.text(context);
     if (record === null || record.title === '') {
       return null;
     }
@@ -113,22 +120,26 @@ export const plivetHoverSource =
       pos: word === null ? pos : word.from,
       end: word === null ? undefined : word.to,
       above: true,
-      create: () => ({
-        dom: hoverDom(record),
-        // The canvas is told while this tooltip stands, and told again when
-        // it goes: a mark that outlived the thing that asked for it would be
-        // a second pointer on the screen.
-        mount: () => {
-          if (typeof options.onFocus !== 'undefined') {
-            options.onFocus(record.object ?? null);
-          }
-        },
-        destroy: () => {
-          if (typeof options.onFocus !== 'undefined') {
-            options.onFocus(null);
-          }
-        },
-      }),
+      create: () => {
+        const dom = hoverDom(record);
+        options.decorate?.(dom, view, context);
+        return {
+          dom,
+          // The canvas is told while this tooltip stands, and told again when
+          // it goes: a mark that outlived the thing that asked for it would be
+          // a second pointer on the screen.
+          mount: () => {
+            if (typeof options.onFocus !== 'undefined') {
+              options.onFocus(record.object ?? null);
+            }
+          },
+          destroy: () => {
+            if (typeof options.onFocus !== 'undefined') {
+              options.onFocus(null);
+            }
+          },
+        };
+      },
     };
   };
 

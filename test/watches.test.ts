@@ -1,6 +1,12 @@
 import { EditorState } from '@codemirror/state';
-import { EditorView, showTooltip } from '@codemirror/view';
 import {
+  activateHover,
+  EditorView,
+  hasHoverTooltips,
+  showTooltip,
+} from '@codemirror/view';
+import {
+  DebugExtensions,
   setWatchRecords,
   toggleWatch,
   watchField,
@@ -100,6 +106,124 @@ describe('pinned watches', () => {
     const record = hover.watchRecord('count');
     expect(record.title).toBe('count');
     expect(record.facts[0].label).toContain('not visible');
+  });
+});
+
+describe('pinning an ordinary hover', () => {
+  const at = doc.indexOf('count');
+  const makeView = (onWatchesChanged?: () => void) =>
+    new EditorView({
+      doc,
+      parent: document.body,
+      extensions: new DebugExtensions({
+        hoverText: ({ word }) => ({
+          title: word,
+          facts: [{ label: 'value', value: '7' }],
+        }),
+        onWatchesChanged,
+      }).extensions,
+    });
+  const hover = async (view: EditorView, pos = at) => {
+    activateHover(view, pos, 1);
+    await Promise.resolve();
+    await Promise.resolve();
+    return view.dom.querySelector<HTMLElement>('.cm-tooltip-hover')!;
+  };
+
+  it('offers an unpressed pin on hover without creating a watch', async () => {
+    const changed = jest.fn();
+    const view = makeView(changed);
+    try {
+      const dom = await hover(view);
+      const pin = dom.querySelector<HTMLButtonElement>('.plivet-watch__pin')!;
+      expect(pin.getAttribute('aria-pressed')).toBe('false');
+      expect(pin.getAttribute('aria-label')).toBe('Pin count as a live watch');
+      expect(watchNames(view.state)).toEqual([]);
+      expect(changed).not.toHaveBeenCalled();
+    } finally {
+      view.destroy();
+    }
+  });
+
+  it('pins from hover, closes the transient copy, and keeps updating the value', async () => {
+    const changed = jest.fn();
+    const view = makeView(changed);
+    try {
+      const dom = await hover(view);
+      const pin = dom.querySelector<HTMLButtonElement>('.plivet-watch__pin')!;
+      const before = view.state.selection;
+      const down = new MouseEvent('mousedown', {
+        bubbles: true,
+        cancelable: true,
+      });
+      pin.dispatchEvent(down);
+      expect(down.defaultPrevented).toBe(true);
+      pin.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+      expect(watchNames(view.state)).toEqual(['count']);
+      expect(view.state.selection.eq(before)).toBe(true);
+      expect(hasHoverTooltips(view.state)).toBe(false);
+      expect(changed).toHaveBeenCalledTimes(1);
+      document.body.dispatchEvent(
+        new MouseEvent('mousemove', { bubbles: true })
+      );
+      expect(watchNames(view.state)).toEqual(['count']);
+      view.dispatch({
+        effects: setWatchRecords.of([
+          {
+            name: 'count',
+            record: { title: 'count', facts: [{ label: 'value', value: '8' }] },
+          },
+        ]),
+      });
+      const standing = view.dom.querySelector<HTMLElement>('.plivet-watch')!;
+      expect(standing.textContent).toContain('8');
+      expect(
+        standing.querySelector('button')!.getAttribute('aria-pressed')
+      ).toBe('true');
+    } finally {
+      view.destroy();
+    }
+  });
+
+  it('does not offer pins without a listener to supply watched values', async () => {
+    const view = makeView();
+    try {
+      expect(
+        (await hover(view)).querySelector('.plivet-watch__pin')
+      ).toBeNull();
+    } finally {
+      view.destroy();
+    }
+  });
+
+  it('can release a pinned name from a later hover without leaving a stale pin', async () => {
+    const changed = jest.fn();
+    const view = makeView(changed);
+    try {
+      view.dispatch({ effects: toggleWatch.of({ name: 'count', pos: at }) });
+      const dom = await hover(view);
+      const pin = dom.querySelector<HTMLButtonElement>('.plivet-watch__pin')!;
+      expect(pin.getAttribute('aria-pressed')).toBe('true');
+      pin.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+      expect(watchNames(view.state)).toEqual([]);
+      expect(hasHoverTooltips(view.state)).toBe(false);
+      expect(changed).toHaveBeenCalledTimes(1);
+    } finally {
+      view.destroy();
+    }
+  });
+
+  it('does not offer a pin for a numeric literal', async () => {
+    const view = makeView(jest.fn());
+    try {
+      expect(
+        (await hover(view, doc.indexOf('7'))).querySelector(
+          '.plivet-watch__pin'
+        )
+      ).toBeNull();
+    } finally {
+      view.destroy();
+    }
   });
 });
 

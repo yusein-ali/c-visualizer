@@ -6,6 +6,8 @@
 const strings = {
   howToUse: 'How to use',
   close: 'Close',
+  watchPin: 'Pin {name} as a live watch',
+  watchUnpin: 'Pinned - click to unpin {name}',
   tabsLabel: 'Open files',
   tabRuns: 'this is the entry source file',
   tabMakeEntry: 'make this the entry source file',
@@ -228,7 +230,7 @@ const strings = {
         'Before execution, tooltips explain declarations and C language constructs. They can show types, type qualifiers, storage-class specifiers, parameters, control-flow clauses, conversions, and where a break, continue, or return statement transfers control. Common library functions show a declaration and a short description.',
         'At a debug step, an object tooltip shows its declared type, stored value, and address; a pointer value also shows the object it points to and that object’s value. Tooltips on the current expression show results already produced, and control-flow tooltips explain controlling-expression values, selected branches, iteration counts, arguments, and return values for that step.',
         'Preprocessor tooltips show macro-replacement chains and definition lines, whether a conditional-inclusion group is active, and which source was excluded. Hover over an error or teaching marker to read the diagnostic and any available library help or suggested fix.',
-        'Hovering an object identifier also highlights the matching declaration and object row on the canvas. Alt-click an identifier to pin its tooltip as a live watch; Alt-click it again to remove the watch. A pinned watch updates at every step and reports when the identifier is not visible at the current execution point.',
+        'Hovering an object identifier also highlights the matching declaration and object row on the canvas. Click the pin in its hover tooltip to keep it as a live watch; click the pin again to release it. Alt-click an identifier also toggles its watch. A pinned watch updates at every step and reports when the identifier is not visible at the current execution point.',
       ],
     },
     {
@@ -292,7 +294,7 @@ const strings = {
         'Ctrl+Shift+[ folds the block at the cursor and Ctrl+Shift+] unfolds it; on macOS these are Command+Alt+[ and Command+Alt+]. Ctrl+Alt+[ and Ctrl+Alt+] fold and unfold the whole file.',
         'F12 goes to the declaration of the name at the cursor. Ctrl-click a name does the same with the pointer, and holding the key underlines the names that can be followed.',
         'Double-click a cell in the memory view to go to the object declaration or function definition it represents.',
-        'Alt-click a name pins its tooltip as a live watch, and Alt-click it again removes the watch. Clicking the breakpoint gutter sets or removes a breakpoint.',
+        'Hover a name and click the pin in its tooltip to keep it as a live watch. Click the pin again to release it. Alt-click a name also toggles its watch. Clicking the breakpoint gutter sets or removes a breakpoint.',
         'In the console input field, Enter submits the line and Shift+Enter adds another line before submitting. Ctrl+D, or the EOF button beside the field, ends the input: the waiting read returns EOF (fgets and gets return NULL), and a later read waits for new input. What a program writes to stderr is shown in the error colour.',
         'Debugger shortcuts follow the toolbar: F5 runs or continues, F6 steps into the next statement or function call, F7 steps over function calls, and F9 toggles a breakpoint on the line containing the cursor.',
         'Resize handles take keyboard focus: with a handle focused, the arrow keys resize the panes it separates and Enter restores the default size.',

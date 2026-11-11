@@ -52,6 +52,7 @@ import { HoverText, plivetHoverTooltip } from './tooltip';
 import { SourceRange } from './positions';
 import {
   WatchRecord,
+  decorateWatchHover,
   watchField,
   watchGesture,
   watchNames,
@@ -156,6 +157,10 @@ export class DebugExtensions {
         plivetHoverTooltip({
           text: options.hoverText,
           onFocus: options.onHoverObject,
+          decorate:
+            typeof options.onWatchesChanged === 'undefined'
+              ? undefined
+              : decorateWatchHover,
         })
       );
     }
