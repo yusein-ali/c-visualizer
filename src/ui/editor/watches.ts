@@ -7,6 +7,7 @@ import {
 } from '@codemirror/view';
 import { HoverContext, HoverRecord, hoverDom } from './tooltip';
 import strings from '../../strings';
+import { iconFor } from '../controls/icons';
 
 /**
  * Watches: the tooltips a reader has pinned to a name, kept on the screen and
@@ -141,7 +142,7 @@ const pinButton = (view: EditorView, watch: Watch): HTMLButtonElement => {
   );
   button.title = label;
   button.setAttribute('aria-label', label);
-  button.textContent = '\u{1F4CC}\uFE0E';
+  button.appendChild(iconFor('pin'));
   // The press must not take the focus out of the editor, nor reach it as a
   // click on the text under the tooltip.
   button.addEventListener('mousedown', (event) => {

@@ -537,7 +537,7 @@ export const debugTheme = EditorView.baseTheme({
   // like it - the same table saying the same things - with a line down its
   // left edge and a pin pressed into its corner to say that this one stays.
   // Let go by its pin it keeps its place and its size, so that it does not
-  // move out from under the pointer, and loses only the colour.
+  // move out from under the pointer, and loses only the emphasis.
   '.cm-tooltip .plivet-watch': {
     maxWidth: '30em',
     padding: '4px 8px',
@@ -545,7 +545,7 @@ export const debugTheme = EditorView.baseTheme({
     borderLeft: '3px solid transparent',
   },
   '.cm-tooltip .plivet-watch--latched': {
-    borderLeftColor: 'var(--plivet-watch-edge, #d9a400)',
+    borderLeftColor: 'var(--plivet-watch-edge, currentColor)',
   },
   '.plivet-watch__pin': {
     float: 'right',
@@ -561,10 +561,14 @@ export const debugTheme = EditorView.baseTheme({
     opacity: '0.45',
   },
   '.plivet-watch__pin[aria-pressed="true"]': {
-    color: 'var(--plivet-watch-edge, #d9a400)',
-    backgroundColor: 'rgba(217, 164, 0, 0.15)',
-    borderColor: 'var(--plivet-watch-edge, #d9a400)',
+    backgroundColor: 'rgba(127, 127, 127, 0.15)',
+    borderColor: 'currentColor',
     opacity: '1',
+  },
+  '.plivet-watch__pin svg': {
+    width: '1em',
+    height: '1em',
+    verticalAlign: '-0.125em',
   },
   '.plivet-watch__pin:hover, .plivet-watch__pin:focus-visible': {
     opacity: '1',
