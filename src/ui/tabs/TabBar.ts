@@ -23,6 +23,11 @@ export interface TabModel {
   canBeEntry?: boolean;
   /** Whether the text differs from what was opened or last saved. */
   edited?: boolean;
+  /**
+   * Whether the reader may close this file. A file the host handed over is
+   * not theirs to close: nothing in the widget would open it again.
+   */
+  closable?: boolean;
 }
 
 export interface TabBarOptions {
@@ -95,7 +100,8 @@ export class TabBar {
     element.appendChild(select);
     // The file that runs cannot be closed: a session with no translation unit
     // is not a session, and the reader would have to open one to get back.
-    if (!tab.entry) {
+    // Nor can a file the host supplied, which the reader could not get back.
+    if (!tab.entry && tab.closable !== false) {
       const close = document.createElement('button');
       close.type = 'button';
       close.className = 'plivet-tabs__close';

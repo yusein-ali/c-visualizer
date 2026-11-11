@@ -762,15 +762,33 @@ describe('the editor with several files', () => {
     host.remove();
   });
 
-  it('closes a file, but never the one that runs', () => {
+  it('closes a file the reader opened, but never one the host supplied', () => {
     const { host, controller } = mounted(FILES);
-    const closers = host.querySelectorAll<HTMLButtonElement>(
-      '.plivet-tabs__close'
-    );
-    // One closer, on the file that is not the entry.
-    expect(closers).toHaveLength(1);
-    closers[0].click();
-    expect(controller.openFiles().map((file) => file.path)).toEqual(['main.c']);
+    const closers = () =>
+      host.querySelectorAll<HTMLButtonElement>('.plivet-tabs__close');
+    // Neither the entry nor the host's other file can be closed.
+    expect(closers()).toHaveLength(0);
+    controller.openInTab('extra.c', 'int extra = 3;');
+    // One closer, on the file the reader loaded.
+    expect(closers()).toHaveLength(1);
+    expect(closers()[0].title).toContain('extra.c');
+    closers()[0].click();
+    expect(controller.openFiles().map((file) => file.path)).toEqual([
+      'main.c',
+      'notes.c',
+    ]);
+    controller.destroy();
+    host.remove();
+  });
+
+  it('keeps the files of a host update open as well', () => {
+    const { host, controller } = mounted(FILES);
+    controller.openInTab('extra.c', 'int extra = 3;');
+    controller.updateFiles([
+      FILES[0],
+      { path: 'extra.c', text: 'int extra = 4;' },
+    ]);
+    expect(host.querySelectorAll('.plivet-tabs__close')).toHaveLength(0);
     controller.destroy();
     host.remove();
   });

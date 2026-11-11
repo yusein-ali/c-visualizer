@@ -333,6 +333,12 @@ export class EditorController {
    * back held to the same text.
    */
   private protections = new Map<string, FileProtection>();
+  /**
+   * The files the host handed over, at the start or through `updateFiles`.
+   * They belong to the host's exercise, so the reader cannot close them: the
+   * widget has no way to open one again. A file the reader loaded is theirs.
+   */
+  private hostPaths = new Set<string>();
   private readonly onLoadRefused?: (refusal: LoadRefusal) => void;
   private readonly programArgs?: () => readonly string[];
   /**
@@ -446,6 +452,9 @@ export class EditorController {
         : files.map((file) => ({ ...file, session: null }));
     const requestedEntry = entry ?? (useDefaults ? defaults.entry : undefined);
     this.files = opened;
+    if (typeof files !== 'undefined' && files.length !== 0) {
+      this.hostPaths = new Set(files.map((file) => file.path));
+    }
     this.entryPath = entryPathFor(opened, requestedEntry);
     this.activePath = this.entryPath;
     this.sourcecode = this.fileAt(this.activePath).text;
@@ -1073,6 +1082,7 @@ export class EditorController {
       text: file.text,
       session: null,
     }));
+    this.hostPaths = new Set(paths);
     this.entryPath = entryPathFor(this.files, entry);
     this.activePath = this.entryPath;
     this.clearRefusalNotice();
@@ -1258,7 +1268,11 @@ export class EditorController {
   }
 
   private closeFile(path: string): void {
-    if (path === this.entryPath || this.files.length < 2) {
+    if (
+      path === this.entryPath ||
+      this.files.length < 2 ||
+      this.hostPaths.has(path)
+    ) {
       return;
     }
     this.files = this.files.filter((file) => file.path !== path);
@@ -1282,6 +1296,7 @@ export class EditorController {
         entry: file.path === this.entryPath,
         active: file.path === this.activePath,
         canBeEntry: canBeEntry(file),
+        closable: !this.hostPaths.has(file.path),
       }))
     );
   }
