@@ -406,37 +406,4 @@ describe('the rest of the bar', () => {
     help.click();
     expect(helped()).toBe(1);
   });
-
-  it('carries no program-arguments field unless asked for one', () => {
-    const { parent } = mount();
-    expect(parent.querySelector('.plivet-controls__args')).toBeNull();
-  });
-
-  it('holds the program arguments in a field and reports each edit', () => {
-    const parent = document.createElement('div');
-    document.body.appendChild(parent);
-    const edits: string[] = [];
-    const bar = new ControlBar(parent, {
-      programArgs: true,
-      args: 'one "two words"',
-      onArgs: (text) => edits.push(text),
-    });
-    const input = parent.querySelector(
-      '.plivet-controls__args input'
-    ) as HTMLInputElement;
-    expect(input.value).toBe('one "two words"');
-    expect(input.getAttribute('aria-label')).toBe(strings.programArgsLabel);
-    expect(
-      parent.querySelector('.plivet-controls__args')!.textContent
-    ).toContain(strings.programArgs);
-
-    input.value = 'three';
-    input.dispatchEvent(new Event('input'));
-    expect(edits).toEqual(['three']);
-
-    bar.setArgs('four five');
-    expect(input.value).toBe('four five');
-    expect(edits).toEqual(['three']);
-    bar.destroy();
-  });
 });

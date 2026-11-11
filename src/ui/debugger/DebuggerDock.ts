@@ -3,12 +3,28 @@ import './debugger.css';
 
 export type DebuggerPanel = 'console' | 'breakpoints';
 
+export interface DebuggerDockOptions {
+  /**
+   * Whether the dock's header carries the program-arguments field, where the
+   * reader writes what `main` receives in `argv`. Default: it is not there.
+   */
+  programArgs?: boolean;
+  /** The field's text when the dock opens: arguments as on a command line. */
+  args?: string;
+  /** The field's text, on every change the reader makes to it. */
+  onArgs?: (text: string) => void;
+}
+
 /**
  * The utility dock below the editor, alongside the editor's other controls.
  *
  * It owns presentation only: which tab is visible and whether the dock is
  * collapsed. The console and breakpoint table mount into the two boxes it
  * exposes and keep their own behavior.
+ *
+ * The program's arguments are written in its header, beside the Console tab:
+ * they are what the program is started with, as the console is what it reads
+ * and prints, and the header stays in view while the dock is collapsed.
  */
 export class DebuggerDock {
   readonly root: HTMLElement;
@@ -18,10 +34,14 @@ export class DebuggerDock {
   private readonly consoleTab: HTMLButtonElement;
   private readonly breakpointsTab: HTMLButtonElement;
   private readonly count: HTMLSpanElement;
+  /** Null unless the page asked for the program-arguments field. */
+  private readonly args: HTMLInputElement | null = null;
+  private readonly onArgs?: (text: string) => void;
   private selected: DebuggerPanel = 'console';
   private expanded = false;
 
-  constructor(parent: HTMLElement) {
+  constructor(parent: HTMLElement, options: DebuggerDockOptions = {}) {
+    this.onArgs = options.onArgs;
     this.root = document.createElement('section');
     this.root.className = 'plivet-debugger';
     this.root.setAttribute('aria-label', strings.debuggerPanels);
@@ -41,7 +61,16 @@ export class DebuggerDock {
 
     this.console = this.panel('console');
     this.breakpoints = this.panel('breakpoints');
-    this.root.append(tabs, this.console, this.breakpoints);
+    // The field is beside the tab list and not in it: a tab list holds tabs.
+    const header = document.createElement('div');
+    header.className = 'plivet-debugger__header';
+    header.appendChild(tabs);
+    if (options.programArgs === true) {
+      const field = this.argsField(options.args ?? '');
+      this.args = field.querySelector('input');
+      header.appendChild(field);
+    }
+    this.root.append(header, this.console, this.breakpoints);
     parent.appendChild(this.root);
     this.render();
   }
@@ -56,6 +85,13 @@ export class DebuggerDock {
 
   showBreakpoints(): void {
     this.show('breakpoints');
+  }
+
+  /** The program-arguments field's text; ignored where there is no field. */
+  setArgs(text: string): void {
+    if (this.args !== null) {
+      this.args.value = text;
+    }
   }
 
   destroy(): void {
@@ -78,6 +114,30 @@ export class DebuggerDock {
       this.show(panel);
     });
     return tab;
+  }
+
+  /**
+   * The program's arguments, as a line typed on a command line. What is in
+   * it is read when a run starts, so an edit applies at the next Start or
+   * Run and never to the run under way.
+   */
+  private argsField(text: string): HTMLLabelElement {
+    const field = document.createElement('label');
+    field.className = 'plivet-debugger__args';
+    field.title = strings.programArgsHint;
+    const caption = document.createElement('span');
+    caption.className = 'plivet-debugger__args-caption';
+    caption.textContent = strings.programArgs;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'plivet-debugger__args-input';
+    input.value = text;
+    input.spellcheck = false;
+    input.autocomplete = 'off';
+    input.setAttribute('aria-label', strings.programArgsLabel);
+    input.addEventListener('input', () => this.onArgs?.(input.value));
+    field.append(caption, input);
+    return field;
   }
 
   private panel(panel: DebuggerPanel): HTMLDivElement {

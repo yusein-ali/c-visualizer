@@ -1,5 +1,6 @@
 import { BreakpointTable } from '../src/ui/breakpoints';
 import { DebuggerDock } from '../src/ui/debugger';
+import strings from '../src/strings';
 
 const parentOf = (): HTMLDivElement => {
   const parent = document.createElement('div');
@@ -135,6 +136,44 @@ describe('the debugger dock', () => {
     dock.showConsole();
     expect(dock.console.hidden).toBe(false);
     expect(dock.breakpoints.hidden).toBe(true);
+    dock.destroy();
+  });
+
+  it('carries no program-arguments field unless asked for one', () => {
+    const parent = parentOf();
+    const dock = new DebuggerDock(parent);
+    expect(parent.querySelector('.plivet-debugger__args')).toBeNull();
+    dock.destroy();
+  });
+
+  it('holds the program arguments in its header and reports each edit', () => {
+    const parent = parentOf();
+    const edits: string[] = [];
+    const dock = new DebuggerDock(parent, {
+      programArgs: true,
+      args: 'one "two words"',
+      onArgs: (text) => edits.push(text),
+    });
+    const input = parent.querySelector(
+      '.plivet-debugger__args input'
+    ) as HTMLInputElement;
+    expect(input.value).toBe('one "two words"');
+    expect(input.getAttribute('aria-label')).toBe(strings.programArgsLabel);
+    expect(
+      parent.querySelector('.plivet-debugger__args')!.textContent
+    ).toContain(strings.programArgs);
+    // Beside the tab list, not inside it, and in view while it is collapsed.
+    expect(input.closest('[role="tablist"]')).toBeNull();
+    expect(input.closest('.plivet-debugger__header')).not.toBeNull();
+    expect(dock.console.hidden).toBe(true);
+
+    input.value = 'three';
+    input.dispatchEvent(new Event('input'));
+    expect(edits).toEqual(['three']);
+
+    dock.setArgs('four five');
+    expect(input.value).toBe('four five');
+    expect(edits).toEqual(['three']);
     dock.destroy();
   });
 });

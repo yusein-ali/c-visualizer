@@ -210,27 +210,6 @@
 	font: inherit;
 }
 
-/* The program's arguments: a caption and a line typed as on a command line. */
-.plivet-controls__args {
-	display: inline-flex;
-	align-items: center;
-	gap: 0.35rem;
-	min-width: 0;
-}
-
-.plivet-controls__args-input {
-	width: 12rem;
-	max-width: 40vw;
-	min-height: 2rem;
-	padding: 0 0.4rem;
-	border: 1px solid var(--plivet-line, #333333);
-	border-radius: 0.25rem;
-	background: var(--plivet-button-bg, #f6f6f6);
-	color: var(--plivet-button-color, #333333);
-	font-family: Consolas, 'Courier New', monospace;
-	font-size: inherit;
-}
-
 /* The picker behind the Open button: reachable, and never drawn. */
 .plivet-controls__file {
 	display: none;

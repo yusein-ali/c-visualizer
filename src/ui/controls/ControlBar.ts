@@ -60,15 +60,6 @@ export interface ControlBarOptions {
   theme?: boolean;
   /** Whether the bar carries the three text-size buttons. Default: yes. */
   textSize?: boolean;
-  /**
-   * Whether the bar carries the program-arguments field, where the reader
-   * writes what `main` receives in `argv`. Default: it is not there.
-   */
-  programArgs?: boolean;
-  /** The field's text when the bar opens: arguments as on a command line. */
-  args?: string;
-  /** The field's text, on every change the reader makes to it. */
-  onArgs?: (text: string) => void;
   dark?: boolean;
 }
 
@@ -89,8 +80,6 @@ export class ControlBar {
   private readonly dragHandle: HTMLButtonElement;
   /** Null where the page has left the switch off the bar. */
   private readonly theme: HTMLSelectElement | null;
-  /** Null unless the page asked for the program-arguments field. */
-  private readonly args: HTMLInputElement | null = null;
   private readonly fileInput: HTMLInputElement;
   /**
    * What sits between the bar and the editor's text - the task panel, the
@@ -156,11 +145,6 @@ export class ControlBar {
     this.fileInput.addEventListener('change', this.chosen);
 
     this.theme = options.theme === false ? null : this.themeSwitch();
-    const argsField =
-      options.programArgs === true ? this.argsField(options.args ?? '') : null;
-    if (argsField !== null) {
-      this.args = argsField.querySelector('input');
-    }
     this.dragHandle = this.toolbarHandle();
     this.debugToolbar = this.debugGroup();
 
@@ -172,7 +156,6 @@ export class ControlBar {
       this.fileGroup(),
       this.fileInput,
       this.debugToolbar,
-      ...(argsField === null ? [] : [this.divider(), argsField]),
       ...(options.preprocessor === false ? [] : [this.divider(), preprocessed]),
       ...(options.textSize === false ? [] : [this.divider(), this.zoomGroup()]),
       this.divider(),
@@ -349,13 +332,6 @@ export class ControlBar {
   setDark(dark: boolean): void {
     if (this.theme !== null) {
       this.theme.value = dark ? 'dark' : 'light';
-    }
-  }
-
-  /** The program-arguments field's text; ignored where there is no field. */
-  setArgs(text: string): void {
-    if (this.args !== null) {
-      this.args.value = text;
     }
   }
 
@@ -698,30 +674,6 @@ export class ControlBar {
     element.appendChild(iconFor(icon));
     element.addEventListener('click', () => this.options.onZoom?.(command));
     return element;
-  }
-
-  /**
-   * The program's arguments, as a line typed on a command line. What is in
-   * it is read when a run starts, so an edit applies at the next Start or
-   * Run and never to the run under way.
-   */
-  private argsField(text: string): HTMLLabelElement {
-    const field = document.createElement('label');
-    field.className = 'plivet-controls__args';
-    field.title = strings.programArgsHint;
-    const caption = document.createElement('span');
-    caption.className = 'plivet-controls__args-caption';
-    caption.textContent = strings.programArgs;
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.className = 'plivet-controls__args-input';
-    input.value = text;
-    input.spellcheck = false;
-    input.autocomplete = 'off';
-    input.setAttribute('aria-label', strings.programArgsLabel);
-    input.addEventListener('input', () => this.options.onArgs?.(input.value));
-    field.append(caption, input);
-    return field;
   }
 
   private themeSwitch(): HTMLSelectElement {

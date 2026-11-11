@@ -623,7 +623,7 @@ storage, drawn in the data segment as `_argv` (a `char*[argc + 1]`) and
 `_argv_0`, `_argv_1`, ... (one `char` array per argument), which the program
 may read and write as C allows. A `main` declared without parameters ignores
 them. `features.programArgs` (off by default) puts a field holding them in the
-control bar; what the reader types there applies at the next Start or Run,
+header of the Console and Breakpoints dock; what the reader types there applies at the next Start or Run,
 never to a run under way. For a host that drives the interpreter itself,
 `Request.args` carries `argv[1]` onwards with `Start` and `Exec`.
 

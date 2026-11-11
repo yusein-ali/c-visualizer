@@ -1,2 +1,2 @@
 export { DebuggerDock } from './DebuggerDock';
-export type { DebuggerPanel } from './DebuggerDock';
+export type { DebuggerDockOptions, DebuggerPanel } from './DebuggerDock';

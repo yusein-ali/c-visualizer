@@ -404,15 +404,6 @@ export class Plivet {
       build: options.supportBuild === true,
       theme: options.controls?.theme !== false,
       textSize: options.controls?.textSize !== false,
-      programArgs: features.programArgs === true,
-      // The host's own spelling where it wrote a line, so its quoting stays.
-      args:
-        typeof options.args === 'string'
-          ? options.args
-          : joinArgs(this.programArgs),
-      onArgs: (text) => {
-        this.programArgs = splitArgs(text);
-      },
     });
 
     this.editor = new EditorController(this.shell.editor, {
@@ -436,7 +427,17 @@ export class Plivet {
       this.editor.tabBarElement
     );
 
-    this.debugger = new DebuggerDock(this.shell.debugger);
+    this.debugger = new DebuggerDock(this.shell.debugger, {
+      programArgs: features.programArgs === true,
+      // The host's own spelling where it wrote a line, so its quoting stays.
+      args:
+        typeof options.args === 'string'
+          ? options.args
+          : joinArgs(this.programArgs),
+      onArgs: (text) => {
+        this.programArgs = splitArgs(text);
+      },
+    });
     this.breakpointTable = new BreakpointTable(this.debugger.breakpoints, {
       onEnabled: (path, line, enabled) =>
         this.editor.setBreakpointEnabled(path, line, enabled),

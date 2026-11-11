@@ -319,8 +319,8 @@ acosh atanh` and `NAN INFINITY HUGE_VAL isnan isinf isfinite signbit`;
 ### L16 Program arguments
 
 Option `args` (an array of strings, or one string split like a shell line)
-and an optional field in the control bar (feature `programArgs`, default
-off). `int main(int argc, char *argv[])` and `char **argv` receive them:
+and an optional field in the header of the Console and Breakpoints dock
+(feature `programArgs`, default off). `int main(int argc, char *argv[])` and `char **argv` receive them:
 `argv[0]` is the entry file's name without `.c`, the strings live in the
 static area and are drawn there, `argv[argc]` is a null pointer. A `main`
 without parameters ignores them. The configuration element accepts `args`.

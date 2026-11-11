@@ -18,7 +18,7 @@ jest.mock('../src/ui/graph', () => ({
 }));
 
 /**
- * L16 as a host sees it: the `args` option, the control bar's field behind
+ * L16 as a host sees it: the `args` option, the debugger dock's field behind
  * `features.programArgs`, and the arguments that reach the interpreter when
  * a run starts. The client is stubbed, so what is checked is the request.
  */
@@ -52,7 +52,7 @@ const mount = (options: ConstructorParameters<typeof Plivet>[1] = {}) => {
   const send = (command: 'Start' | 'Exec' | 'Step') =>
     (plivet as any).editor.send(command);
   const field = () =>
-    parent.querySelector<HTMLInputElement>('.plivet-controls__args input');
+    parent.querySelector<HTMLInputElement>('.plivet-debugger__args input');
   return { plivet, parent, requests, send, field };
 };
 
