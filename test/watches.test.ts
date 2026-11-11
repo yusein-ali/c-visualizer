@@ -102,3 +102,70 @@ describe('pinned watches', () => {
     expect(record.facts[0].label).toContain('not visible');
   });
 });
+
+describe('the pin on a watch', () => {
+  const at = doc.indexOf('count');
+  const pinned = () =>
+    new EditorView({
+      state: stateWith({ name: 'count', pos: at }),
+      parent: document.body,
+    });
+  const shownIn = (view: EditorView) =>
+    view.state.facet(showTooltip)[0]!.create(view);
+  const pinOf = (dom: HTMLElement) =>
+    dom.querySelector<HTMLButtonElement>('.plivet-watch__pin')!;
+  const press = (button: HTMLElement) =>
+    button.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+
+  it('marks a pinned watch as pinned', () => {
+    const view = pinned();
+    const { dom } = shownIn(view);
+    expect(dom.classList.contains('plivet-watch--latched')).toBe(true);
+    expect(pinOf(dom).getAttribute('aria-pressed')).toBe('true');
+    view.destroy();
+  });
+
+  it('lets the watch go when pressed, and leaves it standing under the pointer', () => {
+    const view = pinned();
+    press(pinOf(shownIn(view).dom));
+    expect(watchNames(view.state)).toEqual([]);
+    expect(tooltipsOf(view.state)).toHaveLength(1);
+    const { dom } = shownIn(view);
+    expect(dom.classList.contains('plivet-watch--latched')).toBe(false);
+    expect(pinOf(dom).getAttribute('aria-pressed')).toBe('false');
+    view.destroy();
+  });
+
+  it('takes a released watch away when the pointer moves off it', () => {
+    const view = pinned();
+    press(pinOf(shownIn(view).dom));
+    // The tooltip the editor itself put on the page, not one made for the
+    // test: it is the one whose leaving is listened for.
+    const standing = view.dom.querySelector<HTMLElement>('.plivet-watch')!;
+    standing.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+    expect(tooltipsOf(view.state)).toHaveLength(1);
+    document.body.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+    expect(tooltipsOf(view.state)).toHaveLength(0);
+    view.destroy();
+  });
+
+  it('pins a released watch again when its pin is pressed', () => {
+    const view = pinned();
+    press(pinOf(shownIn(view).dom));
+    press(pinOf(shownIn(view).dom));
+    expect(watchNames(view.state)).toEqual(['count']);
+    expect(shownIn(view).dom.classList.contains('plivet-watch--latched')).toBe(
+      true
+    );
+    view.destroy();
+  });
+
+  it('removes the watch at once when the pin is pressed from the keyboard', () => {
+    const view = pinned();
+    pinOf(shownIn(view).dom).dispatchEvent(
+      new MouseEvent('click', { bubbles: true, detail: 0 })
+    );
+    expect(tooltipsOf(view.state)).toHaveLength(0);
+    view.destroy();
+  });
+});

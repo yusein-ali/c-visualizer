@@ -535,12 +535,40 @@ export const debugTheme = EditorView.baseTheme({
   },
   // A pinned watch. It is the hover tooltip's twin and deliberately looks
   // like it - the same table saying the same things - with a line down its
-  // left edge to say that this one stays.
+  // left edge and a pin pressed into its corner to say that this one stays.
+  // Let go by its pin it keeps its place and its size, so that it does not
+  // move out from under the pointer, and loses only the colour.
   '.cm-tooltip .plivet-watch': {
     maxWidth: '30em',
     padding: '4px 8px',
     fontSize: '12px',
-    borderLeft: '3px solid var(--plivet-watch-edge, #d9a400)',
+    borderLeft: '3px solid transparent',
+  },
+  '.cm-tooltip .plivet-watch--latched': {
+    borderLeftColor: 'var(--plivet-watch-edge, #d9a400)',
+  },
+  '.plivet-watch__pin': {
+    float: 'right',
+    margin: '-2px -4px 0 8px',
+    padding: '0 3px',
+    font: 'inherit',
+    lineHeight: '1.4',
+    color: 'inherit',
+    background: 'transparent',
+    border: '1px solid transparent',
+    borderRadius: '3px',
+    cursor: 'pointer',
+    opacity: '0.45',
+  },
+  '.plivet-watch__pin[aria-pressed="true"]': {
+    color: 'var(--plivet-watch-edge, #d9a400)',
+    backgroundColor: 'rgba(217, 164, 0, 0.15)',
+    borderColor: 'var(--plivet-watch-edge, #d9a400)',
+    opacity: '1',
+  },
+  '.plivet-watch__pin:hover, .plivet-watch__pin:focus-visible': {
+    opacity: '1',
+    borderColor: 'currentColor',
   },
   '.cm-tooltip:has(.plivet-watch)': {
     backgroundColor: 'var(--plivet-tooltip-bg, #fffbe6)',

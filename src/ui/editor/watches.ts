@@ -1,4 +1,4 @@
-import { MapMode, StateEffect, StateField } from '@codemirror/state';
+import { Facet, MapMode, StateEffect, StateField } from '@codemirror/state';
 import { EditorView, showTooltip, Tooltip } from '@codemirror/view';
 import { HoverRecord, hoverDom } from './tooltip';
 
@@ -15,12 +15,23 @@ import { HoverRecord, hoverDom } from './tooltip';
  * The gesture is alt-click on a name, and alt-click again to take it away.
  * Not a plain click: a plain click is how a reader moves the cursor, and a
  * watch pinned by every cursor move is not a watch window but a mess.
+ *
+ * A pinned tooltip says that it is pinned: it carries a pin in its corner,
+ * pressed in. The pin is also the way out for a reader who never learned the
+ * gesture - pressing it lets the watch go. A watch let go that way does not
+ * vanish from under the pointer that pressed it: it stands, unpinned, for as
+ * long as the pointer stays on it, and pressing the pin again puts it back.
  */
 
 /** A pinned name and where it was pinned, so the tooltip stays with it. */
 export interface Watch {
   name: string;
   pos: number;
+  /**
+   * Let go by its pin, and standing only until the pointer leaves it. It is
+   * no longer a watch for anything that asks which names are pinned.
+   */
+  released?: boolean;
 }
 
 /** What a watch shows: the same record the hover tooltip would have shown. */
@@ -37,6 +48,28 @@ interface WatchState {
 /** Pin a name, or take the pin off it if it is already pinned. */
 export const toggleWatch = StateEffect.define<Watch>();
 
+/**
+ * Let go of a pinned name without taking its tooltip away yet: the pointer
+ * that pressed the pin is still on it.
+ */
+export const releaseWatch = StateEffect.define<string>();
+
+/** Take a name's tooltip away, pinned or let go. */
+export const removeWatch = StateEffect.define<string>();
+
+/**
+ * Who is told when the pins change by hand. The pin on a tooltip has to tell
+ * the same listener the gesture tells, and a tooltip is made by the state,
+ * which has no listener of its own to hand it.
+ */
+const watchChanged = Facet.define<() => void>();
+
+const notify = (view: EditorView): void => {
+  for (const changed of view.state.facet(watchChanged)) {
+    changed();
+  }
+};
+
 /** What the pinned names hold now. Sent at every step. */
 export const setWatchRecords = StateEffect.define<WatchRecord[]>();
 
@@ -51,16 +84,77 @@ const watchTooltip = (watch: Watch, shown: WatchRecord[]): Tooltip => {
     // belongs to, because several of them stand at once and an unattached box
     // is a value with nothing to say which name it is the value of.
     arrow: true,
-    create: () => {
+    create: (view) => {
       const record: HoverRecord =
         typeof found === 'undefined'
           ? { title: watch.name, facts: [] }
           : found.record;
       const dom = hoverDom(record);
+      const released = watch.released === true;
       dom.classList.add('plivet-watch');
-      return { dom };
+      dom.classList.toggle('plivet-watch--latched', !released);
+      dom.prepend(pinButton(view, watch));
+      if (!released) {
+        return { dom };
+      }
+      // A released watch goes when the pointer is no longer on it. The
+      // document is asked rather than the tooltip: the tooltip was rebuilt
+      // under a pointer that has not moved, and one that never entered it
+      // would never be told it left.
+      const leave = (event: MouseEvent) => {
+        const box = dom.closest('.cm-tooltip') ?? dom;
+        if (event.target instanceof Node && box.contains(event.target)) {
+          return;
+        }
+        view.dispatch({ effects: removeWatch.of(watch.name) });
+      };
+      const doc = view.dom.ownerDocument;
+      doc.addEventListener('mousemove', leave);
+      return {
+        dom,
+        destroy: () => doc.removeEventListener('mousemove', leave),
+      };
     },
   };
+};
+
+/**
+ * The pin in a watch's corner: pressed in while the watch is pinned, and the
+ * button that lets it go.
+ */
+const pinButton = (view: EditorView, watch: Watch): HTMLButtonElement => {
+  const released = watch.released === true;
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'plivet-watch__pin';
+  button.setAttribute('aria-pressed', released ? 'false' : 'true');
+  const label = released
+    ? `Pin ${watch.name} again`
+    : `Pinned - click to unpin ${watch.name}`;
+  button.title = label;
+  button.setAttribute('aria-label', label);
+  button.textContent = '\u{1F4CC}\uFE0E';
+  // The press must not take the focus out of the editor, nor reach it as a
+  // click on the text under the tooltip.
+  button.addEventListener('mousedown', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+  });
+  button.addEventListener('click', (event) => {
+    event.preventDefault();
+    if (released) {
+      view.dispatch({
+        effects: toggleWatch.of({ name: watch.name, pos: watch.pos }),
+      });
+    } else {
+      // A press from the keyboard has no pointer resting on the tooltip to
+      // wait for, so there the watch simply goes.
+      const effect = event.detail === 0 ? removeWatch : releaseWatch;
+      view.dispatch({ effects: effect.of(watch.name) });
+    }
+    notify(view);
+  });
+  return button;
 };
 
 export const watchField = StateField.define<WatchState>({
@@ -89,10 +183,32 @@ export const watchField = StateField.define<WatchState>({
     for (const effect of transaction.effects) {
       if (effect.is(toggleWatch)) {
         const wanted = effect.value;
-        const already = pins.some((watch) => watch.name === wanted.name);
-        pins = already
-          ? pins.filter((watch) => watch.name !== wanted.name)
-          : pins.concat(wanted);
+        const already = pins.find((watch) => watch.name === wanted.name);
+        if (typeof already === 'undefined') {
+          pins = pins.concat({ name: wanted.name, pos: wanted.pos });
+        } else if (already.released === true) {
+          // Asked for again while it lingers: it is pinned again, where it
+          // stands.
+          pins = pins.map((watch) =>
+            watch === already ? { name: watch.name, pos: watch.pos } : watch
+          );
+        } else {
+          pins = pins.filter((watch) => watch !== already);
+        }
+      }
+      if (effect.is(releaseWatch)) {
+        const name = effect.value;
+        pins = pins.map((watch) =>
+          watch.name === name && watch.released !== true
+            ? { ...watch, released: true }
+            : watch
+        );
+      }
+      if (effect.is(removeWatch)) {
+        const name = effect.value;
+        if (pins.some((watch) => watch.name === name)) {
+          pins = pins.filter((watch) => watch.name !== name);
+        }
       }
       if (effect.is(setWatchRecords)) {
         shown = effect.value;
@@ -111,7 +227,13 @@ export const watchField = StateField.define<WatchState>({
 
 /** The names pinned at the moment, for whoever has to find their values. */
 export const watchNames = (state: EditorView['state']): string[] =>
-  state.field(watchField, false)?.pins.map((watch) => watch.name) ?? [];
+  pinnedWatches(state).map((watch) => watch.name);
+
+/** The watches that are pinned, without the ones let go and still standing. */
+export const pinnedWatches = (state: EditorView['state']): Watch[] =>
+  (state.field(watchField, false)?.pins ?? []).filter(
+    (watch) => watch.released !== true
+  );
 
 export const showWatchRecords = (
   view: EditorView,
@@ -125,7 +247,8 @@ export const showWatchRecords = (
  * answers `true` only when it has done something, so an alt-click anywhere
  * else is still the editor's own.
  */
-export const watchGesture = (onChange: () => void) =>
+export const watchGesture = (onChange: () => void) => [
+  watchChanged.of(onChange),
   EditorView.domEventHandlers({
     mousedown(event: MouseEvent, view: EditorView) {
       if (!event.altKey) {
@@ -149,4 +272,5 @@ export const watchGesture = (onChange: () => void) =>
       onChange();
       return true;
     },
-  });
+  }),
+];

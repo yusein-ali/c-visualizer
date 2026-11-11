@@ -100,6 +100,8 @@ export { excludedRegionFolding } from './folding';
 export { insertNewlineKeepingLineStart, newlineKeymap } from './newline';
 export { expansionListField } from './expansions';
 export {
+  releaseWatch,
+  removeWatch,
   setWatchRecords,
   toggleWatch,
   watchField,

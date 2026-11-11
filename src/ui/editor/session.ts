@@ -6,7 +6,7 @@ import {
   breakpointStates,
 } from './breakpoints';
 import { unprotected } from './protected';
-import { toggleWatch, watchField } from './watches';
+import { pinnedWatches, removeWatch, toggleWatch, watchField } from './watches';
 
 /**
  * A session, as plain JSON: the program, where the cursor is, which lines are
@@ -97,7 +97,7 @@ export const sessionOf = (state: EditorState): DocumentSessionJSON => ({
   disabledBreakpoints: breakpointStates(state)
     .filter((breakpoint) => !breakpoint.enabled)
     .map((breakpoint) => breakpoint.row),
-  watches: (state.field(watchField, false)?.pins ?? []).map((watch) => ({
+  watches: pinnedWatches(state).map((watch) => ({
     name: watch.name,
     pos: watch.pos,
   })),
@@ -296,10 +296,10 @@ export const restoreSession = (
   ]);
   // Every pin is dropped before the saved ones go on, so restoring twice
   // leaves one set of watches rather than none.
-  for (const name of (
+  for (const watch of (
     view.state.field(watchField, false)?.pins ?? []
   ).slice()) {
-    view.dispatch({ effects: toggleWatch.of(name) });
+    view.dispatch({ effects: removeWatch.of(watch.name) });
   }
   for (const watch of session.watches) {
     if (
