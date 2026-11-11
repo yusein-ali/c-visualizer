@@ -1,0 +1,35 @@
+/*
+ * The program's arguments: a caption and a line typed as on a command line,
+ * in a row of its own between the task panel and the editor's tabs. The line
+ * takes the room the caption leaves, up to a width a long line reads well in.
+ */
+
+.plivet-args {
+	display: flex;
+	align-items: center;
+	gap: 0.35rem;
+	min-width: 0;
+	margin: 0;
+	padding: 4px 5px;
+	font-size: 14px;
+	font-weight: inherit;
+}
+
+.plivet-args__caption {
+	flex: none;
+}
+
+.plivet-args__input {
+	flex: 1 1 auto;
+	width: 100%;
+	min-width: 0;
+	max-width: 32rem;
+	min-height: 26px;
+	padding: 0 0.4rem;
+	border: 1px solid var(--plivet-line, var(--bs-border-color, #999));
+	border-radius: 0.25rem;
+	background: var(--plivet-button-bg, #f6f6f6);
+	color: var(--plivet-button-color, #333333);
+	font-family: Consolas, 'Courier New', monospace;
+	font-size: inherit;
+}

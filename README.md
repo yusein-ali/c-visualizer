@@ -622,8 +622,8 @@ null pointer, and the strings and the array of pointers are objects of static
 storage, drawn in the data segment as `_argv` (a `char*[argc + 1]`) and
 `_argv_0`, `_argv_1`, ... (one `char` array per argument), which the program
 may read and write as C allows. A `main` declared without parameters ignores
-them. `features.programArgs` (off by default) puts a field holding them in the
-header of the Console and Breakpoints dock; what the reader types there applies at the next Start or Run,
+them. `features.programArgs` (off by default) puts a field holding them right
+above the editor, below the task panel; what the reader types there applies at the next Start or Run,
 never to a run under way. For a host that drives the interpreter itself,
 `Request.args` carries `argv[1]` onwards with `Start` and `Exec`.
 

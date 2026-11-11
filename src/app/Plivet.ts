@@ -33,6 +33,7 @@ import type {
   RunStatus,
 } from '../ui/graph';
 import { FilePanel, download } from '../ui/files';
+import { ProgramArgsField } from '../ui/args';
 import { DescriptionPanel } from '../ui/description';
 import { HowToDialog } from '../ui/help';
 import type { PreprocessedDialog } from '../ui/preprocessed';
@@ -325,6 +326,8 @@ export class Plivet {
   private readonly files: FilePanel | null;
   /** Always built; hidden while there is no task to show. */
   private readonly description: DescriptionPanel;
+  /** Null unless the page asked for the program-arguments field. */
+  private readonly args: ProgramArgsField | null;
   private readonly help: HowToDialog;
   /** The browsing context this instance belongs to, if it has one. */
   private readonly lifecycleWindow: Window | null;
@@ -421,23 +424,29 @@ export class Plivet {
       onLoadRefused: options.onLoadRefused,
       programArgs: () => this.programArgs,
     });
-    // The toolbar opens over the code, below the task panel and the tabs.
+    this.args =
+      features.programArgs === true
+        ? new ProgramArgsField(this.shell.args, {
+            // The host's own spelling where it wrote a line, so its quoting
+            // stays.
+            args:
+              typeof options.args === 'string'
+                ? options.args
+                : joinArgs(this.programArgs),
+            onArgs: (text) => {
+              this.programArgs = splitArgs(text);
+            },
+          })
+        : null;
+    // The toolbar opens over the code, below the task panel, the arguments
+    // and the tabs.
     this.controls.setDebugToolbarTabs(
       this.shell.description,
+      this.shell.args,
       this.editor.tabBarElement
     );
 
-    this.debugger = new DebuggerDock(this.shell.debugger, {
-      programArgs: features.programArgs === true,
-      // The host's own spelling where it wrote a line, so its quoting stays.
-      args:
-        typeof options.args === 'string'
-          ? options.args
-          : joinArgs(this.programArgs),
-      onArgs: (text) => {
-        this.programArgs = splitArgs(text);
-      },
-    });
+    this.debugger = new DebuggerDock(this.shell.debugger);
     this.breakpointTable = new BreakpointTable(this.debugger.breakpoints, {
       onEnabled: (path, line, enabled) =>
         this.editor.setBreakpointEnabled(path, line, enabled),
@@ -773,6 +782,7 @@ export class Plivet {
     this.preprocessed?.destroy();
     this.files?.destroy();
     this.description.destroy();
+    this.args?.destroy();
     this.graph.destroy();
     this.console.destroy();
     this.breakpointTable.destroy();

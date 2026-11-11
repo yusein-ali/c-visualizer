@@ -126,6 +126,8 @@ export class PlivetShell {
   readonly controls: HTMLDivElement;
   /** The task the host describes, between the controls and the editor. */
   readonly description: HTMLDivElement;
+  /** The program's arguments, between the task and the editor. */
+  readonly args: HTMLDivElement;
   readonly editor: HTMLDivElement;
   readonly files: HTMLDivElement;
   /** The right-hand column: the visualization. */
@@ -158,6 +160,8 @@ export class PlivetShell {
     this.controls.className = 'plivet__controls';
     this.description = document.createElement('div');
     this.description.className = 'plivet__description';
+    this.args = document.createElement('div');
+    this.args.className = 'plivet__args';
     this.editor = document.createElement('div');
     this.editor.className = 'plivet__editor';
     this.debugger = document.createElement('div');
@@ -175,6 +179,7 @@ export class PlivetShell {
     this.side.append(
       this.controls,
       this.description,
+      this.args,
       this.editor,
       editorSplit.element,
       this.debugger,

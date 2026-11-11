@@ -121,9 +121,15 @@ describe('the description option', () => {
     expect(boxes.indexOf('plivet__description')).toBe(
       boxes.indexOf('plivet__controls') + 1
     );
-    expect(boxes.indexOf('plivet__editor')).toBe(
+    // The program's arguments, when the page asks for them, come between
+    // the task and the editor; without them their box is empty.
+    expect(boxes.indexOf('plivet__args')).toBe(
       boxes.indexOf('plivet__description') + 1
     );
+    expect(boxes.indexOf('plivet__editor')).toBe(
+      boxes.indexOf('plivet__args') + 1
+    );
+    expect(side.querySelector('.plivet__args')!.children).toHaveLength(0);
     const panel = parent.querySelector<HTMLDetailsElement>(
       '.plivet__description > .plivet-description'
     )!;

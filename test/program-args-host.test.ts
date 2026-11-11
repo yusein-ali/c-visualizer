@@ -18,7 +18,7 @@ jest.mock('../src/ui/graph', () => ({
 }));
 
 /**
- * L16 as a host sees it: the `args` option, the debugger dock's field behind
+ * L16 as a host sees it: the `args` option, the field above the editor behind
  * `features.programArgs`, and the arguments that reach the interpreter when
  * a run starts. The client is stubbed, so what is checked is the request.
  */
@@ -52,7 +52,7 @@ const mount = (options: ConstructorParameters<typeof Plivet>[1] = {}) => {
   const send = (command: 'Start' | 'Exec' | 'Step') =>
     (plivet as any).editor.send(command);
   const field = () =>
-    parent.querySelector<HTMLInputElement>('.plivet-debugger__args input');
+    parent.querySelector<HTMLInputElement>('.plivet-args input');
   return { plivet, parent, requests, send, field };
 };
 
@@ -115,6 +115,24 @@ describe('program arguments in an instance', () => {
       undefined,
       ['second', 'two words'],
     ]);
+  });
+
+  it('puts the field below the task panel and above the editor', () => {
+    const { parent, field } = mount({
+      args: 'one',
+      description: '<p>Print the arguments.</p>',
+      features: { programArgs: true },
+    });
+    const input = field()!;
+    const slot = input.closest('.plivet__args')!;
+    expect(slot).not.toBeNull();
+    expect(slot.previousElementSibling!.classList).toContain(
+      'plivet__description'
+    );
+    expect(slot.nextElementSibling!.classList).toContain('plivet__editor');
+    expect(input.closest('.plivet__controls')).toBeNull();
+    expect(input.closest('.plivet__debugger')).toBeNull();
+    expect(parent.querySelectorAll('.plivet-args')).toHaveLength(1);
   });
 
   it('fills the field from an array, quoting what needs it', () => {

@@ -13,63 +13,17 @@
 	box-sizing: inherit;
 }
 
-/* The tabs and, where the page asked for it, the program's arguments. */
-.plivet-debugger__header {
+.plivet-debugger__tabs {
 	display: flex;
-	flex-wrap: wrap;
 	align-items: center;
-	gap: 2px 0.75rem;
+	gap: 2px;
 	min-height: 34px;
 	padding: 2px 5px;
 	border-bottom: 1px solid var(--plivet-line, var(--bs-border-color, #999));
 }
 
-.plivet-debugger--collapsed .plivet-debugger__header {
+.plivet-debugger--collapsed .plivet-debugger__tabs {
 	border-bottom: 0;
-}
-
-.plivet-debugger__tabs {
-	display: flex;
-	flex: none;
-	align-items: center;
-	gap: 2px;
-}
-
-/*
- * The program's arguments: a caption and a line typed as on a command line,
- * taking the room the tabs leave so a long line can be read whole. In a pane
- * too narrow to hold both, the field goes to a row of its own below the tabs.
- */
-.plivet-debugger__args {
-	display: flex;
-	flex: 1 1 14rem;
-	align-items: center;
-	gap: 0.35rem;
-	min-width: 0;
-	margin: 0;
-	font-weight: inherit;
-}
-
-/* Quieter than a tab's label, so it is not taken for a third tab. */
-.plivet-debugger__args-caption {
-	flex: none;
-	font-size: 0.9em;
-	opacity: 0.75;
-}
-
-.plivet-debugger__args-input {
-	flex: 1 1 auto;
-	width: 100%;
-	min-width: 0;
-	max-width: 32rem;
-	min-height: 26px;
-	padding: 0 0.4rem;
-	border: 1px solid var(--plivet-line, var(--bs-border-color, #999));
-	border-radius: 0.25rem;
-	background: var(--plivet-button-bg, #f6f6f6);
-	color: var(--plivet-button-color, #333333);
-	font-family: Consolas, 'Courier New', monospace;
-	font-size: inherit;
 }
 
 .plivet-debugger__tab {

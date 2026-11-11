@@ -151,6 +151,11 @@
 	min-width: 0;
 }
 
+/* Empty, and so no height, unless the page asked for the arguments field. */
+.plivet__args {
+	min-width: 0;
+}
+
 /*
  * The handles between the boxes.
  *
