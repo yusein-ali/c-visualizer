@@ -209,6 +209,17 @@
 	font-style: italic;
 }
 
+/*
+ * The hint is not input, so it never scrolls: the field does not wrap, and a
+ * hint wider than the field would otherwise give it a horizontal scrollbar,
+ * drawn inside its one line, over the hint itself. A narrow field cuts the
+ * hint short instead; the EOF button's title says the rest.
+ */
+.plivet-console-input:placeholder-shown {
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
 .plivet-console-input:disabled {
 	color: inherit;
 	opacity: 1;

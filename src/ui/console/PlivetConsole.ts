@@ -280,7 +280,12 @@ export class PlivetConsole {
     this.field.style.height = 'auto';
     const height = this.field.scrollHeight;
     if (0 < height) {
-      this.field.style.height = `${height}px`;
+      // A typed line wider than the field scrolls sideways, and a classic
+      // scrollbar takes its room from inside the box: add that room, so the
+      // scrollbar sits below the line instead of over it. Overlay scrollbars
+      // take none, and the difference is then 0.
+      const scrollbar = this.field.offsetHeight - this.field.clientHeight;
+      this.field.style.height = `${height + Math.max(0, scrollbar)}px`;
     }
   };
 
