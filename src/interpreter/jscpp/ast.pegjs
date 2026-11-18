@@ -89,8 +89,12 @@ TypedefDeclaration
     }
     ;
 
+// PLIVET: upstream allowed one `*` before the name (`STAR?`), so a function
+// returning a pointer to a pointer - `char **split(...)`, `int **f(void)` -
+// was a syntax error and the program never started. A declarator's
+// `Pointer` takes any number of stars, each with its qualifiers.
 FunctionDefinition
-    = a:DeclarationSpecifiers b_pointer:STAR? b:FunctionDirectDeclarator c:(SEMI {return null;} / CompoundStatement) {
+    = a:DeclarationSpecifiers b_pointer:Pointer? b:FunctionDirectDeclarator c:(SEMI {return null;} / CompoundStatement) {
       b.Pointer = b_pointer;
       return addPositionInfo({type:'FunctionDefinition', DeclarationSpecifiers:a, Declarator:b, CompoundStatement:c});
     }

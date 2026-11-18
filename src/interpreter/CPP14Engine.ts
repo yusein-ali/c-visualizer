@@ -80,7 +80,7 @@ import {
   installLibrary,
 } from './library';
 import { ASSERT_FILE } from './library/assert';
-import { Memory } from './library/memory';
+import { Memory, decodeValue } from './library/memory';
 import { mainParameterNames, storeProgramArguments } from './ProgramArguments';
 import {
   installLibraryTypedefs,
@@ -675,6 +675,13 @@ export class PlivetCPP14Engine extends CPP14Engine {
   /** Where each function was filed on the code segment, both ways round. */
   private readonly functionAddresses = new Map<string, number>();
   private readonly functionsByAddress = new Map<number, UniFunctionDec>();
+  /**
+   * The heap blocks `free` has given back in this run. The stock `free` keeps
+   * every block's size in `mallocData` after freeing it, so a second `free`
+   * of the same block, or of an address that never began one, ran on
+   * silently; glibc stops the program at either.
+   */
+  private readonly freedBlocks = new Set<number>();
   /**
    * What each heap block was asked for: its size in bytes, and whether
    * `calloc` zeroed it. See `layOutHeapRecords`.
@@ -1339,7 +1346,9 @@ export class PlivetCPP14Engine extends CPP14Engine {
   private staticTypeOf(expr: unknown, scope: Scope): string | null {
     if (expr instanceof UniIdent) {
       const name = expr.name;
-      const declared = scope.hasType(name) ? scope.getType(name) : null;
+      const declared = scope.hasType(name)
+        ? scope.getType(name)
+        : this.typeBeingDeclared(name);
       if (declared === 'SYSTEM') {
         const value = scope.get(name);
         return value instanceof Int ? 'int' : 'double';
@@ -1677,6 +1686,7 @@ export class PlivetCPP14Engine extends CPP14Engine {
     this.pendingVarargs = null;
     this.variadicFrames.length = 0;
     this.heapRequests.clear();
+    this.freedBlocks.clear();
     this.recordBlocks.clear();
     this.blockStatics.clear();
     this.blockStaticSites = this.blockStaticDeclarationsIn(dec);
@@ -2959,8 +2969,42 @@ export class PlivetCPP14Engine extends CPP14Engine {
     }
   }
 
-  /** Allocates record arrays and retains declaration metadata. */
+  /**
+   * The declarations being executed, innermost last. A declarator's scope
+   * begins where the declarator ends, before its initializer, so
+   * `int *a = malloc(3 * sizeof *a)` measures the `a` it declares; `sizeof`
+   * does not evaluate its operand, and `staticTypeOf` finds the name here
+   * while the declaration's scope does not have it yet.
+   */
+  private readonly declaring: UniVariableDec[] = [];
+
   protected *execVariableDec(decVar: UniVariableDec, scope: Scope): any {
+    this.declaring.push(decVar);
+    try {
+      return yield* this.declareVariables(decVar, scope);
+    } finally {
+      this.declaring.pop();
+    }
+  }
+
+  /** The type a name has in a declaration still being executed, or null. */
+  private typeBeingDeclared(name: string): string | null {
+    for (let index = this.declaring.length - 1; index >= 0; index -= 1) {
+      const decVar = this.declaring[index];
+      for (const def of decVar.variables) {
+        if (declaredName(def.name) === name) {
+          // Upstream moves a declarator's stars onto the type when it first
+          // runs the declaration, before the initializer; whatever is still
+          // on the name is added here.
+          return `${decVar.type}${/^\**/.exec(def.name)![0]}`;
+        }
+      }
+    }
+    return null;
+  }
+
+  /** Allocates record arrays and retains declaration metadata. */
+  private *declareVariables(decVar: UniVariableDec, scope: Scope): any {
     // Every declaration reaches here, so this is the earliest and only hook
     // needed to keep hold of the scope the functions were filed in.
     this.globalScope = scope.global;
@@ -3330,12 +3374,13 @@ export class PlivetCPP14Engine extends CPP14Engine {
     }
     const block = Number(scope.objectOnMemory.get(address)?.valueOf());
     const pointee = scope.getTypedef(type.slice(0, -1).trim());
-    if (
-      !Number.isFinite(block) ||
-      !scope.isMallocArea(block) ||
-      pointee.indexOf('*') !== -1 ||
-      !scope.isStructType(pointee)
-    ) {
+    if (!Number.isFinite(block) || !scope.isMallocArea(block)) {
+      return;
+    }
+    if (pointee.indexOf('*') !== -1 || !scope.isStructType(pointee)) {
+      // A pointer to a scalar or to a pointer: `char *s = malloc(n)` and
+      // `char **titles = malloc(n * sizeof(char *))`.
+      this.layOutHeapScalars(pointee, block, scope);
       return;
     }
     const layout = scope.get(pointee);
@@ -3446,6 +3491,110 @@ export class PlivetCPP14Engine extends CPP14Engine {
     this.recordBlocks.set(block, { type: name, count });
     scope.setMallocSize(block, bytes + Engine.structInfoSize);
     return descriptors;
+  }
+
+  /**
+   * A heap block a pointer to a scalar or to a pointer has taken, cut into
+   * the cells that pointer reads: `char *s; s = malloc(6);` gives six `char`,
+   * `w[i] = malloc(4)` four, `char **titles = malloc(n * sizeof(char *))` n
+   * pointers.
+   *
+   * The stock `malloc` carves its cells by `Engine.lastSizeOf`, the type of
+   * the last `sizeof` evaluated or of the declaration being initialized, and
+   * an assignment sets neither before its right-hand side runs. A block that
+   * `p = malloc(4)` or `w[0] = malloc(4)` hands to a `char *` was carved as
+   * one word, so `p[1]` named no cell ("could not be executed") and `strcpy`
+   * kept its first character only; `sizeof(char *)` was taken for `char`, so
+   * an array of pointers on the heap had a cell per byte. The stock retyping
+   * that follows stamps the pointee's type every so many bytes but makes no
+   * cell where there was none.
+   *
+   * Only a block nothing has written yet is cut again - every cell still
+   * uninitialized, or zero from `calloc` - so a pointer of another type taking
+   * a block that holds values (`(char *)ints`) leaves those values alone. A
+   * block already cut this way is left as it is.
+   */
+  private layOutHeapScalars(type: string, block: number, scope: Scope): void {
+    const pointee = scope.getTypedef(type.trim()).trim();
+    if (
+      pointee === '' ||
+      pointee === 'void' ||
+      isFunctionPointerType(pointee) ||
+      scope.isStructType(pointee) ||
+      this.tableFor(pointee) !== null ||
+      !scope.isMallocArea(block) ||
+      this.recordBlocks.has(block) ||
+      // A freed block - by `free`, or by a `realloc` that moved it - has no
+      // cells left, and a stale pointer taking it must not bring them back.
+      this.freedBlocks.has(block) ||
+      !scope.objectOnMemory.has(block)
+    ) {
+      return;
+    }
+    const size = this.sizeOfType(pointee, scope);
+    if (size === null || !(size > 0)) {
+      return;
+    }
+    const requested = this.heapRequests.get(block);
+    const bytes =
+      typeof requested === 'undefined'
+        ? scope.getMallocSize(block)
+        : requested.bytes;
+    const limit = this.heapLimitOf(block, scope);
+    const held: number[] = [];
+    for (let address = block; address < limit; address += 1) {
+      if (scope.objectOnMemory.has(address)) {
+        held.push(address);
+      }
+    }
+    let count = Math.floor(bytes / size);
+    const fits = held.length === count;
+    if (
+      fits &&
+      held.every(
+        (address, index) =>
+          address === block + index * size &&
+          scope.getTypedef(scope.typeOnMemory.get(address) ?? '').trim() ===
+            pointee
+      )
+    ) {
+      return;
+    }
+    const zeroed = requested?.zeroed === true;
+    const fresh = held.every((address) => {
+      const value = scope.objectOnMemory.get(address);
+      if (value === null || typeof value === 'undefined') {
+        return true;
+      }
+      return zeroed && Number((value as any)?.valueOf?.() ?? value) === 0;
+    });
+    if (!fresh) {
+      return;
+    }
+    if (block + count * size > limit) {
+      if (limit === scope.address.heapAddress) {
+        scope.address.heapAddress = block + count * size;
+      } else {
+        count = Math.floor((limit - block) / size);
+      }
+    }
+    for (
+      let address = block;
+      address < Math.max(limit, block + count * size);
+      address += 1
+    ) {
+      scope.objectOnMemory.delete(address);
+      scope.typeOnMemory.delete(address);
+    }
+    for (let index = 0; index < count; index += 1) {
+      const address = block + index * size;
+      scope.typeOnMemory.set(address, pointee);
+      scope.objectOnMemory.set(
+        address,
+        zeroed ? decodeValue(new Array(size).fill(0), pointee) : null
+      );
+    }
+    scope.setMallocSize(block, bytes);
   }
 
   /** One record of a heap block; see `layOutHeapRecords`. */
@@ -4141,11 +4290,9 @@ export class PlivetCPP14Engine extends CPP14Engine {
     if (type.endsWith('*')) {
       const block = Number(result?.valueOf?.() ?? result);
       if (Number.isFinite(block) && scope.isMallocArea(block)) {
-        this.layOutHeapRecords(
-          scope.getTypedef(type.slice(0, -1).trim()),
-          block,
-          scope
-        );
+        const pointee = scope.getTypedef(type.slice(0, -1).trim());
+        this.layOutHeapRecords(pointee, block, scope);
+        this.layOutHeapScalars(pointee, block, scope);
       }
     }
     this.constructs.assigned(this.valueAt(address, scope), pointer);
@@ -4287,6 +4434,7 @@ export class PlivetCPP14Engine extends CPP14Engine {
     }
     const requests = this.heapRequests;
     const records = this.recordBlocks;
+    const freed = this.freedBlocks;
     const calls = this.calls;
     // A `function` rather than an arrow, for the reason `includeStdio` gives.
     const wrapped = function (this: unknown, ...args: any[]) {
@@ -4339,6 +4487,7 @@ export class PlivetCPP14Engine extends CPP14Engine {
         zeroed: caller instanceof UniIdent && caller.name === 'calloc',
       });
       records.delete(block);
+      freed.delete(block);
       return block;
     };
     global.setTop('malloc', wrapped, 'FUNCTION');
@@ -4346,12 +4495,40 @@ export class PlivetCPP14Engine extends CPP14Engine {
     // records spans a descriptor word more per record than that.
     const release = global.get('free');
     const limitOf = (block: number): number => this.heapLimitOf(block, global);
+    const refuse = (rule: string, message: string): never =>
+      this.refuse(rule, message);
     if (typeof release === 'function') {
       global.setTop(
         'free',
         function (this: unknown, ...args: any[]) {
-          const result = release.apply(this, args);
           const block = Number(args[0]?.valueOf?.() ?? args[0]);
+          if (block === 0) {
+            // `free(NULL)` does nothing.
+            return undefined;
+          }
+          // A block `realloc` moved away was freed by it, and has no cells
+          // left; a block of no bytes never had any.
+          const gone =
+            global.isMallocArea(block) &&
+            !global.objectOnMemory.has(block) &&
+            (requests.get(block)?.bytes ?? 1) > 0;
+          if (freed.has(block) || gone) {
+            refuse(
+              'double-free',
+              'free(): double free detected: this block was already freed. ' +
+                'Free each block once, and set the pointer to NULL after it'
+            );
+          }
+          if (!global.isMallocArea(block)) {
+            refuse(
+              'invalid-free',
+              'free(): invalid pointer: free takes only an address that ' +
+                'malloc, calloc or realloc returned, not one inside a block ' +
+                'or of a variable'
+            );
+          }
+          const result = release.apply(this, args);
+          freed.add(block);
           if (records.has(block)) {
             records.delete(block);
             const end = limitOf(block);

@@ -1223,7 +1223,7 @@ module.exports = (function() {
       s0 = peg$currPos;
       s1 = peg$parseDeclarationSpecifiers();
       if (s1 !== peg$FAILED) {
-        s2 = peg$parseSTAR();
+        s2 = peg$parsePointer();
         if (s2 === peg$FAILED) {
           s2 = null;
         }
