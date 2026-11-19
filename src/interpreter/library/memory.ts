@@ -1,6 +1,7 @@
 import { Int } from 'unicoen.ts/dist/interpreter/CPP14/Int';
 import { Engine } from 'unicoen.ts/dist/interpreter/Engine/Engine';
 import { Scope } from 'unicoen.ts/dist/interpreter/Engine/Scope';
+import { canonicalType, integerTypeInfo } from '../ExpressionTypes';
 import { LibraryHost } from './host';
 
 /**
@@ -94,7 +95,17 @@ export function encodeValue(
   return Array.from({ length: size }, (_, i) => view.getUint8(i));
 }
 
-/** The value a cell of a type holds when its bytes are these. */
+/**
+ * The value a cell of a type holds when its bytes are these, kept as the
+ * engine keeps a value of that type: an integer as an `Int` while it fits 32
+ * bits, a floating value, an address and a character as plain numbers.
+ *
+ * The type is read off its spelling, so it comes with its typedef names
+ * resolved (`LibraryHost.valueType`). An unsigned type's bytes are its value
+ * as they stand: `memset` of 0xff over an `unsigned short` made it -1, which
+ * `printf("%u")` showed as 4294967295, and an integer wider than 32 bits was
+ * cut to them by `Int`.
+ */
 export function decodeValue(bytes: (number | null)[], type: string): unknown {
   if (bytes.some((byte) => byte === null)) {
     return null;
@@ -106,11 +117,26 @@ export function decodeValue(bytes: (number | null)[], type: string): unknown {
     return size === 8 ? view.getFloat64(0, true) : view.getFloat32(0, true);
   }
   const whole = view.getBigUint64(0, true);
-  if (type.indexOf('*') !== -1 || size === 1) {
-    // An address, or a char: the engine keeps both as plain numbers.
+  if (type.indexOf('*') !== -1) {
+    // An address: the engine keeps one as a plain number.
     return Number(whole);
   }
-  return new Int(Number(BigInt.asIntN(size * 8, whole)));
+  const canonical = canonicalType(type);
+  const integer = integerTypeInfo(canonical);
+  if (size === 1) {
+    // A character, a plain number too. A `signed char` is negative past
+    // 127, as an assignment stores one; a plain `char` keeps its byte as it
+    // is, as the engine keeps the characters of a string.
+    return integer?.signed === true && canonical !== 'char'
+      ? Number(BigInt.asIntN(8, whole))
+      : Number(whole);
+  }
+  const value = Number(
+    integer?.signed === false
+      ? BigInt.asUintN(size * 8, whole)
+      : BigInt.asIntN(size * 8, whole)
+  );
+  return value >= -2147483648 && value <= 2147483647 ? new Int(value) : value;
 }
 
 /** One object: a variable, an allocated block, or a string literal. */
@@ -212,7 +238,11 @@ export class Memory {
       return undefined;
     }
     const value = this.scope.objectOnMemory.get(cell.start);
-    return encodeValue(value, cell.type, cell.size)[address - cell.start];
+    return encodeValue(
+      value,
+      this.host.valueType(cell.type, cell.start),
+      cell.size
+    )[address - cell.start];
   }
 
   /** The object an address points into, or null when it points nowhere. */
@@ -480,7 +510,11 @@ export class Memory {
       if (typeof entry === 'undefined') {
         // A byte the cell never held stays indeterminate unless this write
         // supplies it: half of an uninitialised `int` is still garbage.
-        const held = encodeValue(memory.get(cell.start), cell.type, cell.size);
+        const held = encodeValue(
+          memory.get(cell.start),
+          this.host.valueType(cell.type, cell.start),
+          cell.size
+        );
         entry = { cell, bytes: held };
         touched.set(cell.start, entry);
       }
@@ -489,7 +523,11 @@ export class Memory {
         byte === null ? null : byte & 0xff;
     }
     for (const { cell, bytes: cellBytes } of touched.values()) {
-      this.host.write(cell.start, decodeValue(cellBytes, cell.type), fn);
+      this.host.write(
+        cell.start,
+        decodeValue(cellBytes, this.host.valueType(cell.type, cell.start)),
+        fn
+      );
     }
   }
 

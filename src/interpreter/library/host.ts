@@ -55,6 +55,15 @@ export interface LibraryHost {
   truthy(value: unknown): boolean;
   getErrno(): number;
   setErrno(value: number): void;
+  /**
+   * A cell's type as C spells it, typedef names resolved - the program's,
+   * the library's - so its bytes can be read off the spelling: `real` is
+   * `double`, `uint16_t` is `unsigned short`, `unsignedchar` is `unsigned
+   * char`. Given the cell's address, a `signed char` the engine holds as a
+   * `char` is a `signed char`. A name that is not a scalar type comes back
+   * as it is.
+   */
+  valueType(type: string, address?: number): string;
   /** Whether a type names a structure or union the engine lays out. */
   isRecordType(type: string): boolean;
   /** `sizeof` of a record, as the program sees it. */

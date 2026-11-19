@@ -715,14 +715,55 @@ export class PlivetCPP14Engine extends CPP14Engine {
    * Upstream knows only one-word types and gives every one it does not
    * recognise four bytes, which is what `long long` became when the rewrite
    * wrote it as one word. The same function every time, so a second instance
-   * replaces it with itself.
+   * replaces it with itself, and never the engine it answers for
+   * (`executing`).
    */
   constructor() {
     super();
-    Engine.sizeof = basicSizeof;
-    Scope.sizeof = basicSizeof;
-    Variable.sizeof = basicSizeof;
+    Engine.sizeof = PlivetCPP14Engine.programSizeof;
+    Scope.sizeof = PlivetCPP14Engine.programSizeof;
+    Variable.sizeof = PlivetCPP14Engine.programSizeof;
   }
+
+  /**
+   * The engine whose program is executing a step, for the class-level
+   * `sizeof`: it is handed a type's spelling and nothing else, so it asks
+   * this engine for its program's typedef names (`engineWidthOf`), and with
+   * none executing it is `basicSizeof`. Bound for each step and restored
+   * after it (`stepExecute`), so an engine made in the meantime - the one
+   * `libraryFunctionNames` reads the library from, a syntax check's - and
+   * two runs stepped in turn each size with their own names.
+   *
+   * State of the class rather than of an instance, which `AGENTS.md` rules
+   * out for anything a page's visualizers could share. They share none of
+   * this: each spawns a Worker of its own (`spawnWorker`, in
+   * `core/client.ts`), and the Worker runs one interpreter, so the binding
+   * never reaches another visualizer.
+   */
+  private static executing: PlivetCPP14Engine | null = null;
+
+  private static readonly programSizeof = (type: string): number =>
+    PlivetCPP14Engine.executing === null
+      ? basicSizeof(type)
+      : PlivetCPP14Engine.executing.engineWidthOf(type);
+
+  /**
+   * The program's typedef names of scalar and pointer types, each to the
+   * type it stands for with the program's typedef names resolved already:
+   * `byte` to `unsignedchar`, then `octet` (`typedef byte octet;`) to the
+   * same. Filed as each typedef is executed - so of two functions that give
+   * one name different types, the one that ran last is used - and emptied
+   * when a run starts.
+   *
+   * A typedef of a structure or union is not filed: the engine sizes the
+   * name as it sizes the record's own name, and lays the record out by it.
+   * Nor is the length of a typedef of an array type (`typedef char
+   * name[16];`): the stock typedef drops it, and an object declared with the
+   * name is laid out from its initializer, as a `char` array that long, or as
+   * a single `char` - sizing the name as sixteen bytes would space those
+   * `char`s sixteen bytes apart.
+   */
+  private readonly programTypedefs = new Map<string, string>();
 
   private structs = new StructTable();
   private unions = new UnionTable();
@@ -923,7 +964,103 @@ export class PlivetCPP14Engine extends CPP14Engine {
   scalarSizeOf(type: string): number {
     const scope = this.globalScope;
     const size = scope === null ? null : this.sizeOfType(type, scope);
-    return size === null || !(size > 0) ? Engine.sizeof(type) : size;
+    return size === null || !(size > 0) ? this.engineWidthOf(type) : size;
+  }
+
+  /**
+   * How wide the engine makes an object of a type: `basicSizeof` of the
+   * spelling with the program's typedef names in it resolved
+   * (`programTypedefs`). `typedef unsigned char byte;` was four bytes wide to
+   * the engine - a `byte buf[4]` was laid out four bytes to an element, and
+   * `memset(buf, 0, sizeof buf)` wrote one element in four - since its
+   * `sizeof` knew the built-in and the library's names only.
+   *
+   * What `Engine.sizeof` answers while this engine's program is executing
+   * (`executing`). The engine's own code asks here rather than there: the
+   * canvas is drawn between steps, when the hook is answering for no one,
+   * and it finds a record's array members where the step laid them out.
+   */
+  private engineWidthOf(type: string): number {
+    return basicSizeof(this.withProgramTypedefs(type));
+  }
+
+  /**
+   * A type as C spells it with every typedef name resolved, the ones a
+   * function declares included: what the bytes of an object of it are
+   * read off (`LibraryHost.valueType`, `UnionStorage`).
+   */
+  private valueTypeOf(type: string): string {
+    return this.cTypeOf(this.withProgramTypedefs(type), null);
+  }
+
+  /**
+   * `valueTypeOf` of the cell at an address: its type as the engine holds
+   * it, unless the declaration filed there was written in words the source
+   * pass reduced to it. A `signed char` is held as a `char`, whose byte
+   * 0xff the library reads as 255, as it reads a string's characters.
+   * Taken only where the two are integers of one width, so the declaration
+   * of an object that has died where a new one now is cannot speak for it.
+   */
+  private cellValueType(type: string, address: number | undefined): string {
+    const held = this.valueTypeOf(type);
+    const declared =
+      typeof address === 'undefined'
+        ? undefined
+        : this.declarationInfoByAddress.get(address)?.declaredType;
+    if (typeof declared !== 'string' || !isIntegerType(held)) {
+      return held;
+    }
+    const written = this.valueTypeOf(declared);
+    return isIntegerType(written) && basicSizeof(written) === basicSizeof(held)
+      ? written
+      : held;
+  }
+
+  /** A type spelling with the program's typedef names in it resolved. */
+  private withProgramTypedefs(type: string): string {
+    return this.programTypedefs.size === 0
+      ? type
+      : type.replace(
+          /[A-Za-z_]\w*/g,
+          (name) => this.programTypedefs.get(name) ?? name
+        );
+  }
+
+  /**
+   * Files the typedef names a declaration has just given a scalar or a
+   * pointer type, for `engineWidthOf` and `valueTypeOf`. A type the source
+   * pass reduced is filed as it was written: the engine is given `char` for
+   * `typedef signed char tiny;`, whose bytes read differently.
+   */
+  private noteTypedefs(
+    decVar: UniVariableDec,
+    scope: Scope,
+    written: ({ declaredType?: string } | null)[]
+  ): void {
+    if (!decVar.modifiers.includes('typedef')) {
+      return;
+    }
+    decVar.variables.forEach((def, index) => {
+      const name = declaredName(def.name);
+      const held = typedefIn(scope, name);
+      if (held === null || held === name) {
+        return;
+      }
+      const declared = written[index]?.declaredType;
+      // The reduced spelling is the base type; the declarator's `*`s stay.
+      const target =
+        typeof declared === 'string'
+          ? declared + held.replace(/^[^*[]*/, '')
+          : held;
+      const resolved = this.withProgramTypedefs(target);
+      const canonical = this.cTypeOf(resolved, scope);
+      if (canonical.includes('*') || isArithmeticType(canonical)) {
+        this.programTypedefs.set(name, resolved);
+      } else {
+        // A name given again, to a structure: no longer the scalar it was.
+        this.programTypedefs.delete(name);
+      }
+    });
   }
 
   /** A scalar type as `UnionStorage` encodes and decodes it. */
@@ -932,7 +1069,7 @@ export class PlivetCPP14Engine extends CPP14Engine {
     floating: boolean;
     signed: boolean;
   } {
-    const canonical = this.cTypeOf(type, null);
+    const canonical = this.valueTypeOf(type);
     return {
       size: this.scalarSizeOf(type),
       floating: isFloatingType(canonical),
@@ -1542,7 +1679,7 @@ export class PlivetCPP14Engine extends CPP14Engine {
   private pointerStride(type: string, at?: unknown): number {
     const element = elementTypeOf(type);
     if (element.endsWith(']')) {
-      return Engine.sizeof(element);
+      return this.engineWidthOf(element);
     }
     const size = /^(?:const|volatile|\s)*void$/.test(element)
       ? 1
@@ -1561,15 +1698,15 @@ export class PlivetCPP14Engine extends CPP14Engine {
    * The step of a pointer to `element` that holds `address`, where the
    * engine's width of the type is not C's.
    *
-   * The engine sizes a typedef a program declares itself as four bytes,
-   * whatever it names - its `sizeof` is a static that cannot know a
-   * program's names - so `typedef unsigned char byte;` lays a `byte` array
-   * out four bytes to an element, and a `byte *` stepped four bytes:
-   * `((byte *)&year)[1]` read the object after `year`. Such a pointer steps
-   * over the elements of what it points at as the engine laid them out: an
-   * object of its own width (a `byte` array, a `char` array) by that
-   * object's width, and the bytes of a wider object one C byte at a time,
-   * as a `char *` does (`byteView`).
+   * The engine sized a typedef a program declares itself as four bytes,
+   * whatever it named, until its `sizeof` was given the program's names
+   * (`engineWidthOf`): `typedef unsigned char byte;` laid a `byte` array out
+   * four bytes to an element, and a `byte *` stepped four bytes -
+   * `((byte *)&year)[1]` read the object after `year`. Where the two widths
+   * still differ, such a pointer steps over the elements of what it points
+   * at as the engine laid them out: an object of its own width (a `byte`
+   * array, a `char` array) by that object's width, and the bytes of a wider
+   * object one C byte at a time, as a `char *` does (`byteView`).
    */
   private strideAt(element: string, stride: number, address: number): number {
     const scope = this.globalScope;
@@ -1588,7 +1725,7 @@ export class PlivetCPP14Engine extends CPP14Engine {
       isArithmeticType(this.cTypeOf(cell, scope)) &&
       this.scalarSizeOf(cell) === width
     ) {
-      return Engine.sizeof(cell);
+      return this.engineWidthOf(cell);
     }
     return this.byteView(address, element, scope) !== null ? width : stride;
   }
@@ -1828,7 +1965,7 @@ export class PlivetCPP14Engine extends CPP14Engine {
     }
     const table = type.indexOf('*') === -1 ? this.tableFor(type.trim()) : null;
     return table === null
-      ? Engine.sizeof(type)
+      ? this.engineWidthOf(type)
       : Engine.structInfoSize + table.sizeOf(type.trim());
   }
 
@@ -1983,7 +2120,7 @@ export class PlivetCPP14Engine extends CPP14Engine {
         : dimensions.reduce((total, length) => total * length, element);
     }
     if (type.indexOf('*') !== -1 || /^_fp\d+$/.test(type)) {
-      return Engine.sizeof('*');
+      return this.engineWidthOf('*');
     }
     const table = this.tableFor(type);
     if (table !== null) {
@@ -2012,7 +2149,7 @@ export class PlivetCPP14Engine extends CPP14Engine {
       /^(?:unsigned|signed)$/.test(type) ||
       type === ENGINE_LONG_LONG ||
       type === ENGINE_UNSIGNED_LONG_LONG
-      ? Engine.sizeof(type)
+      ? this.engineWidthOf(type)
       : null;
   }
 
@@ -2187,13 +2324,24 @@ export class PlivetCPP14Engine extends CPP14Engine {
     return declaration === null ? [] : parameterNames(declaration);
   }
 
+  /**
+   * One step, with the class-level `sizeof` answering for this engine's
+   * program while it runs (`executing`). A run's every statement executes
+   * inside one: `startStepExecution` takes the first.
+   */
   stepExecute(): ExecState {
-    const state = this.advance();
-    if (!this.isStepExecutionRunning()) {
-      this.expressions.finish(state);
-      this.constructs.finish(state);
+    const outer = PlivetCPP14Engine.executing;
+    PlivetCPP14Engine.executing = this;
+    try {
+      const state = this.advance();
+      if (!this.isStepExecutionRunning()) {
+        this.expressions.finish(state);
+        this.constructs.finish(state);
+      }
+      return state;
+    } finally {
+      PlivetCPP14Engine.executing = outer;
     }
-    return state;
   }
 
   /**
@@ -2220,6 +2368,7 @@ export class PlivetCPP14Engine extends CPP14Engine {
   }
 
   protected *executeStepByStep(dec: UniProgram): any {
+    this.programTypedefs.clear();
     this.entryPoint = this.getEntryPoint(dec);
     this.sourceStrings = stringLiteralsIn(dec);
     this.usedStdioFunctions = usedStdioFunctionsIn(dec);
@@ -3421,6 +3570,7 @@ export class PlivetCPP14Engine extends CPP14Engine {
         this.noteWrite(this.errnoAddress);
         global.objectOnMemory.set(this.errnoAddress, new Int(value));
       },
+      valueType: (type, address) => this.cellValueType(type, address),
       isRecordType: (type) =>
         this.tableFor(type) !== null || global.isStructType(type),
       recordSize: (type) => {
@@ -4156,6 +4306,7 @@ export class PlivetCPP14Engine extends CPP14Engine {
     } finally {
       this.zeroFillingStaticStorage = previousZeroFill;
     }
+    this.noteTypedefs(decVar, scope, sourceInfo);
     if (staticStorage) {
       for (const def of decVar.variables) {
         if (def.value !== null && !(def.value instanceof UniNoneLiteral)) {
@@ -4218,14 +4369,33 @@ export class PlivetCPP14Engine extends CPP14Engine {
       if (def.typeSuffix !== null && def.typeSuffix !== '') {
         const arrayAddress = scope.objectOnMemory.get(address);
         if (typeof arrayAddress === 'number') {
-          const dimensions = scope.getArrayDims(def.typeSuffix);
-          const count = dimensions.reduce((total, length) => total * length, 1);
+          // The lengths the array was laid out with: a declarator of `[]`
+          // (`const char greeting[] = "hi";`) has none, and its elements -
+          // the first of them where the canvas reads the declaration - were
+          // given no `const` and no band.
+          const laidOut = scope.getRawType(address);
+          const dimensions = scope.getArrayDims(
+            laidOut.includes('[')
+              ? laidOut.slice(laidOut.indexOf('['))
+              : def.typeSuffix
+          );
+          if (dimensions.length > 1) {
+            // The execution state files an array of more than one dimension
+            // at its table of rows, and the canvas reads the declaration -
+            // its `const`, its band - there.
+            this.declared(arrayAddress, info);
+          }
           // An array of pointers keeps its `*`s on the declarator.
-          const elementSize = Engine.sizeof(
+          const elementSize = this.engineWidthOf(
             decVar.type + '*'.repeat(this.pointerDepthOf(def))
           );
-          for (let element = 0; element < count; element += 1) {
-            this.declared(arrayAddress + element * elementSize, info);
+          for (const cell of this.elementCellsOf(
+            address,
+            dimensions,
+            elementSize,
+            scope
+          )) {
+            this.declared(cell, info);
           }
         }
       }
@@ -4600,7 +4770,9 @@ export class PlivetCPP14Engine extends CPP14Engine {
       scope.typeOnMemory.set(address, pointee);
       scope.objectOnMemory.set(
         address,
-        zeroed ? decodeValue(new Array(size).fill(0), pointee) : null
+        zeroed
+          ? decodeValue(new Array(size).fill(0), this.valueTypeOf(pointee))
+          : null
       );
     }
     scope.setMallocSize(block, bytes);
@@ -6216,7 +6388,7 @@ export class PlivetCPP14Engine extends CPP14Engine {
       member.type.indexOf('*') === -1 && this.tableFor(member.type) !== null;
     const stride = record
       ? Engine.structInfoSize + this.tableFor(member.type)!.sizeOf(member.type)
-      : Engine.sizeof(member.type);
+      : this.engineWidthOf(member.type);
     return Array.from({ length: count }, (_, index) => ({
       address: address + index * stride,
       type: member.type.replace(/^\s*(struct|union)\s+/, ''),
@@ -6255,7 +6427,7 @@ export class PlivetCPP14Engine extends CPP14Engine {
     scope.variableTypes.set(name, arrayType);
     scope.objectOnMemory.set(handle, descriptors[0]);
     scope.typeOnMemory.set(handle, arrayType);
-    scope.address.codeAddress += Engine.sizeof(arrayType);
+    scope.address.codeAddress += this.engineWidthOf(arrayType);
     const allocation = { type, descriptors, scope };
     // Scope stores the variable under `handle`, but ExecState replaces an
     // array variable's address with the first element address while snapshotting.
@@ -7282,50 +7454,64 @@ export class PlivetCPP14Engine extends CPP14Engine {
         }
         continue;
       }
-      const dimensions = scope.getArrayDims(def.typeSuffix);
-      const first = this.firstElementOf(address, dimensions.length, scope);
-      if (first === null) {
-        continue;
-      }
-      const count = dimensions.reduce((total, length) => total * length, 1);
-      const elementSize = Engine.sizeof(
+      const elementSize = this.engineWidthOf(
         decVar.type + '*'.repeat(this.pointerDepthOf(def))
       );
-      for (let element = 0; element < count; element += 1) {
-        this.markUnwritten(first + element * elementSize, decVar);
+      for (const cell of this.elementCellsOf(
+        address,
+        scope.getArrayDims(def.typeSuffix),
+        elementSize,
+        scope
+      )) {
+        this.markUnwritten(cell, decVar);
       }
     }
   }
 
   /**
-   * Where the elements of an array of `rank` dimensions begin, given where
-   * its name is filed; null where the layout is not the one expected.
+   * The cells of an array's elements, row by row, given where its name is
+   * filed and its `dimensions`; none where the layout is not the one
+   * expected.
    *
    * The name holds the address of the first element of its first dimension.
    * Of an array of more, that is a table of rows on the code segment - each
    * entry of a type such as `char[40]`, holding where its row is - and the
-   * rows themselves are laid out one after another on the stack
-   * (`Scope.setArray`). `char titles[10][40]` was marked unwritten from its
-   * table on, 400 cells over the code segment, where the names of the arrays
-   * declared after it are filed: `scanf(" %79[^;];", title)` then read as an
-   * uninitialized `title`.
+   * rows themselves are laid out on the stack (`Scope.setArray`). Counted
+   * from the table, `char titles[10][40]` was marked unwritten over 400 cells
+   * of the code segment, where the names of the arrays declared after it are
+   * filed - `scanf(" %79[^;];", title)` then read as an uninitialized
+   * `title` - and a `const int grid[2][3]` filed its `const` there too, so
+   * `grid[1][2] = 5` ran.
    */
-  private firstElementOf(
+  private elementCellsOf(
     address: number,
-    rank: number,
+    dimensions: number[],
+    elementSize: number,
     scope: Scope
-  ): number | null {
-    let first: unknown = scope.objectOnMemory.get(address);
-    for (let level = 1; level < rank; level += 1) {
-      if (
-        typeof first !== 'number' ||
-        !(scope.typeOnMemory.get(first) ?? '').trim().endsWith(']')
-      ) {
-        return null;
+  ): number[] {
+    const cells: number[] = [];
+    const walk = (at: unknown, level: number): void => {
+      if (typeof at !== 'number') {
+        return;
       }
-      first = scope.objectOnMemory.get(first);
-    }
-    return typeof first === 'number' ? first : null;
+      if (level === dimensions.length - 1) {
+        for (let index = 0; index < dimensions[level]; index += 1) {
+          cells.push(at + index * elementSize);
+        }
+        return;
+      }
+      const row = scope.typeOnMemory.get(at) ?? '';
+      if (!row.trim().endsWith(']')) {
+        return;
+      }
+      // Each entry is as wide as `Scope.setArray` stepped over it.
+      const stride = this.engineWidthOf(row);
+      for (let index = 0; index < dimensions[level]; index += 1) {
+        walk(scope.objectOnMemory.get(at + index * stride), level + 1);
+      }
+    };
+    walk(scope.objectOnMemory.get(address), 0);
+    return cells;
   }
 
   /**

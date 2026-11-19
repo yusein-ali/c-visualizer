@@ -183,6 +183,41 @@ describe('<string.h> memory blocks', () => {
     ).toBe('0 1 1 me 1\n');
   });
 
+  it('memset and memcpy leave each type the value its bytes are in C', async () => {
+    // A cell's bytes were read back as a signed integer whatever its type:
+    // an `unsigned short` of 0xffff held -1 and printed 4294967295, and a
+    // `long long` past 32 bits was cut to them.
+    const run = await exec(
+      program(`  unsigned short us[2];
+  unsigned char uc[2];
+  signed char sc[2];
+  unsigned int ui;
+  short s;
+  memset(us, 0xff, sizeof us);
+  memset(uc, 0xff, sizeof uc);
+  memset(sc, 0xff, sizeof sc);
+  memset(&ui, 0xff, sizeof ui);
+  memset(&s, 0xff, sizeof s);
+  printf("%u %u %d %u %d %d %d\\n", us[0], uc[1], sc[0], ui, s, us[1] + 1, sc[1] < 0);
+  unsigned short from[2] = {40000, 65535};
+  unsigned short to[2];
+  memcpy(to, from, sizeof from);
+  long long big = 5000000000LL;
+  long long copy;
+  memcpy(&copy, &big, sizeof big);
+  unsigned int u = 3000000000u;
+  unsigned int v;
+  memcpy(&v, &u, sizeof u);
+  printf("%u %d %lld %u %d\\n", to[0], to[1] > 40000, copy, v, v > 2000000000u);`)
+    );
+    // As gcc prints them.
+    expect(run.output).toBe(
+      '65535 255 -1 4294967295 -1 65536 1\n40000 1 5000000000 3000000000 1\n'
+    );
+    expect(valueOf(run.model, 'us[0]')).toBe('65535');
+    expect(rulesOf(run)).toEqual([]);
+  });
+
   it('copies, clears and compares whole structures member by member', async () => {
     const run = await exec(`#include <stdio.h>
 #include <string.h>

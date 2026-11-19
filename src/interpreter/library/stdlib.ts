@@ -363,7 +363,10 @@ export function installStdlib(global: Scope, host: LibraryHost): void {
       }
       host.write(
         address,
-        decodeValue(new Array(Engine.sizeof(type)).fill(0), type),
+        decodeValue(
+          new Array(Engine.sizeof(type)).fill(0),
+          host.valueType(type, address)
+        ),
         'calloc'
       );
     }

@@ -428,7 +428,10 @@ export function installString(global: Scope, host: LibraryHost): void {
         const size = Engine.sizeof(cell.type);
         host.write(
           cell.address,
-          decodeValue(new Array(size).fill(byte), cell.type),
+          decodeValue(
+            new Array(size).fill(byte),
+            host.valueType(cell.type, cell.address)
+          ),
           'memset'
         );
       }
@@ -444,7 +447,7 @@ export function installString(global: Scope, host: LibraryHost): void {
     cellsOf(span).flatMap((cell) =>
       encodeValue(
         global.objectOnMemory.get(cell.address),
-        cell.type,
+        host.valueType(cell.type, cell.address),
         Engine.sizeof(cell.type)
       )
     );
