@@ -10,7 +10,7 @@ import type {
 } from './Plivet';
 import type { EditableRegionsOption, FileEditableLines } from './protection';
 import { codeMirrorTheme, type CodeMirrorConfig } from './host';
-import { codeMirrorCount, codeMirrorFlag } from './host';
+import { codeMirrorCount, codeMirrorFlag, codeMirrorSize } from './host';
 import type { Theme } from './theme';
 
 /**
@@ -182,7 +182,7 @@ const viewsOf = (value: unknown): ViewSelection | undefined => {
  * The editor settings a page names, in either spelling, under the names the
  * editor takes.
  *
- * The two tables are the fields this reads; a key that is in neither is left
+ * The tables are the fields this reads; a key that is in none of them is left
  * alone rather than warned about. A page hands over the configuration it built
  * its own editors with, whole, and most of what is in one - the languages it
  * has editors for, the code blocks it replaces - is about editors this window
@@ -190,6 +190,9 @@ const viewsOf = (value: unknown): ViewSelection | undefined => {
  */
 const CODEMIRROR_COUNTS: Record<string, string> = {
   indentUnit: 'indent_unit',
+};
+
+const CODEMIRROR_SIZES: Record<string, string> = {
   fontSize: 'font_size',
 };
 
@@ -226,6 +229,18 @@ const codeMirrorOf = (value: unknown): CodeMirrorConfig | undefined => {
       continue;
     }
     config[name] = count;
+  }
+  for (const [name, written] of Object.entries(CODEMIRROR_SIZES)) {
+    const setting = value[name] ?? value[written];
+    if (typeof setting === 'undefined') {
+      continue;
+    }
+    const size = codeMirrorSize(setting);
+    if (typeof size === 'undefined') {
+      warn(`codeMirror.${written} must be a number of pixels above zero`);
+      continue;
+    }
+    config[name] = size;
   }
   for (const [name, written] of Object.entries(CODEMIRROR_FLAGS)) {
     const setting = value[name] ?? value[written];

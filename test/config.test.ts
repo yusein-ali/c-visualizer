@@ -464,6 +464,26 @@ describe('the CodeMirror configuration a host hands over', () => {
     });
   });
 
+  it('takes a text size that is not a whole number of pixels', () => {
+    // What a host reads off its own stylesheet: 0.75rem at 16px, times 1.15.
+    expect(codeMirrorSettings({ font_size: 13.8 })).toEqual({ fontSize: 13.8 });
+    expect(codeMirrorSettings(JSON.parse('{"fontSize": "10.8"}'))).toEqual({
+      fontSize: 10.8,
+    });
+    expect(
+      parseConfig(JSON.stringify({ codeMirror: { fontSize: 13.8 } }))
+    ).toEqual({ codeMirror: { fontSize: 13.8 } });
+    expect(warnings).toEqual([]);
+    for (const size of ['0', '-1', '"12px"', '"large"', '""']) {
+      expect(
+        codeMirrorSettings(JSON.parse(`{"font_size": ${size}}`))
+      ).toEqual({});
+    }
+    expect(
+      codeMirrorSettings({ font_size: Number.POSITIVE_INFINITY })
+    ).toEqual({});
+  });
+
   it('leaves out what a host did not name, or named as nothing it can be', () => {
     expect(codeMirrorSettings()).toEqual({});
     expect(

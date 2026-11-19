@@ -55,6 +55,12 @@ describe('the text size', () => {
     plivet.destroy();
   });
 
+  it('opens at a size between whole pixels', () => {
+    const { plivet } = open({ codeMirror: { fontSize: 13.8 } });
+    expect(plivet.getFontSize()).toBe(13.8);
+    plivet.destroy();
+  });
+
   it('refuses a size that is not a positive number', () => {
     const { plivet } = open();
     expect(plivet.setFontSize(0)).toBe(false);

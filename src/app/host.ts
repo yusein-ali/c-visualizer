@@ -101,7 +101,10 @@ export interface CodeMirrorConfig {
   line_numbers?: boolean;
   /** Offer the names the program declares while typing. */
   autocomplete?: boolean;
-  /** The text size the editor opens at, in pixels. */
+  /**
+   * The text size the editor opens at, in pixels: not only a whole number,
+   * because a host matching its own code works it out from its stylesheet.
+   */
   fontSize?: number;
   font_size?: number;
   /** Named theme used while the application is in light mode. */
@@ -146,13 +149,30 @@ export const codeMirrorFlag = (value: unknown): boolean | undefined => {
   return undefined;
 };
 
-/** A count of columns or pixels, likewise, and never zero or a fraction. */
+/** A count of columns, likewise, and never zero or a fraction. */
 export const codeMirrorCount = (value: unknown): number | undefined => {
   const count = typeof value === 'string' ? Number(value.trim()) : value;
   if (typeof count !== 'number' || !Number.isInteger(count) || count <= 0) {
     return undefined;
   }
   return count;
+};
+
+/**
+ * A text size in pixels: any positive number, written as one or as its text.
+ *
+ * Not a count. A host that wants this editor to show code at the size its own
+ * page shows code reads that size off its stylesheet, and a page whose text
+ * is 0.75rem, read at a reader's 1.15, draws its code at 13.8px. Rounded to
+ * 14, the window would be the one place on the page where code is a size of
+ * its own.
+ */
+export const codeMirrorSize = (value: unknown): number | undefined => {
+  const size = typeof value === 'string' ? Number(value.trim()) : value;
+  if (typeof size !== 'number' || !Number.isFinite(size) || size <= 0) {
+    return undefined;
+  }
+  return size;
 };
 
 /** A serializable theme name understood by both course editors. */
@@ -174,7 +194,7 @@ export const codeMirrorSettings = (
 ): CodeMirrorSettings => {
   const settings: CodeMirrorSettings = {};
   const indentUnit = codeMirrorCount(config.indentUnit ?? config.indent_unit);
-  const fontSize = codeMirrorCount(config.fontSize ?? config.font_size);
+  const fontSize = codeMirrorSize(config.fontSize ?? config.font_size);
   const lightTheme = codeMirrorTheme(config.lightTheme ?? config.light_theme);
   const darkTheme = codeMirrorTheme(config.darkTheme ?? config.dark_theme);
   const flags = {
