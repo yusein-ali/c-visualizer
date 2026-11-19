@@ -20,6 +20,11 @@ import { UniUnaryOp } from 'unicoen.ts/dist/node/UniUnaryOp';
 import { UniVariableDec } from 'unicoen.ts/dist/node/UniVariableDec';
 import { UniWhile } from 'unicoen.ts/dist/node/UniWhile';
 import { decodeEscapes } from './Escapes';
+import {
+  declaredNamesIn,
+  implicitDeclarationMessage,
+  isImplicitlyDeclared,
+} from './ImplicitDeclaration';
 import { cSpelling } from './ExpressionTypes';
 import { libraryTypedefIn } from './library/types';
 import { mask } from './scan';
@@ -403,16 +408,31 @@ class LintPass {
   readonly undeclaredNames = new Set<string>();
   /** Names already reported by a rule that reports each name once. */
   readonly reported = new Set<string>();
+  /** Callees already reported as implicitly declared. */
+  readonly implicitCallees = new Set<string>();
 
   private readonly lines: string[];
   private readonly scopes: Array<Map<string, Declared>> = [new Map()];
+  /** Every name the program declares; see `declaredAnywhere`. */
+  private programNames: ReadonlySet<string> | null = null;
 
   constructor(
     source: string,
     /** The library functions a program may name without declaring them. */
-    readonly libraryFunctions: ReadonlySet<string> = new Set()
+    readonly libraryFunctions: ReadonlySet<string> = new Set(),
+    private readonly root: UniNode | null = null
   ) {
     this.lines = source.split('\n');
+  }
+
+  /**
+   * Whether the program declares a name anywhere, as anything, whatever the
+   * walk has reached: worked out the first time a rule asks.
+   */
+  declaredAnywhere(name: string): boolean {
+    this.programNames ??=
+      this.root === null ? new Set() : declaredNamesIn(this.root);
+    return this.programNames.has(name);
   }
 
   declared(name: string): Declared | null {
@@ -932,9 +952,9 @@ const MACRO_CASE = /^[A-Z_][A-Z0-9_]*$/;
  * Four things are deliberately not reported, because each is a name a valid
  * program uses without declaring it in its own source:
  *
- * - A callee. A name this source never declares is exactly what a library
- *   function looks like from the tree; `LinkerCheck` makes the same exception
- *   and gives the same reason.
+ * - A callee. A call is a question about functions, which the library
+ *   provides without declaring them in the tree; `implicitFunctionDeclaration`
+ *   asks it.
  * - The operand of `sizeof`, which names a type rather than an object.
  * - A function used as a value, which `Op op = add;` does. Those are collected
  *   before the walk, so a function may be named above its definition. A
@@ -1012,6 +1032,43 @@ const undeclaredIdentifier: Rule = {
   },
 };
 
+/**
+ * A call of a function nothing declares: `reading_minutes(pages, 2)` before
+ * any file declares or defines it, `MINUTES(pages)` before a header defines
+ * the macro. C99 has no implicit function declarations, and gcc refuses the
+ * call as an error. Said once for each name, at its first call; what counts
+ * as declared is in `ImplicitDeclaration.ts`. A call through anything but a
+ * plain name - `ops[0](1)`, `r.run(2)`, `(*f)(3)` - names no function, and
+ * one through a pointer by name (`op(a, b)`) has the pointer declared.
+ */
+const implicitFunctionDeclaration: Rule = {
+  name: 'implicit-function-declaration',
+  severity: 'error',
+  enter(node, pass) {
+    const name = calleeName(node);
+    if (
+      (node.receiver !== null && typeof node.receiver !== 'undefined') ||
+      pass.implicitCallees.has(name) ||
+      !isImplicitlyDeclared(
+        name,
+        (one) =>
+          pass.declared(one) !== null ||
+          pass.returnTypes.has(one) ||
+          pass.declaredAnywhere(one),
+        (one) => pass.libraryFunctions.has(one)
+      )
+    ) {
+      return;
+    }
+    const range = rangeOf(node.methodName) ?? rangeOf(node);
+    if (range === null) {
+      return;
+    }
+    pass.implicitCallees.add(name);
+    pass.report(this, range, implicitDeclarationMessage(name));
+  },
+};
+
 /** The `v*printf` family, and the position of the `va_list` each takes. */
 const VA_LIST_FUNCTIONS: Record<string, number> = {
   vprintf: 1,
@@ -1079,7 +1136,10 @@ const RULES: Rule[] = [
  * coordinates back to the file the reader is looking at, exactly as it does
  * for the linker rules.
  */
-const PROGRAM_RULES: Rule[] = [undeclaredIdentifier];
+const PROGRAM_RULES: Rule[] = [
+  undeclaredIdentifier,
+  implicitFunctionDeclaration,
+];
 
 const declaredFrom = (
   declaration: any,
@@ -1193,7 +1253,7 @@ function runRules(
   source: string,
   libraryFunctions: ReadonlySet<string> = new Set()
 ): LintDiagnostic[] {
-  const pass = new LintPass(source, libraryFunctions);
+  const pass = new LintPass(source, libraryFunctions, root);
   collectReturnTypes(root, pass);
 
   const visit = (node: any, parent: any = null): void => {

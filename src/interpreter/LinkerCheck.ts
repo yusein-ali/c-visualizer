@@ -17,10 +17,11 @@ import { LintDiagnostic, LintRange } from './TeachingLint';
  *
  * Three of them, and each is reported only where execution cannot be formed
  * from the supplied source. What is deliberately not here is a call to a name
- * this source never
- * declares: that is what a library function looks like from the tree, and a
- * rule that flagged `printf` because it cannot see `stdio.h` would teach a
- * reader to distrust the linter.
+ * this source never declares: that is what a library function looks like from
+ * the tree, and a rule that flagged `printf` because it cannot see `stdio.h`
+ * would teach a reader to distrust the linter. The program rule
+ * `implicit-function-declaration` (`TeachingLint.ts`) asks it knowing the
+ * library.
  */
 
 /** A name defined at file scope, and where. */

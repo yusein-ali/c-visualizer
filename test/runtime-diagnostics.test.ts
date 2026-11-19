@@ -15,20 +15,26 @@ interface Session {
   steps: number;
 }
 
-const run = (code: string): Session => {
+const run = (code: string, input: string | null = null): Session => {
   const interpreter = new PlivetCPP14Interpreter();
   interpreter.setFileList(new Map());
   const log = console.log;
   console.log = () => undefined;
   let steps = 0;
+  let pending = input;
   try {
     interpreter.startStepExecution(code);
-    while (
-      interpreter.isStepExecutionRunning() &&
-      // A program blocked on a read never finishes; nothing here submits one.
-      !interpreter.getIsWaitingForStdin() &&
-      steps < 20000
-    ) {
+    while (interpreter.isStepExecutionRunning() && steps < 20000) {
+      if (interpreter.getIsWaitingForStdin()) {
+        // A program blocked on a read never finishes: the input, where there
+        // is one, is submitted once and then ended, as Ctrl+D ends it.
+        if (pending === null) {
+          break;
+        }
+        interpreter.stdin(pending);
+        interpreter.endInput();
+        pending = null;
+      }
       interpreter.stepExecute();
       steps += 1;
     }
@@ -361,6 +367,118 @@ int main(void)
       ])
     ).toEqual([['uninitialized-read', 'y', 11]]);
   });
+});
+
+/**
+ * An array used as a value is the address of its first element (C11
+ * 6.3.2.1p3): `scanf(" %79[^;];", title)` and `add_book(titles, ...)` evaluate
+ * no element, so nothing indeterminate is read. The T5.2 shelf warned "title
+ * is evaluated before a value is stored in it" all the same: a declaration of
+ * a two-dimensional array marked its elements unwritten from its table of
+ * rows on, not where the rows are, which covered where the next arrays' names
+ * were filed. An element, a whole scalar, or the characters a library
+ * function reads are still reported when nothing has written them.
+ */
+describe('an array used as a value', () => {
+  const said = (session: Session) =>
+    session.diagnostics.map(({ rule, message, line }) => [
+      rule,
+      message.split(' ')[0],
+      line,
+    ]);
+
+  it('reads no element when scanf or a function is handed it', () => {
+    const session = run(
+      `#include <stdio.h>
+int add_book(char titles[][40], int count, const char *title)
+{
+  (void)titles;
+  (void)title;
+  return count;
+}
+int main(void)
+{
+  char titles[10][40];
+  int count = 0;
+  char command;
+  while (scanf(" %c", &command) == 1 && command != 'Q') {
+    char title[80];
+    if (command == 'A') {
+      if (scanf(" %79[^;];", title) != 1) {
+        continue;
+      }
+      if (add_book(titles, count, title) == count) {
+        printf("full: %s\\n", title);
+      }
+    }
+  }
+  return 0;
+}`,
+      'A Dune; A Emma; A Kalevala; Q\n'
+    );
+    expect(session.diagnostics).toEqual([]);
+    expect(session.output).toMatch(/full: Dune\nfull: Emma\nfull: Kalevala\n$/);
+  });
+
+  it('reads no element as an operand, an initializer or a row', () => {
+    const session = run(`#include <stdio.h>
+#include <string.h>
+int main(void) {
+  char rows[3][8];
+  char word[10];
+  char *end = word + 9;
+  char *p = word;
+  char *row = rows[1];
+  strcpy(p, "hi");
+  *end = '\\0';
+  strcpy(row, word);
+  strcpy(rows[0], "up");
+  printf("%s %s %s\\n", word, rows[1], rows[0]);
+  return 0;
+}`);
+    expect(session.diagnostics).toEqual([]);
+    expect(session.output).toBe('hi hi up\n');
+  });
+
+  it('still reports an element of a two-dimensional array nothing wrote', () => {
+    const session = run(`int main(void) {
+  int m[2][3];
+  m[0][0] = 1;
+  int x = m[1][2];
+  return x + m[0][0];
+}`);
+    expect(said(session)).toEqual([['uninitialized-read', 'm[1][2]', 4]]);
+  });
+
+  it('still reports a scalar read before it is written', () => {
+    const session = run(`int main(void) {
+  int m[4][4];
+  int k;
+  m[0][0] = 1;
+  return m[0][0] + k;
+}`);
+    expect(said(session)).toEqual([['uninitialized-read', 'k', 5]]);
+  });
+
+  it.each([
+    ['an array', 'char title[80];', 'title', 'title'],
+    ['a row', 'char rows[2][80];', 'rows[1]', 'rows'],
+  ])(
+    'still reports strlen reading the characters of %s nothing wrote',
+    (_what, declaration, argument, object) => {
+      const session = run(`#include <stdio.h>
+#include <string.h>
+int main(void) {
+  ${declaration}
+  printf("%zu\\n", strlen(${argument}));
+  return 0;
+}`);
+      // What the characters hold is random, so whether a null character
+      // ends them in time, and the run goes on, is too.
+      expect(said(session)[0]).toEqual(['uninitialized-read', 'strlen', 5]);
+      expect(session.diagnostics[0].message).toContain(`from ${object} `);
+    }
+  );
 });
 
 /**

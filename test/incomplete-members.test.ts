@@ -212,6 +212,49 @@ int counter_value(const struct counter *c);
     expect(response.output).toBe('5\n');
     expect(response.runtime ?? []).toEqual([]);
   });
+
+  it.each([
+    ['struct', 'typedef struct {\n  int count;\n} Queue, *QueuePtr;'],
+    ['union', 'typedef union {\n  int count;\n  char byte;\n} Queue;'],
+  ])(
+    'accepts a tagless typedef %s that a shared header defines',
+    async (_kind, definition) => {
+      const response = await runFiles([
+        {
+          path: 'main.c',
+          text: `#include <stdio.h>
+#include "source.h"
+int main(void) {
+  Queue q;
+  q.count = 0;
+  bump(&q);
+  printf("%d\\n", q.count);
+  return 0;
+}
+`,
+        },
+        {
+          path: 'source.h',
+          text: `#ifndef SOURCE_H
+#define SOURCE_H
+${definition}
+void bump(Queue *q);
+#endif
+`,
+        },
+        {
+          path: 'source.c',
+          text: `#include "source.h"
+void bump(Queue *q) {
+  q->count++;
+}
+`,
+        },
+      ]);
+      expect(response.output).toBe('1\n');
+      expect(response.runtime ?? []).toEqual([]);
+    }
+  );
 });
 
 /**

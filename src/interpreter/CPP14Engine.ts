@@ -72,6 +72,11 @@ import {
   promotedType,
 } from './ExpressionTypes';
 import { literalSpelling } from './LiteralSpelling';
+import {
+  declaredNamesIn,
+  implicitDeclarationMessage,
+  isImplicitlyDeclared,
+} from './ImplicitDeclaration';
 import { LIBRARY_CONSTANTS } from './library/constants';
 import { Expansion, originalRange } from './Expansion';
 import {
@@ -810,6 +815,8 @@ export class PlivetCPP14Engine extends CPP14Engine {
   private errnoValue = 0;
   /** The standard streams the program names, which are drawn as objects. */
   private namedStreams: string[] = [];
+  /** Every name the program declares, as anything; see `checkDeclared`. */
+  private programNames: ReadonlySet<string> = new Set();
   /** This run's `<stdio.h>`: its streams and the files it has open. */
   private stdio: StdioRuntime | null = null;
   /** The program's file system: the uploaded files and those it made. */
@@ -2219,6 +2226,7 @@ export class PlivetCPP14Engine extends CPP14Engine {
     this.libraryValues.clear();
     this.usesErrno = mentions(dec, 'errno');
     this.namedStreams = STANDARD_STREAMS.filter((name) => mentions(dec, name));
+    this.programNames = declaredNamesIn(dec);
     this.variadicFunctions = variadicFunctionsIn(this.sourceText);
     this.pendingVarargs = null;
     this.variadicFrames.length = 0;
@@ -2286,6 +2294,9 @@ export class PlivetCPP14Engine extends CPP14Engine {
       if (mc.receiver !== null) {
         return yield* super.execMethoodCall(mc, scope);
       }
+      if (mc.methodName instanceof UniIdent) {
+        this.checkDeclared(mc.methodName.name, scope);
+      }
       const pointed = yield* this.calleeOf(mc, scope);
       if (
         pointed instanceof UniFunctionDec &&
@@ -2320,6 +2331,27 @@ export class PlivetCPP14Engine extends CPP14Engine {
       }
       this.calls.pop();
       this.constructs.leftAt(depth);
+    }
+  }
+
+  /**
+   * A call of a function nothing declares, reached without the check before
+   * a run that refuses it (`ImplicitDeclaration.ts`): refused in gcc's words
+   * before its arguments are evaluated. The stock lookup threw, and the run
+   * stopped with "This statement could not be executed".
+   */
+  private checkDeclared(name: string, scope: Scope): void {
+    if (
+      isImplicitlyDeclared(
+        name,
+        (one) => this.programNames.has(one),
+        (one) => scope.hasValue(one)
+      )
+    ) {
+      this.refuse(
+        'implicit-function-declaration',
+        implicitDeclarationMessage(name)
+      );
     }
   }
 
@@ -6712,6 +6744,29 @@ export class PlivetCPP14Engine extends CPP14Engine {
         tags.add(found[1]);
         found = definition.exec(masked);
       }
+      // A tagless record is filed under the typedef names that follow its
+      // closing brace (`typedef struct { ... } Queue, *QueuePtr;`).
+      const tagless = /\btypedef\s+(?:struct|union)\s*\{/g;
+      for (let found = tagless.exec(masked); found !== null; ) {
+        let depth = 0;
+        let end = found.index + found[0].length - 1;
+        for (; end < masked.length; end++) {
+          if (masked[end] === '{') {
+            depth++;
+          } else if (masked[end] === '}' && --depth === 0) {
+            break;
+          }
+        }
+        const declarators = masked.slice(end + 1).split(';', 1)[0];
+        for (const declarator of declarators.split(',')) {
+          const name = /([A-Za-z_]\w*)/.exec(declarator.replace(/\*/g, ' '));
+          if (name !== null) {
+            tags.add(name[1]);
+          }
+        }
+        tagless.lastIndex = end + 1;
+        found = tagless.exec(masked);
+      }
       own.set(file, tags);
       includes.set(
         file,
@@ -7024,6 +7079,12 @@ export class PlivetCPP14Engine extends CPP14Engine {
   /**
    * The read of an object nothing has written. Reported once per object: a
    * loop reading it a thousand times is one mistake, not a thousand.
+   *
+   * An array's name used as a value is the address of its first element
+   * (C11 6.3.2.1p3), which reads none of them: `scanf("%79s", title)`,
+   * `add_book(titles, count)` and `title + 1` are not reads, and what is
+   * then read through the address is checked where it is read
+   * (`checkReadAt`, and the library's own check of its arguments).
    */
   private checkRead(expr: UniIdent, scope: Scope): void {
     let address = -1;
@@ -7033,7 +7094,14 @@ export class PlivetCPP14Engine extends CPP14Engine {
       return;
     }
     const said = this.unwrittenBy.get(address) ?? address;
-    if (!this.unwritten.has(address) || this.readUnwritten.has(said)) {
+    if (
+      !this.unwritten.has(address) ||
+      this.readUnwritten.has(said) ||
+      scope
+        .getTypedef(scope.typeOnMemory.get(address) ?? '')
+        .trim()
+        .endsWith(']')
+    ) {
       return;
     }
     this.readUnwritten.add(said);
@@ -7214,11 +7282,11 @@ export class PlivetCPP14Engine extends CPP14Engine {
         }
         continue;
       }
-      const first = scope.objectOnMemory.get(address);
-      if (typeof first !== 'number') {
+      const dimensions = scope.getArrayDims(def.typeSuffix);
+      const first = this.firstElementOf(address, dimensions.length, scope);
+      if (first === null) {
         continue;
       }
-      const dimensions = scope.getArrayDims(def.typeSuffix);
       const count = dimensions.reduce((total, length) => total * length, 1);
       const elementSize = Engine.sizeof(
         decVar.type + '*'.repeat(this.pointerDepthOf(def))
@@ -7227,6 +7295,37 @@ export class PlivetCPP14Engine extends CPP14Engine {
         this.markUnwritten(first + element * elementSize, decVar);
       }
     }
+  }
+
+  /**
+   * Where the elements of an array of `rank` dimensions begin, given where
+   * its name is filed; null where the layout is not the one expected.
+   *
+   * The name holds the address of the first element of its first dimension.
+   * Of an array of more, that is a table of rows on the code segment - each
+   * entry of a type such as `char[40]`, holding where its row is - and the
+   * rows themselves are laid out one after another on the stack
+   * (`Scope.setArray`). `char titles[10][40]` was marked unwritten from its
+   * table on, 400 cells over the code segment, where the names of the arrays
+   * declared after it are filed: `scanf(" %79[^;];", title)` then read as an
+   * uninitialized `title`.
+   */
+  private firstElementOf(
+    address: number,
+    rank: number,
+    scope: Scope
+  ): number | null {
+    let first: unknown = scope.objectOnMemory.get(address);
+    for (let level = 1; level < rank; level += 1) {
+      if (
+        typeof first !== 'number' ||
+        !(scope.typeOnMemory.get(first) ?? '').trim().endsWith(']')
+      ) {
+        return null;
+      }
+      first = scope.objectOnMemory.get(first);
+    }
+    return typeof first === 'number' ? first : null;
   }
 
   /**

@@ -157,9 +157,14 @@ const syntaxErrorMessage = (
  * refuses to translate, so there is no execution to show. Using a name that
  * nothing declares is the first of them; C has no implicit declaration of
  * objects, and PLIVET used to run such a program, print nothing and report
- * success.
+ * success. Calling a function that nothing declares is the second; C99 has
+ * no implicit declaration of functions, and the run stopped at the call with
+ * "This statement could not be executed".
  */
-const REFUSING_RULES = new Set(['undeclared-identifier']);
+const REFUSING_RULES = new Set([
+  'undeclared-identifier',
+  'implicit-function-declaration',
+]);
 
 const refusals = (analysis: SourceAnalysis): LintDiagnostic[] =>
   analysis.linkerLints.filter((diagnostic) =>
