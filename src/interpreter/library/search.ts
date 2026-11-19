@@ -85,7 +85,9 @@ export function installSearch(global: Scope, host: LibraryHost): void {
         misfit(record, host.recordSize(record));
       }
       const stride = host.recordStride(record);
-      memory.region(start, count * stride, fn, 'the array', fn === 'qsort');
+      // The bytes C counts: the descriptor words between the records are no
+      // part of the array.
+      memory.region(start, count * size, fn, 'the array', fn === 'qsort');
       const at = (index: number): number => start + index * stride;
       return {
         count,

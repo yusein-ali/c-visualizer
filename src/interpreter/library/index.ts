@@ -15,7 +15,10 @@ import { installTime } from './time';
 
 export type {
   LibraryHost,
+  MemberByteSite,
+  PaddingByte,
   RecordCell,
+  RecordSpan,
   SourceLine,
   VariadicFrame,
 } from './host';
@@ -47,7 +50,7 @@ export function installLibrary(global: Scope, host: LibraryHost): void {
  * The object-like macros, as system variables beside `NULL`: on the code
  * segment, never drawn, read by name.
  */
-function installConstants(global: Scope): void {
+export function installConstants(global: Scope): void {
   for (const [name, constant] of Object.entries(LIBRARY_CONSTANTS)) {
     global.setSystemVariable(
       'SYSTEM',

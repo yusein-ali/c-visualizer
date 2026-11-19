@@ -143,6 +143,11 @@ const stdlibBasics = fromHeader('stdlib.h', {
     signature: 'void exit(int status)',
     description: 'causes normal program termination with the specified status',
   },
+  atexit: {
+    signature: 'int atexit(void (*function)(void))',
+    description:
+      'registers a function to be called with no arguments when the program terminates normally; the last one registered is called first; returns 0',
+  },
   atoi: {
     signature: 'int atoi(const char* text)',
     description:

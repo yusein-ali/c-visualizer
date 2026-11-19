@@ -203,7 +203,11 @@ export class Memory {
   private cellAt(address: number): Cell | null {
     const memory = this.scope.objectOnMemory;
     const types = this.scope.typeOnMemory;
-    for (let back = 0; back < 8; back += 1) {
+    // A returned frame's cells stay in memory under the live ones, and the
+    // nearest one below an address can be one of them: `float f` laid where
+    // a loop's `i` had been read `i`'s bytes as its second.
+    const live = this.host.cellStart(address);
+    for (let back = live === null ? 0 : address - live; back < 8; back += 1) {
       const start = address - back;
       const type = types.get(start);
       if (typeof type === 'undefined' || !memory.has(start)) {
@@ -367,6 +371,25 @@ export class Memory {
     what: string,
     writing: boolean
   ): MemoryObject {
+    const span = this.host.recordSpan(address, length);
+    if (span !== null) {
+      // A structure's bytes as C counts them, not the engine's cells: its
+      // descriptor word is no byte of it, and its padding is.
+      if (span.room < length) {
+        this.host.refuse(
+          writing ? 'buffer-overflow' : 'out-of-bounds-read',
+          `${fn} would ${writing ? 'write' : 'read'} ${plural(length, 'byte')} ` +
+            `of ${span.name}, but only ${plural(span.room, 'byte')} of it ` +
+            `${span.room === 1 ? 'is' : 'are'} there`
+        );
+      }
+      return {
+        start: address,
+        end: address + span.room,
+        name: span.name,
+        kind: 'object',
+      };
+    }
     const object = this.objectAt(address);
     if (object === null) {
       this.host.refuse(
@@ -423,7 +446,12 @@ export class Memory {
         address: null,
       };
     }
-    const address = this.pointer(value, fn, what);
+    let address = this.pointer(value, fn, what);
+    // A structure's own address, as a `char *`, is its first member's.
+    const first = this.host.recordSpan(address, 1)?.bytes[0];
+    if (typeof first !== 'undefined' && 'cell' in first && first.byte === 0) {
+      address = first.cell;
+    }
     const object = this.region(address, 0, fn, what, false);
     const bytes: number[] = [];
     let warned = false;
@@ -485,12 +513,42 @@ export class Memory {
     }
     const address = this.pointer(value, fn, what);
     this.region(address, n, fn, what, false);
+    const span = this.host.recordSpan(address, n);
+    if (span !== null) {
+      return {
+        bytes: span.bytes.map((site) =>
+          'cell' in site
+            ? (encodeValue(
+                this.scope.objectOnMemory.get(site.cell),
+                this.host.valueType(site.type, site.cell),
+                Engine.sizeof(site.type)
+              )[site.byte] ?? null)
+            : site.get()
+        ),
+        address,
+      };
+    }
     const bytes: (number | null)[] = [];
     for (let at = address; at < address + n; at += 1) {
       const byte = this.byteAt(at);
       bytes.push(typeof byte === 'undefined' ? null : byte);
     }
     return { bytes, address };
+  }
+
+  /**
+   * Which bytes `n` bytes from an address are: their engine addresses, or
+   * for a structure's padding a key of the byte. Two accesses overlap where
+   * they share one; their address ranges do not say, because a structure's
+   * bytes are not a range of engine addresses.
+   */
+  byteKeys(address: number, n: number): (number | string)[] {
+    const span = this.host.recordSpan(address, n);
+    return span === null
+      ? Array.from({ length: n }, (_, i) => address + i)
+      : span.bytes.map((site) =>
+          'cell' in site ? site.cell + site.byte : site.key
+        );
   }
 
   /**
@@ -501,11 +559,42 @@ export class Memory {
   writeBytes(address: number, bytes: (number | null)[], fn: string): void {
     const memory = this.scope.objectOnMemory;
     const touched = new Map<number, { cell: Cell; bytes: (number | null)[] }>();
+    // Into a structure, each byte goes where C's layout puts it: a member's
+    // byte at its cell, a padding byte to the structure's padding.
+    const span = this.host.recordSpan(address, bytes.length);
+    const siteOf = (i: number): { cell: Cell; at: number } | null => {
+      if (span === null) {
+        const cell = this.cellAt(address + i);
+        return cell === null || cell.descriptor
+          ? null
+          : { cell, at: address + i };
+      }
+      const site = span.bytes[i];
+      if (typeof site === 'undefined') {
+        return null;
+      }
+      if (!('cell' in site)) {
+        if (bytes[i] !== null) {
+          site.set(bytes[i] as number);
+        }
+        return null;
+      }
+      return {
+        cell: {
+          start: site.cell,
+          type: site.type,
+          size: Engine.sizeof(site.type),
+          descriptor: false,
+        },
+        at: site.cell + site.byte,
+      };
+    };
     for (let i = 0; i < bytes.length; i += 1) {
-      const cell = this.cellAt(address + i);
-      if (cell === null || cell.descriptor) {
+      const found = siteOf(i);
+      if (found === null) {
         continue;
       }
+      const { cell, at } = found;
       let entry = touched.get(cell.start);
       if (typeof entry === 'undefined') {
         // A byte the cell never held stays indeterminate unless this write
@@ -519,8 +608,7 @@ export class Memory {
         touched.set(cell.start, entry);
       }
       const byte = bytes[i];
-      entry.bytes[address + i - cell.start] =
-        byte === null ? null : byte & 0xff;
+      entry.bytes[at - cell.start] = byte === null ? null : byte & 0xff;
     }
     for (const { cell, bytes: cellBytes } of touched.values()) {
       this.host.write(

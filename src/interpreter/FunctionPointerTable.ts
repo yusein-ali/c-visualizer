@@ -112,7 +112,16 @@ interface Declarator {
   /** `[2]` for an array of function pointers, otherwise empty. */
   arraySuffix: string;
   isTypedef: boolean;
+  /** `static`, `extern`: the storage class written before the type, or empty. */
+  storage: string;
 }
+
+/** The storage classes that may lead a declaration, as one run of words. */
+const STORAGE_CLASSES =
+  /^(?:(?:static|extern|register|auto|_Thread_local)\b\s*)*/;
+
+/** Leading type qualifiers, which do not name the base type. */
+const QUALIFIERS = /^(?:(?:const|volatile)\b\s*)*/;
 
 /** A span the rewrite replaces, and what it becomes. */
 interface Edit {
@@ -268,6 +277,17 @@ export class FunctionPointerTable {
     while (masked[cursor] === '*') {
       depth += 1;
       cursor = skipSpace(masked, cursor + 1);
+      // `(*const handlers[])`: a qualifier of the pointer itself, which the
+      // runtime type does not carry.
+      for (;;) {
+        const word = /^(const|volatile|restrict)\b/.exec(
+          masked.slice(cursor, cursor + 9)
+        );
+        if (word === null) {
+          break;
+        }
+        cursor = skipSpace(masked, cursor + word[1].length);
+      }
     }
     if (depth === 0) {
       return null;
@@ -309,7 +329,15 @@ export class FunctionPointerTable {
     if (isTypedef) {
       baseText = baseText.replace(/^typedef\b/, '').trim();
     }
-    const firstWord = /^[A-Za-z_][A-Za-z0-9_]*/.exec(baseText);
+    // A storage class belongs to the object, not to the signature: it stays
+    // in front of the runtime type. `static int (*compares[])(...) = {...};`
+    // was left unrewritten - `static` is no type name - and the parser then
+    // lost the rest of the file, `main` with it ("No entry point").
+    const storage = STORAGE_CLASSES.exec(baseText)![0];
+    baseText = baseText.slice(storage.length).trim();
+    const firstWord = /^[A-Za-z_][A-Za-z0-9_]*/.exec(
+      baseText.replace(QUALIFIERS, '')
+    );
     if (firstWord === null || !typeNames.has(firstWord[0])) {
       return null;
     }
@@ -335,6 +363,7 @@ export class FunctionPointerTable {
       name,
       arraySuffix,
       isTypedef,
+      storage: normalizeSpace(storage),
     };
   }
 
@@ -354,7 +383,7 @@ export class FunctionPointerTable {
           text: original.replace(/[^\n]/g, ' '),
         };
       }
-      const text = `${declarator.runtimeType} ${declarator.name}${declarator.arraySuffix}`;
+      const text = `${declarator.storage} ${declarator.runtimeType} ${declarator.name}${declarator.arraySuffix}`;
       return {
         start: declarator.start,
         end: declarator.end,

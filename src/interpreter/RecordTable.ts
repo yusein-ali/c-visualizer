@@ -106,7 +106,17 @@ export interface Member {
   pointerQualifiers: TypeQualifier[][];
   /** A bit-field's width in bits; absent for every other member. */
   bits?: number;
+  /**
+   * The bits an unnamed bit-field declared just before this member keeps
+   * unused (`unsigned : 3`), or `'unit'` after one of width 0, which starts
+   * the next bit-field in a new storage unit. Absent for every other member.
+   */
+  skippedBits?: number | 'unit';
 }
+
+/** The words a type can be spelled with, for telling an unnamed bit-field. */
+const TYPE_WORDS =
+  /^(?:(?:const|volatile|signed|unsigned|int|char|short|long|_Bool|bool)\b\s*)+$/;
 
 /** Where each member sits: the shape `Engine.execClassDec` puts in scope. */
 export type FieldOffset = Map<string, [number, string, number]>;
@@ -593,6 +603,11 @@ export abstract class RecordTable {
       const shape = this.displayShapeOfMember(member, new Set(path));
       recordAlignment = Math.max(recordAlignment, shape.alignment);
       const bits = member.bits;
+      if (member.skippedBits === 'unit') {
+        unit = null;
+      } else if (typeof member.skippedBits === 'number' && unit !== null) {
+        unit.used += member.skippedBits;
+      }
       if (
         this.keyword !== 'union' &&
         typeof bits === 'number' &&
@@ -862,6 +877,7 @@ function declaratorNames(text: string): string[] {
 export function parseMembers(body: string, offset = 0): Member[] {
   const members: Member[] = [];
   let cursor = offset;
+  let skipped: number | 'unit' = 0;
   for (const raw of splitTopLevel(body, ';')) {
     const start = cursor;
     cursor += raw.length + 1;
@@ -886,6 +902,24 @@ export function parseMembers(body: string, offset = 0): Member[] {
       const part =
         width === null ? declarator : declarator.slice(0, width.index);
       const bits = width === null ? NaN : Number(width[1].trim());
+      // `unsigned int : 0;` names no member: it is padding, and a width of 0
+      // starts the next bit-field in a new unit. It was read as a member
+      // called `int`, which took a whole word and the next initializer.
+      if (
+        width !== null &&
+        (part.trim() === '' ||
+          TYPE_WORDS.test(part.trim()) ||
+          Object.prototype.hasOwnProperty.call(LIBRARY_TYPEDEFS, part.trim()))
+      ) {
+        if (Number.isInteger(bits) && bits >= 0) {
+          skipped =
+            bits === 0 ? 'unit' : skipped === 'unit' ? skipped : skipped + bits;
+        }
+        if (baseType === null) {
+          baseType = part.trim();
+        }
+        continue;
+      }
       const parsed = splitDeclarator(part);
       if (parsed === null) {
         continue;
@@ -914,6 +948,10 @@ export function parseMembers(body: string, offset = 0): Member[] {
         parsed.lengths.length === 0
       ) {
         member.bits = bits;
+      }
+      if (skipped !== 0) {
+        member.skippedBits = skipped;
+        skipped = 0;
       }
       members.push(member);
     }

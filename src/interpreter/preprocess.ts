@@ -441,11 +441,42 @@ class Preprocessor {
         }
         record(rest);
         return;
-      default:
-        // #include, #pragma, #line: dropped, like every other directive.
-        // The blank line keeps the numbering.
+      case 'include':
+        if (this.isActive() && /^[<"]\s*assert\.h\s*[>"]/.test(rest)) {
+          this.includeAssert(lineNumber);
+        }
+        // Dropped like every other directive: the engine provides the
+        // library whichever headers are named. The blank line keeps the
+        // numbering.
         record(rest);
         return;
+      default:
+        // #pragma, #line: dropped. The blank line keeps the numbering.
+        record(rest);
+        return;
+    }
+  }
+
+  /**
+   * `#include <assert.h>`, which defines `assert` anew every time it is
+   * included, by whether `NDEBUG` is defined there (C11 7.2p1): with it,
+   * `assert(x)` is `((void)0)` and its argument is never evaluated -
+   * `assert(++n)` leaves `n` alone; without it, `assert` is the library's,
+   * which checks. A second inclusion after `#define NDEBUG` turns the
+   * assertions below it off, and one after `#undef NDEBUG` turns them back
+   * on. The engine's `assert` was called whatever `NDEBUG` said, so a
+   * program built with assertions off stopped on a false one.
+   */
+  private includeAssert(lineNumber: number): void {
+    if (this.macros.has('NDEBUG')) {
+      this.macros.set('assert', {
+        params: ['ignore'],
+        variadic: false,
+        definedAt: lineNumber,
+        body: '((void)0)',
+      });
+    } else {
+      this.macros.delete('assert');
     }
   }
 

@@ -392,7 +392,14 @@ export class DeclarationSpecifiers {
       variableRange.begin.y,
       variableRange.begin.x
     );
-    const variableEnd = this.offsetOf(variableRange.end.y, variableRange.end.x);
+    // The declarator ends at its initializer: the range unicoen gives it runs
+    // on over `= value`, and a qualifier there - the cast in
+    // `const unsigned char *p = (const unsigned char *)&x;` - was read as
+    // the declarator's own, so `p` itself was const and `p++` was refused.
+    const variableEnd = this.declaratorEnd(
+      variableStart,
+      this.offsetOf(variableRange.end.y, variableRange.end.x)
+    );
     const firstVariableStart = this.offsetOf(
       firstVariableRange.begin.y,
       firstVariableRange.begin.x
@@ -518,6 +525,22 @@ export class DeclarationSpecifiers {
 
   private isQualifierPunctuation(text: string): boolean {
     return text.replace(/[()]/g, '').trim() === '';
+  }
+
+  /** Where a declarator starting at `start` ends: before `=`, or at `end`. */
+  private declaratorEnd(start: number, end: number): number {
+    let depth = 0;
+    for (let at = start; at < end && at < this.source.length; at += 1) {
+      const char = this.source[at];
+      if (char === '(' || char === '[') {
+        depth += 1;
+      } else if (char === ')' || char === ']') {
+        depth -= 1;
+      } else if (char === '=' && depth <= 0) {
+        return at;
+      }
+    }
+    return end;
   }
 
   private countStars(start: number, end: number): number {

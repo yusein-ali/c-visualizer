@@ -159,11 +159,14 @@ const syntaxErrorMessage = (
  * objects, and PLIVET used to run such a program, print nothing and report
  * success. Calling a function that nothing declares is the second; C99 has
  * no implicit declaration of functions, and the run stopped at the call with
- * "This statement could not be executed".
+ * "This statement could not be executed". Reading through a `void *` is
+ * the third: there is no type to read the object as.
  */
 const REFUSING_RULES = new Set([
   'undeclared-identifier',
   'implicit-function-declaration',
+  // `*p` and `p[i]` on a `void *`: gcc's "invalid use of void expression".
+  'void-dereference',
 ]);
 
 const refusals = (analysis: SourceAnalysis): LintDiagnostic[] =>

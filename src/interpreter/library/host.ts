@@ -78,6 +78,20 @@ export interface LibraryHost {
    */
   recordOffset(type: string, member: string): number | null;
   /**
+   * The bytes C's layout puts from `address` on, where `address` points into
+   * a structure (or an array of them) and the `n` bytes are not all inside
+   * one member the engine lays out as C does - from the structure's own
+   * address, across members, over padding. Null for any other access, which
+   * the engine's addresses already serve. See `RecordBytes.ts`.
+   */
+  recordSpan(address: number, n: number): RecordSpan | null;
+  /**
+   * Where the live cell covering an address starts, or null for none: the
+   * nearest cell below it, unless that one is a returned frame's and a
+   * cell born after it covers the address too.
+   */
+  cellStart(address: number): number | null;
+  /**
    * Lays out the heap block at an address as the records of a type it has
    * room for, keeping the records it already holds, and returns their
    * descriptors in order: `malloc(n * sizeof(struct P))` holds n of them.
@@ -143,6 +157,39 @@ export interface VariadicFrame {
 export interface SourceLine {
   file: string;
   line: number;
+}
+
+/** A padding byte of a structure, which no engine cell holds. */
+export interface PaddingByte {
+  /** Which padding byte of which object, for telling two apart. */
+  key: string;
+  /** What it holds: what was stored there, 0, or null for indeterminate. */
+  get(): number | null;
+  set(byte: number): void;
+}
+
+/** A byte of a structure's member: which byte of which cell. */
+export interface MemberByteSite {
+  cell: number;
+  /** Which byte of the cell, least significant first. */
+  byte: number;
+  /** The cell's type, as the engine filed it. */
+  type: string;
+}
+
+/** The bytes of a structure from an address on; see `recordSpan`. */
+export interface RecordSpan {
+  /** The object, as a message names it. */
+  name: string;
+  /** How many bytes of it there are from the address on. */
+  room: number;
+  /**
+   * Each byte from the address on, up to `room` and the `n` asked for: a
+   * member's byte, or a padding byte. The cell is named rather than found
+   * from an address, because a dead frame's cells can still lie between a
+   * live cell's first byte and its last.
+   */
+  bytes: (MemberByteSite | PaddingByte)[];
 }
 
 /** One scalar member of a record object, at its engine address. */

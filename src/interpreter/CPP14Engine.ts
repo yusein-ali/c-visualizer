@@ -1,6 +1,7 @@
 import { CPP14Engine } from 'unicoen.ts/dist/interpreter/CPP14/CPP14Engine';
 import { Int } from 'unicoen.ts/dist/interpreter/CPP14/Int';
 import {
+  Break,
   ControlException,
   Engine,
   Exit,
@@ -83,9 +84,14 @@ import {
   LibraryHost,
   RecordCell,
   SourceLine,
+  MemberByteSite,
+  PaddingByte,
+  RecordSpan,
   VariadicFrame,
+  installConstants,
   installLibrary,
 } from './library';
+import { RecordShape, ShapeSource, shapeOf } from './RecordBytes';
 import { ASSERT_FILE } from './library/assert';
 import { Memory, decodeValue, encodeValue } from './library/memory';
 import { mainParameterNames, storeProgramArguments } from './ProgramArguments';
@@ -478,6 +484,76 @@ class RuntimeRefusal extends Exit {
   }
 }
 
+/**
+ * Makes a function's frame see what C's scopes give it: its own parameters
+ * and locals, then the file-scope names - not its caller's.
+ *
+ * The engine opens a called function's scope under the scope it was called
+ * from, and looks a name up through the scopes above, so a caller's local
+ * hid a global of the same name from the callee: `int count = 7;` and
+ * `void show(void) { printf("%d", count); }` printed `main`'s `count`.
+ * Lookups by name stop at the frame and go on in the file scope; the frame
+ * stays where it is in the scope tree, which is the call stack the canvas
+ * draws.
+ */
+function isolateFrame(frame: Scope): void {
+  const global = frame.global;
+  if (frame === global || frame.parent === global) {
+    return;
+  }
+  frame.getAddress = function (key: any): number {
+    return this.variableAddress.has(key)
+      ? this.variableAddress.get(key)!
+      : global.getAddress(key);
+  };
+  const byAddress = Scope.prototype.getType;
+  frame.getType = function (key: any): string {
+    if (typeof key !== 'string') {
+      return byAddress.call(this, key);
+    }
+    return this.variableTypes.has(key)
+      ? this.variableTypes.get(key)!
+      : global.getType(key);
+  };
+}
+
+/**
+ * The pointer type a heap block is carved by: a pointer to an array, `int[3]*`,
+ * carves the array's elements, `int*` - a block of rows is the rows'
+ * elements one after another. Any other pointer type is itself.
+ */
+function flatPointee(pointer: string): string {
+  const array = /^([^[]+?)\s*(?:\[\d*\])+\s*\*$/.exec(pointer.trim());
+  return array === null ? pointer : `${array[1]}*`;
+}
+
+/** Whether `target` is `node` or a node inside it. */
+function containsNode(node: unknown, target: unknown, depth = 0): boolean {
+  if (node === target) {
+    return true;
+  }
+  if (node === null || typeof node !== 'object' || depth > 64) {
+    return false;
+  }
+  if (Array.isArray(node)) {
+    return node.some((item) => containsNode(item, target, depth + 1));
+  }
+  const fields = (node as { fields?: Map<string, unknown> }).fields;
+  if (!(fields instanceof Map)) {
+    return false;
+  }
+  for (const field of fields.keys()) {
+    if (
+      field !== 'comments' &&
+      field !== 'codeRange' &&
+      containsNode((node as Record<string, unknown>)[field], target, depth + 1)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /** What one subscript or dereference of a type leaves: `int[3][4]` -> `int[4]`. */
 function elementTypeOf(type: string): string {
   const array = /^([^[]*)\[[^\]]*\]((?:\[[^\]]*\])*)$/.exec(type.trim());
@@ -597,6 +673,33 @@ interface RecordArrayAllocation {
 }
 
 /**
+ * A structure, or an array of them, as its bytes are counted in C: a named
+ * object, the elements of an array, or the records of a heap block.
+ */
+interface RecordObject {
+  /** The descriptor of the first structure. */
+  first: number;
+  type: string;
+  count: number;
+  shape: RecordShape;
+  /** As a message names it. */
+  name: string;
+  /**
+   * Whether its padding bytes are zero until something stores into them:
+   * static storage, an initializer, `calloc`. Elsewhere they are
+   * indeterminate, as nothing C does writes them.
+   */
+  zeroPadding: boolean;
+}
+
+/**
+ * Where the addresses made up for padding bytes begin, which the engine has
+ * none for (`recordAddressIn`): past every band, and inside what an `Int`
+ * holds.
+ */
+const PADDING_ADDRESS_BASE = 0x40000000;
+
+/**
  * A subscript or a dereference being read, as written, and where; see
  * `checkReadAt`. `text` is empty for one the engine made up itself (the
  * `*p` of `p->x`), which is not reported.
@@ -708,6 +811,11 @@ interface SteppingEngine {
  * a program could see: every stream function is `library/stdio.ts` over the
  * `FILE` of `stream.ts`.
  */
+/** `Engine.setGlobalObjects`, which unicoen declares private. */
+interface GlobalFiling {
+  setGlobalObjects(node: unknown, global: Scope): void;
+}
+
 export class PlivetCPP14Engine extends CPP14Engine {
   /**
    * The engine's `sizeof` - a static of unicoen's `Engine`, which `Scope` and
@@ -723,6 +831,103 @@ export class PlivetCPP14Engine extends CPP14Engine {
     Engine.sizeof = PlivetCPP14Engine.programSizeof;
     Scope.sizeof = PlivetCPP14Engine.programSizeof;
     Variable.sizeof = PlivetCPP14Engine.programSizeof;
+    // `Engine.setGlobalObjects` is private in unicoen's declarations, so it
+    // is replaced on the instance rather than overridden; see `fileGlobals`.
+    const filing = this as unknown as GlobalFiling;
+    const upstream = filing.setGlobalObjects.bind(this);
+    filing.setGlobalObjects = (node, global) =>
+      this.fileGlobals(node, global, upstream);
+    // `Engine.execFunc` is private too; see `returnedAs`.
+    const calling = this as unknown as DispatchingEngine;
+    const call = calling.execFunc.bind(this);
+    const returnedAs = this.returnedAs.bind(this);
+    calling.execFunc = function* (dec, scope, args) {
+      return returnedAs(dec, yield* call(dec, scope, args));
+    };
+  }
+
+  /**
+   * What a call of a function evaluates to: the value of its `return`
+   * expression converted to the function's return type, as by assignment
+   * (C11 6.8.6.4p3). The engine handed the expression's value back as it
+   * was, so `unsigned char next(unsigned char v) { return v + 1; }` gave
+   * 256 for 255, a `short` function its `int`, an `int` function returning
+   * `2.7` the double, and a `double` function returning `n / 2` an `int`
+   * that went on dividing as one. Only an arithmetic return type converts;
+   * a pointer, a structure and `void` hand back what they were given.
+   */
+  private returnedAs(dec: UniFunctionDec, value: unknown): unknown {
+    const spelled = typeof dec?.returnType === 'string' ? dec.returnType : '';
+    if (
+      spelled === '' ||
+      value === null ||
+      typeof value === 'undefined' ||
+      !(
+        typeof value === 'number' ||
+        typeof value === 'boolean' ||
+        value instanceof Number
+      )
+    ) {
+      return value;
+    }
+    const type = this.cTypeOf(spelled, this.globalScope);
+    return isArithmeticType(type) ? this._execCast(type, value) : value;
+  }
+
+  /**
+   * The program's file-scope declarations, filed before `main` runs: every
+   * function definition first, then the objects and types in the order they
+   * are written, with `NULL` and the library's object-like macros already
+   * there.
+   *
+   * Upstream filed each declaration where it is written and loaded the
+   * library afterwards, so a file-scope initializer could name only the
+   * functions defined above it and no macro of the library:
+   * `const struct row rows[] = {{"twice", twice}, {"none", NULL}};` failed at
+   * Start with "variable twice is not defined" when `twice` was declared by
+   * a prototype and defined below the table - or in another file, declared
+   * in a shared header - and with "variable NULL is not defined" whatever
+   * else it named. A function is a constant of the program, whose address an
+   * initializer may take wherever it is defined.
+   */
+  private fileGlobals(
+    node: unknown,
+    global: Scope,
+    upstream: (node: unknown, global: Scope) => void
+  ): void {
+    if (!(node instanceof UniProgram)) {
+      upstream(node, global);
+      return;
+    }
+    if (global.address.codeAddress === 0) {
+      // As `declareVariables` keeps it: nothing is filed at the null pointer.
+      global.address.codeAddress = Engine.structInfoSize;
+    }
+    global.setSystemVariable('SYSTEM', 'NULL', 0);
+    installConstants(global);
+    for (const [name, constant] of Object.entries(STDIO_CONSTANTS)) {
+      global.setSystemVariable('SYSTEM', name, new Int(constant.value));
+    }
+    const items: unknown[] = [];
+    const flatten = (item: unknown): void => {
+      if (item instanceof UniBlock) {
+        item.body.forEach(flatten);
+      } else {
+        items.push(item);
+      }
+    };
+    flatten(node.block);
+    const definesFunction = (item: unknown): boolean =>
+      item instanceof UniFunctionDec &&
+      item.name !== 'main' &&
+      item.block !== null &&
+      typeof item.block !== 'undefined';
+    for (const item of items.filter(definesFunction)) {
+      upstream(item, global);
+    }
+    for (const item of items.filter((one) => !definesFunction(one))) {
+      upstream(item, global);
+    }
   }
 
   /**
@@ -818,10 +1023,29 @@ export class PlivetCPP14Engine extends CPP14Engine {
     number,
     { bytes: number; zeroed: boolean }
   >();
+  /** Each function the program defines, by its body; see `declareParameters`. */
+  private readonly functionsByBlock = new WeakMap<UniBlock, UniFunctionDec>();
   /** The heap blocks laid out as records: their type and how many. */
   private readonly recordBlocks = new Map<
     number,
     { type: string; count: number }
+  >();
+  /** The functions `atexit` registered, in order; see `runAtexitHandlers`. */
+  private readonly atexitHandlers: unknown[] = [];
+  /** The byte layouts of the program's structure types (`RecordBytes`). */
+  private readonly recordShapes = new Map<string, RecordShape | null>();
+  /**
+   * The padding bytes something has stored into, by the first descriptor of
+   * their object and their offset in it.
+   */
+  private readonly paddingBytes = new Map<number, Map<number, number>>();
+  /** The objects whose indeterminate padding has been read, said once each. */
+  private readonly paddingRead = new Set<number>();
+  /** The addresses made up for padding bytes, both ways. */
+  private readonly paddingAddresses = new Map<string, number>();
+  private readonly paddingSites = new Map<
+    number,
+    { first: number; at: number }
   >();
   /** Each function as it binds its arguments; see `adjustedParameters`. */
   private readonly adjustedDeclarations = new WeakMap<
@@ -1280,6 +1504,11 @@ export class PlivetCPP14Engine extends CPP14Engine {
     ) {
       return address;
     }
+    const padding = this.paddingSites.get(address);
+    if (typeof padding !== 'undefined') {
+      // A padding byte's made-up address, as far into its object as C has it.
+      return this.displayAddressOf(padding.first) + padding.at;
+    }
     const table = this.displayAddressSource?.() ?? null;
     if (table === null) {
       return address;
@@ -1433,6 +1662,18 @@ export class PlivetCPP14Engine extends CPP14Engine {
     runtimeDec.className = name;
     const runtimeLayout = this.runtimeLayout(layout, table.membersOf(name));
     for (const runtimeName of table.namesFor(name)) {
+      // A tag is in a name space of its own (6.2.3): a function the program
+      // also calls `move_name` is filed before the types are, and the layout
+      // filed over it made every call of it "could not be executed". The tag
+      // with its keyword, below, is the name declarations use.
+      const filed = scope.variableTypes.get(runtimeName);
+      if (
+        table.isTag(runtimeName) &&
+        typeof filed !== 'undefined' &&
+        filed !== 'CLASS'
+      ) {
+        continue;
+      }
       // Scope's typedef map is not inherited by child scopes. Registering the
       // same layout under each alias makes local declarations resolve anyway.
       scope.setTop(runtimeName, runtimeLayout, 'CLASS');
@@ -1440,9 +1681,13 @@ export class PlivetCPP14Engine extends CPP14Engine {
     // And under the tag with its keyword, which no object can be named: the
     // name every declaration of the type is filed under (`recordTypeName`).
     const tagged = this.recordTypeName(name);
-    if (tagged !== name && scope.variableAddress.has(name)) {
-      scope.variableAddress.set(tagged, scope.variableAddress.get(name)!);
-      scope.variableTypes.set(tagged, 'CLASS');
+    if (tagged !== name) {
+      if (scope.variableTypes.get(name) === 'CLASS') {
+        scope.variableAddress.set(tagged, scope.variableAddress.get(name)!);
+        scope.variableTypes.set(tagged, 'CLASS');
+      } else {
+        scope.setTop(tagged, runtimeLayout, 'CLASS');
+      }
     }
   }
 
@@ -1534,6 +1779,10 @@ export class PlivetCPP14Engine extends CPP14Engine {
           const base = Number(
             (yield* this.execExpr(expr.left, scope)).valueOf()
           );
+          const stepped = this.recordByteStep(pointer, base, index);
+          if (stepped !== null) {
+            return stepped;
+          }
           const stride = this.pointerStride(pointer, base);
           this.checkHeapElement(expr.left.name, base, index, stride, scope);
           return base + index * stride;
@@ -1571,6 +1820,10 @@ export class PlivetCPP14Engine extends CPP14Engine {
             `${this.sourceTextOf(expr.left) || 'the pointer'} is a null ` +
               `pointer, so a subscript of it does not designate an object`
           );
+        }
+        const stepped = this.recordByteStep(pointer, base, index);
+        if (stepped !== null) {
+          return stepped;
         }
         this.checkHeapElement(
           this.sourceTextOf(expr.left) || 'the pointer',
@@ -1679,6 +1932,21 @@ export class PlivetCPP14Engine extends CPP14Engine {
   private pointerStride(type: string, at?: unknown): number {
     const element = elementTypeOf(type);
     if (element.endsWith(']')) {
+      const address = Number(
+        (at as { valueOf(): unknown } | null)?.valueOf?.() ?? at
+      );
+      const scope = this.globalScope;
+      if (
+        typeof at !== 'undefined' &&
+        scope !== null &&
+        this.isFlatArrayMemory(address, scope)
+      ) {
+        // Rows laid out flat, one after another: a row's whole width.
+        const flat = this.flatArrayWidth(element);
+        if (flat !== null) {
+          return flat;
+        }
+      }
       return this.engineWidthOf(element);
     }
     const size = /^(?:const|volatile|\s)*void$/.test(element)
@@ -1692,6 +1960,54 @@ export class PlivetCPP14Engine extends CPP14Engine {
           stride,
           Number((at as { valueOf(): unknown } | null)?.valueOf?.() ?? at)
         );
+  }
+
+  /**
+   * Whether an expression is a pointer to an array: `int (*row)[3]`, or a
+   * parameter `int row[][3]`, which is one.
+   */
+  private pointsToArray(expr: unknown, scope: Scope): boolean {
+    const isPointerToArray = (type: string | null): boolean =>
+      type !== null &&
+      type.trim().endsWith('*') &&
+      elementTypeOf(type.trim()).endsWith(']');
+    if (isPointerToArray(this.pointerTypeOf(expr, scope))) {
+      return true;
+    }
+    if (!(expr instanceof UniIdent)) {
+      return false;
+    }
+    try {
+      return isPointerToArray(scope.getRawType(expr.name));
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Whether an address holds an array's elements laid out flat rather than
+   * the engine's table of rows, which a declared array of arrays has: a heap
+   * block a pointer to an array was given.
+   */
+  private isFlatArrayMemory(address: number, scope: Scope): boolean {
+    if (!Number.isFinite(address) || address <= 0) {
+      return false;
+    }
+    const cell = scope.typeOnMemory.get(address);
+    return !(typeof cell === 'string' && cell.trim().endsWith(']'));
+  }
+
+  /** The engine's width of an array laid out flat: `int[3]` is three ints. */
+  private flatArrayWidth(type: string): number | null {
+    const match = /^([^[]+)((?:\[\d+\])+)$/.exec(type.replace(/\s+/g, ''));
+    if (match === null) {
+      return null;
+    }
+    const count = Array.from(match[2].matchAll(/\[(\d+)\]/g)).reduce(
+      (total, found) => total * Number(found[1]),
+      1
+    );
+    return count * this.engineWidthOf(match[1]);
   }
 
   /**
@@ -1753,8 +2069,20 @@ export class PlivetCPP14Engine extends CPP14Engine {
         : engineValue(Math.trunc((left - right) / stride), 'long');
     }
     if (how.pointer === 'left') {
+      const stepped = this.recordByteStep(
+        how.type,
+        left,
+        op === '+' ? right : -right
+      );
+      if (stepped !== null) {
+        return stepped;
+      }
       const stride = this.pointerStride(how.type, left);
       return op === '+' ? left + right * stride : left - right * stride;
+    }
+    const stepped = this.recordByteStep(how.type, right, left);
+    if (stepped !== null) {
+      return stepped;
     }
     return right + left * this.pointerStride(how.type, right);
   }
@@ -1855,12 +2183,58 @@ export class PlivetCPP14Engine extends CPP14Engine {
         scope.hasType(operand.expr.name)
       ) {
         // Upstream's one side effect, kept: `p = malloc(n * sizeof *p)` is
-        // how `malloc` learns what the block it carves will hold.
-        Engine.lastSizeOf = scope
+        // how `malloc` learns what the block it carves will hold. It is
+        // handed `p`'s own type, as a declaration hands it, and takes one
+        // `*` off: what `p` points to. Every `*` was taken off here, so
+        // `const Book **books; books = malloc(n * sizeof *books)` carved
+        // records of `Book` rather than pointers to them, and `qsort` over
+        // the pointers was refused for an element size of 4.
+        const pointer = scope
           .getTypedef(this.getType(operand.expr, scope) ?? '')
-          .replace(/\*+$/, '');
+          .trim();
+        Engine.lastSizeOf = pointer.endsWith('*')
+          ? flatPointee(pointer.replace(/\s*\*$/, '') + '*')
+          : pointer;
       }
-      const type = this.staticTypeOf(operand, scope);
+      // `sizeof(struct book)` reaches here as the bare name `book`, which a
+      // function or an object the program also calls `book` answers for:
+      // the tag, written in the source, is what is measured.
+      const tag =
+        operand instanceof UniIdent
+          ? /\b(struct|union)\s+([A-Za-z_]\w*)\s*\)?\s*$/.exec(
+              this.sourceTextOf(uniOp)
+            )
+          : null;
+      // `sizeof(int[3])`: the parser has no array type name, and hands over
+      // an identifier spelled `int[IntLiteral()]`; the source has the type.
+      const arrayType =
+        operand instanceof UniIdent && operand.name.indexOf('[') !== -1
+          ? /sizeof\s*\(\s*([^()]*\[[^()]*)\)\s*$/.exec(
+              this.sourceTextOf(uniOp)
+            )
+          : null;
+      // An integer constant's type is chosen by its suffix and its value
+      // (6.4.4.1): `sizeof 10LL` and `sizeof 2147483648` are a long long's.
+      const constant =
+        operand instanceof UniIntLiteral
+          ? literalType(
+              literalSpelling(operand) ?? String(operand.value),
+              false,
+              operand.value
+            )
+          : null;
+      const type =
+        constant !== null
+          ? constant.replace(/^(unsigned )?long long$/, (_, unsigned) =>
+              unsigned ? ENGINE_UNSIGNED_LONG_LONG : ENGINE_LONG_LONG
+            )
+          : arrayType !== null
+            ? arrayType[1].trim()
+            : tag !== null &&
+                operand instanceof UniIdent &&
+                tag[2] === operand.name
+              ? `${tag[1]} ${tag[2]}`
+              : this.staticTypeOf(operand, scope);
       const size = type === null ? null : this.sizeOfType(type, scope);
       if (size !== null) {
         return new Int(size);
@@ -1889,12 +2263,21 @@ export class PlivetCPP14Engine extends CPP14Engine {
     const pointer = this.pointerTypeOf(target, scope);
     // The store converts to the object's type, which is where an `int`
     // wraps and a `long long` does not.
+    const stepped =
+      pointer !== null && !pointer.endsWith(']')
+        ? this.recordByteStep(
+            pointer,
+            Number(current?.valueOf?.() ?? current),
+            step
+          )
+        : null;
     const next =
+      stepped ??
       Number(current?.valueOf?.() ?? current) +
-      step *
-        (pointer !== null && !pointer.endsWith(']')
-          ? this.pointerStride(pointer, current)
-          : 1);
+        step *
+          (pointer !== null && !pointer.endsWith(']')
+            ? this.pointerStride(pointer, current)
+            : 1);
     const stored = this.storeAs(address, next, type, scope);
     const result = postfix ? current : stored;
     yield result;
@@ -2289,11 +2672,59 @@ export class PlivetCPP14Engine extends CPP14Engine {
     }
   }
 
+  /**
+   * `switch`, as C runs it (6.8.4.2): the controlling value is compared with
+   * each `case` constant in turn, control goes to the matching label - or to
+   * `default` when none matches, wherever `default` is written - and runs on
+   * through every later label until a `break`. The stock switch took a
+   * second pass over the labels to reach `default`, compared values with
+   * `===` on whatever the engine held (a character against an `Int`), and
+   * left its scope behind as a child of the enclosing one.
+   */
   protected *execSwitch(statement: UniSwitch, scope: Scope): any {
     const depth = this.constructs.entered(statement, 'switch');
+    const switchScope = Scope.createLocal(scope);
+    switchScope.name = scope.name;
     try {
-      return yield* super.execSwitch(statement, scope);
+      const value = yield* this.execExpr(statement.cond, scope);
+      const wanted = Number(value?.valueOf?.() ?? value);
+      const units = statement.cases ?? [];
+      let start = -1;
+      for (let index = 0; index < units.length && start === -1; index += 1) {
+        const unit = units[index];
+        if (unit.label === 'default' || unit.cond === null) {
+          continue;
+        }
+        const label = yield* this.execExpr(unit.cond, switchScope);
+        if (Number(label?.valueOf?.() ?? label) === wanted) {
+          start = index;
+        }
+      }
+      if (start === -1) {
+        start = units.findIndex((unit) => unit.label === 'default');
+      }
+      if (start === -1) {
+        return undefined;
+      }
+      let ret: any;
+      try {
+        // A step stops at the selected label, and at each label control
+        // then falls into, as the stock switch stopped.
+        for (const unit of units.slice(start)) {
+          yield* this.stopByYield(value, unit.cond);
+          for (const inner of unit.statement ?? []) {
+            yield* this.stopByYield(ret, inner);
+            ret = yield* this.execExpr(inner, scope);
+          }
+        }
+      } catch (error) {
+        if (!(error instanceof Break)) {
+          throw error;
+        }
+      }
+      return ret;
     } finally {
+      scope.removeChild(switchScope);
       this.constructs.leftAt(depth);
     }
   }
@@ -2383,14 +2814,49 @@ export class PlivetCPP14Engine extends CPP14Engine {
     this.freedBlocks.clear();
     this.movedBlocks.clear();
     this.recordBlocks.clear();
+    this.recordShapes.clear();
+    this.atexitHandlers.length = 0;
+    this.paddingBytes.clear();
+    this.paddingRead.clear();
+    this.paddingAddresses.clear();
+    this.paddingSites.clear();
     this.blockStatics.clear();
     this.blockStaticSites = this.blockStaticDeclarationsIn(dec);
     this.fileParameterTypes(dec);
     this.constructs.reset(dec, this.entryPoint);
     const value = yield* super.executeStepByStep(dec);
+    yield* this.runAtexitHandlers();
     // Returning from `main` and calling `exit` both flush every open stream.
     this.stdio?.closeAll();
     return value;
+  }
+
+  /**
+   * The functions `atexit` registered, called with no arguments when the
+   * program ends normally - `main` returning or `exit` - the last one
+   * registered first (7.22.4.2). A run that `abort`, a failed assertion or a
+   * refusal ended calls none. Each is stepped through as any call is.
+   */
+  private *runAtexitHandlers(): any {
+    const global = this.globalScope;
+    const handlers = this.atexitHandlers.splice(0).reverse();
+    if (
+      global === null ||
+      handlers.length === 0 ||
+      this.runtimeDiagnostics.some((diagnostic) => diagnostic.fatal)
+    ) {
+      return;
+    }
+    for (const handler of handlers) {
+      try {
+        yield* this.callback(handler, 'atexit', 'the function', global)([]);
+      } catch (error) {
+        if (error instanceof Exit) {
+          return;
+        }
+        throw error;
+      }
+    }
   }
 
   /**
@@ -2409,6 +2875,9 @@ export class PlivetCPP14Engine extends CPP14Engine {
           if (typeof param.type === 'string') {
             param.type = this.recordTypeName(param.type);
           }
+        }
+        if (node.block !== null && typeof node.block !== 'undefined') {
+          this.functionsByBlock.set(node.block, node);
         }
         return;
       }
@@ -2731,6 +3200,50 @@ export class PlivetCPP14Engine extends CPP14Engine {
   }
 
   /**
+   * What each parameter's declaration says - `const void *p1` - filed for
+   * its object, as a declaration's is. Parameters had none: the views drew
+   * `void*` for a `const void *`, and a parameter laid where a dead
+   * frame's `const` local had been took that local's `const`.
+   */
+  private declareParameters(block: UniBlock, scope: Scope): void {
+    const dec = this.functionsByBlock.get(block);
+    for (const param of dec?.params ?? []) {
+      const def = param.variables[0];
+      const address =
+        typeof def === 'undefined'
+          ? undefined
+          : scope.variableAddress.get(def.name.replace(/^[*&]+/, ''));
+      if (
+        typeof def === 'undefined' ||
+        typeof address === 'undefined' ||
+        !param.codeRange ||
+        !def.codeRange
+      ) {
+        continue;
+      }
+      const found = this.declarationSpecifiers.infoForVariable(
+        param.codeRange,
+        def.codeRange,
+        def.codeRange
+      );
+      const info: RuntimeDeclarationInfo = {
+        storageClasses: found?.storageClasses ?? [],
+        qualifiers: found?.qualifiers ?? [],
+        baseQualifiers: found?.baseQualifiers ?? [],
+        pointerQualifiers: found?.pointerQualifiers ?? [],
+        ...(typeof found?.declaredType === 'string'
+          ? { declaredType: found.declaredType }
+          : {}),
+        region: 'stack',
+        initialized: true,
+        readOnly: false,
+      };
+      info.readOnly = this.constBindsObject(info, scope.getRawType(address));
+      this.declarationInfoByAddress.set(address, info);
+    }
+  }
+
+  /**
    * What a function's parameters were given, as the Variables view spells the
    * same values, for its frame in the Call stack: an address in hexadecimal,
    * as the canvas places it (`markAddress`), a function pointer by the name
@@ -2781,6 +3294,7 @@ export class PlivetCPP14Engine extends CPP14Engine {
    */
   protected *execBlock(block: UniBlock, scope: Scope): any {
     if (scope.parent !== null && scope.parent.name !== scope.name) {
+      isolateFrame(scope);
       // A function's body, its parameters just bound: the frames that were
       // where this one is have returned (`forgetDeadObjects`).
       this.forgetDeadObjects(
@@ -2812,6 +3326,7 @@ export class PlivetCPP14Engine extends CPP14Engine {
       for (const address of scope.variableAddress.values()) {
         this.born(address);
       }
+      this.declareParameters(block, scope);
     }
     const pending = this.pendingVarargs;
     if (pending === null || pending.dec.block !== block) {
@@ -3179,6 +3694,15 @@ export class PlivetCPP14Engine extends CPP14Engine {
     const declaredTypes = new Map(global.variableTypes);
     super.loadLibarary(global);
     installLibrary(global, this.libraryHost(global));
+    const handlers = this.atexitHandlers;
+    global.setTop(
+      'atexit',
+      (fn: unknown) => {
+        handlers.push(fn);
+        return new Int(0);
+      },
+      'FUNCTION'
+    );
     for (const [name, address] of declared) {
       if (global.variableAddress.get(name) !== address) {
         global.variableAddress.set(name, address);
@@ -3590,6 +4114,11 @@ export class PlivetCPP14Engine extends CPP14Engine {
       },
       recordCells: (type, descriptor) =>
         this.recordCells(type, descriptor, global),
+      recordSpan: (address, n) => this.recordSpanAt(address, n),
+      cellStart: (address) => {
+        const offset = this.cellOffsetAt(address, global);
+        return offset === null ? null : address - offset;
+      },
       recordOffset: (type, member) => this.recordOffset(type, member),
       recordBlock: (type, block) => this.layOutHeapRecords(type, block, global),
       blockEnd: (start, size) => {
@@ -4128,6 +4657,29 @@ export class PlivetCPP14Engine extends CPP14Engine {
     return null;
   }
 
+  /**
+   * Whether a file-scope declaration is `extern` of an array of unknown size
+   * - `extern const int numbers[];`, a header's
+   * `extern const struct move_name move_names[];` - with no initializer. It
+   * declares an object defined elsewhere and defines nothing, so it takes no
+   * memory: the definition, later in the file or in another file, is the
+   * object every use names. Laid out as an array it had no length for, and
+   * the whole program failed at Start with "Invalid array length".
+   */
+  private declaresIncompleteExternArray(decVar: UniVariableDec): boolean {
+    return (
+      Array.isArray(decVar.modifiers) &&
+      decVar.modifiers.indexOf('extern') !== -1 &&
+      decVar.variables.length > 0 &&
+      decVar.variables.every(
+        (def) =>
+          (def.value === null || def.value instanceof UniNoneLiteral) &&
+          typeof def.typeSuffix === 'string' &&
+          /\[\s*\]/.test(def.typeSuffix)
+      )
+    );
+  }
+
   /** Allocates record arrays and retains declaration metadata. */
   private *declareVariables(decVar: UniVariableDec, scope: Scope): any {
     // Every declaration reaches here, so this is the earliest and only hook
@@ -4142,6 +4694,9 @@ export class PlivetCPP14Engine extends CPP14Engine {
       scope.global.address.codeAddress = Engine.structInfoSize;
     }
     if (scope !== scope.global && this.bindsExistingObject(decVar, scope)) {
+      return null;
+    }
+    if (scope === scope.global && this.declaresIncompleteExternArray(decVar)) {
       return null;
     }
     const top = scope.address.stackAddress;
@@ -4540,7 +5095,8 @@ export class PlivetCPP14Engine extends CPP14Engine {
       return;
     }
     const block = Number(scope.objectOnMemory.get(address)?.valueOf());
-    const pointee = scope.getTypedef(type.slice(0, -1).trim());
+    // A block of rows (`int (*row)[3]`) holds the rows' elements.
+    const pointee = scope.getTypedef(flatPointee(type).slice(0, -1).trim());
     if (!Number.isFinite(block) || !scope.isMallocArea(block)) {
       return;
     }
@@ -4908,6 +5464,15 @@ export class PlivetCPP14Engine extends CPP14Engine {
     ) {
       return yield* super.execBinOp(arg, scope, left, right);
     }
+    if (arg === ',') {
+      // The comma operator (6.5.17): the left operand, then the right, whose
+      // value is the expression's. The stock table had no case for it, and
+      // `int last = (count = 5, count + 1);` was given the left one.
+      yield* this.execExpr(left, scope);
+      const value = yield* this.execExpr(right, scope);
+      yield value;
+      return value;
+    }
     if (arg !== '=' && ASSIGNMENT.test(arg)) {
       return yield* this.compoundAssignment(arg, scope, left, right);
     }
@@ -4974,6 +5539,17 @@ export class PlivetCPP14Engine extends CPP14Engine {
         if (address !== null) {
           yield address;
           return address;
+        }
+        // A row a pointer to an array points at in memory laid out flat -
+        // a heap block, `int (*row)[3] = malloc(...)` - is its address, as
+        // any array used as a value is; there is no table of rows to read
+        // it from.
+        if (arg === '[]' && this.pointsToArray(left, scope)) {
+          const row = yield* this.getAddress(access, scope);
+          if (this.isFlatArrayMemory(Number(row), scope)) {
+            yield row;
+            return row;
+          }
         }
       }
     }
@@ -5057,16 +5633,34 @@ export class PlivetCPP14Engine extends CPP14Engine {
       return null;
     }
     const size = this.scalarSizeOf(type);
-    const offset = this.cellOffsetAt(address, scope);
+    let offset = this.cellOffsetAt(address, scope);
     if (offset === null) {
       return null;
+    }
+    if (offset > 0) {
+      // Inside a structure the cell is known from its layout: a dead frame's
+      // cell between a member's first byte and this one is not the member.
+      const object = this.recordObjectAt(address);
+      const at = object === null ? null : this.recordOffsetIn(object, address);
+      const site = at === null ? null : this.recordByteIn(object!, at);
+      if (
+        site !== null &&
+        'cell' in site &&
+        site.cell + site.byte === address
+      ) {
+        offset = site.byte;
+      }
     }
     const cell = address - offset;
     const cellType = scope.typeOnMemory.get(cell) ?? '';
     const width = this.scalarSizeOf(cellType);
+    // A pointer's bytes are an address's: a byte-wise copy of a structure
+    // with a pointer member moves them one at a time.
+    const pointerCell =
+      cellType.trim().endsWith('*') || /^_fp\d+$/.test(cellType.trim());
     if (
       /:\s*\d+$/.test(cellType) ||
-      !isArithmeticType(this.cTypeOf(cellType, scope)) ||
+      (!pointerCell && !isArithmeticType(this.cTypeOf(cellType, scope))) ||
       (offset === 0 && width <= size) ||
       offset + size > width
     ) {
@@ -5111,6 +5705,482 @@ export class PlivetCPP14Engine extends CPP14Engine {
     return found;
   }
 
+  /** The byte layout of a structure type, or null; see `RecordBytes.ts`. */
+  private recordShapeOf(type: string): RecordShape | null {
+    const key = type.trim();
+    if (!this.recordShapes.has(key)) {
+      this.recordShapes.set(key, shapeOf(key, this.shapeSource()));
+    }
+    return this.recordShapes.get(key)!;
+  }
+
+  /** The record tables, as `shapeOf` reads them. */
+  private shapeSource(): ShapeSource {
+    return {
+      members: (type) => {
+        const table = type.indexOf('*') === -1 ? this.tableFor(type) : null;
+        if (table === null || table === this.unions) {
+          return null;
+        }
+        const members = table.membersOf(type);
+        const fields = table.displayFieldsOf(type);
+        const layout = table.layoutOf(type);
+        if (members === null || fields === null || layout === null) {
+          return null;
+        }
+        return members.map((member) => {
+          const field = fields.get(member.name);
+          const engine = layout.get(member.name);
+          return {
+            name: member.name,
+            type: member.type,
+            lengths: member.lengths,
+            offset: field?.offset ?? NaN,
+            size: field?.size ?? NaN,
+            engineOffset: engine?.[0] ?? NaN,
+            ...(typeof member.bits === 'number' ? { bits: member.bits } : {}),
+          };
+        });
+      },
+      size: (type) => this.tableFor(type)?.displaySizeOf(type) ?? 0,
+      engineSize: (type) => this.tableFor(type)?.sizeOf(type) ?? 0,
+      scalarWidth: (type) => this.scalarSizeOf(type),
+      engineWidth: (type) => this.engineWidthOf(type),
+      descriptorSize: Engine.structInfoSize,
+    };
+  }
+
+  /**
+   * The structure, or array of structures, an engine address is inside -
+   * at its descriptor, in a member's bytes, or at a padding byte's made-up
+   * address - or null for an address in no structure.
+   */
+  private recordObjectAt(address: number): RecordObject | null {
+    const scope = this.globalScope;
+    if (scope === null || !Number.isFinite(address)) {
+      return null;
+    }
+    const padding = this.paddingSites.get(address);
+    if (typeof padding !== 'undefined') {
+      const object = this.recordObjectAt(padding.first);
+      return object !== null && object.first === padding.first ? object : null;
+    }
+    const band = engineBandOf(address);
+    if (band === engineBandOf(ENGINE_HEAP_BASE)) {
+      let block: number | null = null;
+      for (const start of scope.mallocData.keys()) {
+        if (start <= address && (block === null || start > block)) {
+          block = start;
+        }
+      }
+      const laid = block === null ? undefined : this.recordBlocks.get(block);
+      return block === null ||
+        typeof laid === 'undefined' ||
+        this.freedBlocks.has(block)
+        ? null
+        : this.recordObject(
+            block,
+            laid.type,
+            laid.count,
+            'the allocated block',
+            this.heapRequests.get(block)?.zeroed === true,
+            address
+          );
+    }
+    if (band !== engineBandOf(ENGINE_STACK_BASE)) {
+      return null;
+    }
+    const visit = (holder: Scope): RecordObject | null => {
+      for (const [name, at] of holder.variableAddress) {
+        const type = (holder.variableTypes.get(name) ?? '').trim();
+        if (
+          type === '' ||
+          type === 'FUNCTION' ||
+          type === 'CLASS' ||
+          type === 'SYSTEM'
+        ) {
+          continue;
+        }
+        let first = at;
+        let count = 1;
+        let base = type;
+        if (type.endsWith(']')) {
+          const allocation = this.recordArrays.get(at);
+          if (typeof allocation === 'undefined') {
+            continue;
+          }
+          first = allocation.descriptors[0];
+          count = allocation.descriptors.length;
+          base = allocation.type;
+        } else if (
+          type.indexOf('*') !== -1 ||
+          this.tableFor(type) === null ||
+          Number(holder.objectOnMemory.get(at)) !== at + Engine.structInfoSize
+        ) {
+          continue;
+        }
+        if (address < first) {
+          continue;
+        }
+        const info = this.declarationInfoByAddress.get(first);
+        const found = this.recordObject(
+          first,
+          base,
+          count,
+          name,
+          info !== undefined &&
+            (info.initialized ||
+              info.region === 'global' ||
+              info.region === 'static'),
+          address
+        );
+        if (found !== null) {
+          return found;
+        }
+      }
+      for (const child of holder.children) {
+        const found = visit(child);
+        if (found !== null) {
+          return found;
+        }
+      }
+      return null;
+    };
+    return visit(scope);
+  }
+
+  private recordObject(
+    first: number,
+    type: string,
+    count: number,
+    name: string,
+    zeroPadding: boolean,
+    address: number
+  ): RecordObject | null {
+    const shape = this.recordShapeOf(type);
+    if (
+      shape === null ||
+      !(count > 0) ||
+      address < first ||
+      address >= first + count * shape.stride
+    ) {
+      return null;
+    }
+    return { first, type, count, shape, name, zeroPadding };
+  }
+
+  /** The byte offset in C an engine address inside an object stands for. */
+  private recordOffsetIn(object: RecordObject, address: number): number | null {
+    const padding = this.paddingSites.get(address);
+    if (typeof padding !== 'undefined') {
+      return padding.first === object.first ? padding.at : null;
+    }
+    const { shape } = object;
+    const index = Math.floor((address - object.first) / shape.stride);
+    if (index < 0 || index >= object.count) {
+      return null;
+    }
+    const at = shape.offsets.get(
+      address - (object.first + index * shape.stride)
+    );
+    return typeof at === 'undefined' ? null : index * shape.size + at;
+  }
+
+  /**
+   * The engine address a pointer to byte `at` of an object holds: a
+   * structure's descriptor at its first byte, a member's cell plus the
+   * byte's index inside a member, and past the last byte the end of the
+   * object. A padding byte is no cell's, so it is given an address of its
+   * own, above every band, which only this engine reads.
+   */
+  private recordAddressIn(object: RecordObject, at: number): number | null {
+    const { shape } = object;
+    const extent = object.count * shape.size;
+    if (!Number.isInteger(at) || at < 0 || at > extent) {
+      return null;
+    }
+    if (at === extent) {
+      return object.first + object.count * shape.stride;
+    }
+    const index = Math.floor(at / shape.size);
+    const within = shape.addresses[at - index * shape.size];
+    if (within !== null) {
+      return object.first + index * shape.stride + within;
+    }
+    const key = `${object.first}:${at}`;
+    let made = this.paddingAddresses.get(key);
+    if (typeof made === 'undefined') {
+      made = PADDING_ADDRESS_BASE + this.paddingAddresses.size;
+      this.paddingAddresses.set(key, made);
+      this.paddingSites.set(made, { first: object.first, at });
+    }
+    return made;
+  }
+
+  /**
+   * Byte `at` of an object: the engine address of a member's byte, or the
+   * padding byte, with what it holds.
+   */
+  private recordByteIn(
+    object: RecordObject,
+    at: number
+  ): MemberByteSite | PaddingByte {
+    const { shape } = object;
+    const index = Math.floor(at / shape.size);
+    const byte = shape.bytes[at - index * shape.size];
+    if (byte !== null) {
+      return {
+        cell: object.first + index * shape.stride + byte.cell,
+        byte: byte.byte,
+        type: byte.type,
+      };
+    }
+    return {
+      key: `${object.first}:${at}`,
+      get: () => {
+        const stored = this.paddingBytes.get(object.first)?.get(at);
+        return typeof stored === 'number'
+          ? stored
+          : object.zeroPadding
+            ? 0
+            : null;
+      },
+      set: (value) => {
+        let stored = this.paddingBytes.get(object.first);
+        if (typeof stored === 'undefined') {
+          stored = new Map();
+          this.paddingBytes.set(object.first, stored);
+        }
+        stored.set(at, value & 0xff);
+      },
+    };
+  }
+
+  /** Whether a pointer of this type steps a byte at a time, as `char *` does. */
+  private isBytePointer(type: string): boolean {
+    const element = elementTypeOf(type).trim();
+    const scope = this.globalScope;
+    if (/^(?:const|volatile|\s)*void$/.test(element)) {
+      return true;
+    }
+    return (
+      scope !== null &&
+      !element.endsWith('*') &&
+      !element.endsWith(']') &&
+      this.scalarSizeOf(element) === 1 &&
+      isArithmeticType(this.cTypeOf(element, scope))
+    );
+  }
+
+  /**
+   * `p + delta` for a pointer to bytes into a structure, counted in C's
+   * bytes, or null where the step is the engine's own: a pointer to
+   * something else, an address outside every structure, a result outside
+   * the object. `(unsigned char *)&s + 4` had been four engine addresses on
+   * from the descriptor, which is no byte of `s`, and `qsort`'s
+   * `base + i * size` over an array of structures fell short of the next
+   * one by its descriptor word.
+   */
+  private recordByteStep(
+    type: string,
+    base: number,
+    delta: number
+  ): number | null {
+    if (delta === 0 || !Number.isInteger(delta) || !this.isBytePointer(type)) {
+      return null;
+    }
+    const object = this.recordObjectAt(base);
+    const at = object === null ? null : this.recordOffsetIn(object, base);
+    return object === null || at === null
+      ? null
+      : this.recordAddressIn(object, at + delta);
+  }
+
+  /**
+   * Where a scalar access at a structure's address lands: its first member,
+   * as C has the structure begin with it (6.7.2.1p15) - `*(int *)&s` is
+   * `s.first`, and `((unsigned char *)&s)[0]` its first byte. The engine
+   * read the descriptor word there, an address. Any other address, and an
+   * access of a structure type, is left as it is.
+   */
+  private memberAtRecordStart(
+    address: number,
+    type: string | null,
+    scope: Scope
+  ): number {
+    if (
+      type === null ||
+      (type.indexOf('*') === -1 && this.tableFor(type) !== null) ||
+      !this.isRecordDescriptor(address, scope)
+    ) {
+      return address;
+    }
+    const object = this.recordObjectAt(address);
+    const at = object === null ? null : this.recordOffsetIn(object, address);
+    if (object === null || at === null) {
+      return address;
+    }
+    const byte = this.recordByteIn(object, at);
+    return 'cell' in byte ? byte.cell + byte.byte : address;
+  }
+
+  /**
+   * An access at a padding byte's made-up address (`recordAddressIn`): the
+   * bytes from there on, read off the structure's layout, or null for any
+   * other address.
+   */
+  private paddingAccess(
+    address: number,
+    size: number
+  ): { object: RecordObject; bytes: (MemberByteSite | PaddingByte)[] } | null {
+    const site = this.paddingSites.get(address);
+    if (typeof site === 'undefined') {
+      return null;
+    }
+    const object = this.recordObjectAt(address);
+    if (object === null) {
+      return null;
+    }
+    const bytes: (MemberByteSite | PaddingByte)[] = [];
+    for (let i = 0; i < size; i += 1) {
+      if (site.at + i >= object.count * object.shape.size) {
+        break;
+      }
+      bytes.push(this.recordByteIn(object, site.at + i));
+    }
+    return { object, bytes };
+  }
+
+  /** One byte of a member, or null where nothing is stored. */
+  private memberByteAt(site: MemberByteSite, scope: Scope): number | null {
+    return (
+      encodeValue(
+        scope.objectOnMemory.get(site.cell),
+        this.byteValueType(site.type, scope),
+        this.scalarSizeOf(site.type)
+      )[site.byte] ?? null
+    );
+  }
+
+  /**
+   * The type a cell's bytes are read and written as: its own, a pointer's
+   * as an address, a function pointer's as one too.
+   */
+  private byteValueType(type: string, scope: Scope): string {
+    const trimmed = type.trim();
+    return trimmed.endsWith('*') || /^_fp\d+$/.test(trimmed)
+      ? 'void*'
+      : this.cTypeOf(type, scope);
+  }
+
+  /**
+   * `recordSpan` of the library host: the bytes of a structure from an
+   * address on, where the engine's addresses do not already serve.
+   */
+  private recordSpanAt(address: number, n: number): RecordSpan | null {
+    const object = this.recordObjectAt(address);
+    const at = object === null ? null : this.recordOffsetIn(object, address);
+    if (object === null || at === null) {
+      return null;
+    }
+    const { shape } = object;
+    const index = Math.floor(at / shape.size);
+    const within = at - index * shape.size;
+    const startsRecord =
+      this.paddingSites.has(address) ||
+      shape.bytes[within] === null ||
+      this.isRecordDescriptor(address, this.globalScope!);
+    if (!startsRecord && at + n <= index * shape.size + shape.runEnds[within]) {
+      return null;
+    }
+    const room = object.count * shape.size - at;
+    const bytes: (MemberByteSite | PaddingByte)[] = [];
+    for (let i = 0; i < Math.min(n, room); i += 1) {
+      bytes.push(this.recordByteIn(object, at + i));
+    }
+    return { name: object.name, room, bytes };
+  }
+
+  /**
+   * A read at a padding byte's made-up address, from the structure's bytes
+   * there, or undefined for any other address. A padding byte nothing has
+   * stored into is indeterminate unless its object was zero-filled, and is
+   * read as 0 with a warning, once for the object.
+   */
+  private readPadding(
+    address: number,
+    type: string | null,
+    scope: Scope,
+    access: ReadAccess | null
+  ): unknown {
+    if (type === null || !this.paddingSites.has(address)) {
+      return undefined;
+    }
+    const size = this.scalarSizeOf(type);
+    const found = this.paddingAccess(address, size);
+    if (found === null) {
+      return undefined;
+    }
+    const bytes = found.bytes.map((byte) =>
+      'cell' in byte ? this.memberByteAt(byte, scope) : byte.get()
+    );
+    while (bytes.length < size) {
+      bytes.push(null);
+    }
+    if (bytes.some((byte) => byte === null)) {
+      if (
+        access !== null &&
+        access.text !== '' &&
+        !this.paddingRead.has(found.object.first)
+      ) {
+        this.paddingRead.add(found.object.first);
+        this.warn(
+          'uninitialized-read',
+          `${access.text} reads a padding byte of ${found.object.name}, ` +
+            `which nothing has stored into; its value is indeterminate, and ` +
+            `is read here as 0`,
+          access.range ?? this.currentRange()
+        );
+      }
+    }
+    const value = decodeValue(
+      bytes.map((byte) => byte ?? 0),
+      this.byteValueType(type, scope)
+    );
+    return value === null ? null : this._execCast(type, value);
+  }
+
+  /** A store at a padding byte's made-up address; see `readPadding`. */
+  private writePadding(
+    address: number,
+    value: unknown,
+    type: string | null,
+    scope: Scope
+  ): unknown {
+    if (type === null || !this.paddingSites.has(address)) {
+      return undefined;
+    }
+    const size = this.scalarSizeOf(type);
+    const found = this.paddingAccess(address, size);
+    if (found === null) {
+      return undefined;
+    }
+    const narrow = this._execCast(type, value);
+    const bytes = encodeValue(narrow, this.byteValueType(type, scope), size);
+    found.bytes.forEach((byte, i) => {
+      const stored = bytes[i];
+      if (stored === null) {
+        return;
+      }
+      if ('cell' in byte) {
+        this.storeAs(byte.cell + byte.byte, stored, 'unsigned char', scope);
+      } else {
+        byte.set(stored);
+      }
+    });
+    return narrow;
+  }
+
   /**
    * The value an access of `type` reads at `address`; see `byteView`. Given
    * the `access` - a subscript or a dereference, as written - the read of an
@@ -5122,6 +6192,11 @@ export class PlivetCPP14Engine extends CPP14Engine {
     scope: Scope,
     access: ReadAccess | null = null
   ): any {
+    const padded = this.readPadding(address, type, scope, access);
+    if (typeof padded !== 'undefined') {
+      return padded;
+    }
+    address = this.memberAtRecordStart(address, type, scope);
     const view = this.byteView(address, type, scope);
     if (view === null) {
       const value = scope.getValue(address);
@@ -5130,7 +6205,7 @@ export class PlivetCPP14Engine extends CPP14Engine {
     const width = this.scalarSizeOf(view.cellType);
     const bytes = encodeValue(
       scope.objectOnMemory.get(view.cell),
-      this.cTypeOf(view.cellType, scope),
+      this.byteValueType(view.cellType, scope),
       width
     ).slice(view.offset, view.offset + view.size);
     const value = decodeValue(bytes, this.cTypeOf(type!, scope));
@@ -5197,11 +6272,16 @@ export class PlivetCPP14Engine extends CPP14Engine {
     type: string | null,
     scope: Scope
   ): any {
+    const padded = this.writePadding(address, value, type, scope);
+    if (typeof padded !== 'undefined') {
+      return padded;
+    }
+    address = this.memberAtRecordStart(address, type, scope);
     const view = this.byteView(address, type, scope);
     if (view === null) {
       return this.execAssign(address, value, scope);
     }
-    const cellType = this.cTypeOf(view.cellType, scope);
+    const cellType = this.byteValueType(view.cellType, scope);
     const width = this.scalarSizeOf(view.cellType);
     const narrow = this._execCast(type!, value);
     const bytes = encodeValue(
@@ -5273,7 +6353,10 @@ export class PlivetCPP14Engine extends CPP14Engine {
     const rv = Number(r?.valueOf?.() ?? r);
     if (
       lv !== rv &&
-      (this.isRecordDescriptor(lv, scope) || this.isRecordDescriptor(rv, scope))
+      (this.isRecordDescriptor(lv, scope) ||
+        this.isRecordDescriptor(rv, scope) ||
+        this.paddingSites.has(lv) ||
+        this.paddingSites.has(rv))
     ) {
       l = this.displayAddressOf(lv);
       r = this.displayAddressOf(rv);
@@ -5899,7 +6982,7 @@ export class PlivetCPP14Engine extends CPP14Engine {
     if (type.endsWith('*')) {
       const block = Number(result?.valueOf?.() ?? result);
       if (Number.isFinite(block) && scope.isMallocArea(block)) {
-        const pointee = scope.getTypedef(type.slice(0, -1).trim());
+        const pointee = scope.getTypedef(flatPointee(type).slice(0, -1).trim());
         this.layOutHeapRecords(pointee, block, scope);
         this.layOutHeapScalars(pointee, block, scope);
       }
@@ -6077,6 +7160,35 @@ export class PlivetCPP14Engine extends CPP14Engine {
   }
 
   /**
+   * The pointer type a declaration being initialized gives the block a call
+   * in its initializer allocates - `Book **` for
+   * `Book **order = malloc(...)`, stars and all, which is what the stock
+   * allocator takes one `*` off - or null where the call is not in the
+   * initializer of a pointer declaration.
+   */
+  private declaredPointerFor(call: unknown): string | null {
+    const declaration = this.declaring[this.declaring.length - 1];
+    if (
+      typeof declaration === 'undefined' ||
+      declaration.variables.length !== 1 ||
+      call === null ||
+      typeof call !== 'object'
+    ) {
+      return null;
+    }
+    const def = declaration.variables[0];
+    if (
+      def.value === null ||
+      (typeof def.typeSuffix === 'string' && def.typeSuffix !== '') ||
+      !containsNode(def.value, call)
+    ) {
+      return null;
+    }
+    const type = `${declaration.type}${/^\**/.exec(def.name)![0]}`.trim();
+    return type.endsWith('*') ? flatPointee(type) : null;
+  }
+
+  /**
    * What `malloc` hands back: memory the program has not written yet.
    *
    * The engine fills a fresh block with random words, and a random word on the
@@ -6103,9 +7215,19 @@ export class PlivetCPP14Engine extends CPP14Engine {
     const freed = this.freedBlocks;
     const moved = this.movedBlocks;
     const calls = this.calls;
+    const declaredPointer = (call: unknown): string | null =>
+      this.declaredPointerFor(call);
     // A `function` rather than an arrow, for the reason `includeStdio` gives.
     const wrapped = function (this: unknown, ...args: any[]) {
       const start = global.address.heapAddress;
+      // The stock allocator carves the block by `Engine.lastSizeOf`, which a
+      // declaration sets to its type before its `*`s are moved onto it:
+      // `Book **order = malloc(n * sizeof order[0]);` was carved as a `Book`
+      // record and drawn with a row more than the pointers it holds.
+      const pointer = declaredPointer(calls[calls.length - 1]);
+      if (pointer !== null) {
+        Engine.lastSizeOf = pointer;
+      }
       const requested = Number(args[0]);
       // What is written where the block is about to land, read before the
       // allocator writes over it. This engine's heap cursor only moves
@@ -6254,6 +7376,9 @@ export class PlivetCPP14Engine extends CPP14Engine {
   ): number {
     const table = this.tableFor(type)!;
     const descriptor = scope.address.stackAddress;
+    // Padding a dead object laid here held is not this one's.
+    this.paddingBytes.delete(descriptor);
+    this.paddingRead.delete(descriptor);
     scope.variableAddress.set(name, descriptor);
     scope.variableTypes.set(name, type);
     const list = Array.isArray(initializer) ? initializer : null;
@@ -6408,6 +7533,8 @@ export class PlivetCPP14Engine extends CPP14Engine {
     const stride = Engine.structInfoSize + table.sizeOf(type);
     const descriptors: number[] = [];
     let descriptor = scope.address.stackAddress;
+    this.paddingBytes.delete(descriptor);
+    this.paddingRead.delete(descriptor);
     for (const initializer of initializers) {
       descriptors.push(descriptor);
       this.writeRecord(
@@ -7621,6 +8748,13 @@ export class PlivetCPP14Engine extends CPP14Engine {
     info: RuntimeDeclarationInfo,
     type: string
   ): boolean {
+    if (/^_fp\d+(\[|$)/.test(type.trim())) {
+      // A function pointer (`FunctionPointerTable`): a `const` before it is
+      // its return type's - `const char *(*namer)(int)` returns a pointer to
+      // const characters - and `namer = name_of;` was refused as a store
+      // into a const object.
+      return false;
+    }
     if (type.indexOf('*') === -1) {
       return (info.baseQualifiers || info.qualifiers).indexOf('const') !== -1;
     }

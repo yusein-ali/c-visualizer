@@ -127,6 +127,12 @@ export function runtimeFunctionsOf(
 const ENGINE_HEAP_BASE = 20000;
 
 /**
+ * Where the engine's stack band begins: the file-scope objects, the program's
+ * arguments and every frame are given addresses upwards from here.
+ */
+const ENGINE_STACK_BASE = 50000;
+
+/**
  * The name a record type is filed under in the runtime types, which is
  * without its tag keyword. A member that is itself a record keeps the
  * keyword its declaration spelled (`union reg r;`), and looked up with it
@@ -156,6 +162,15 @@ export function annotateRuntimeVariables(
   // after the other file-scope objects, beside `main`'s frame, while the
   // memory view listed them with the literals at 0x2710.
   const readOnlyObjects: Variable[] = [];
+  // Where the objects drawn so far in the stack band end. The engine packs
+  // that band as C packs a structure's members - a `char` is one byte and the
+  // next object sits beside it - while the walk below starts every named
+  // object on a word, so a frame drawn with its padding ends past where the
+  // engine ended it. The next frame, and `main`'s after the program's
+  // arguments, starts where the engine put it, and used to be drawn on top of
+  // the last bytes before it: `char c` in `main` and the first parameter of the
+  // function it called, `_argv[2]`'s string and `argc`, had one address.
+  let stackBandEnd: number | null = null;
   for (const stack of state.getStacks()) {
     let cursor: number | null = null;
     for (const variable of stack.getVariables()) {
@@ -196,10 +211,15 @@ export function annotateRuntimeVariables(
       // packing it is. Members inside an aggregate are laid out from their
       // parent and still pack as C packs them, so a `char[3]` is three
       // consecutive bytes.
-      cursor = alignAddress(
-        cursor === null ? variable.address : cursor,
-        Math.max(shape.alignment, MEMORY_ALIGNMENT)
-      );
+      // A stack's first object starts at its engine address, but never on
+      // what an earlier stack was drawn over (`stackBandEnd`).
+      const from =
+        cursor !== null
+          ? cursor
+          : stackBandEnd !== null && variable.address >= ENGINE_STACK_BASE
+            ? Math.max(variable.address, stackBandEnd)
+            : variable.address;
+      cursor = alignAddress(from, Math.max(shape.alignment, MEMORY_ALIGNMENT));
       annotateVariable(
         variable,
         enumTypes,
@@ -212,6 +232,9 @@ export function annotateRuntimeVariables(
         shape.size
       );
       cursor += shape.size;
+      if (variable.address >= ENGINE_STACK_BASE) {
+        stackBandEnd = Math.max(stackBandEnd ?? cursor, cursor);
+      }
     }
   }
   // A string literal is an object at an address like any other, so it takes a

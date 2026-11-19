@@ -9,6 +9,17 @@ import {
   functionPointerInfoOf,
 } from '../interpreter/RuntimeTypeInfo';
 import { cSpelling, exactInteger } from '../interpreter/ExpressionTypes';
+import { qualifiedDisplayType } from './qualifiedType';
+
+/** A type with its declaration's qualifiers, where it has any. */
+const qualifiedTypeOf = (variable: Variable, type: string): string => {
+  const declaration = declarationInfoOf(variable);
+  return declaration !== null &&
+    (declaration.qualifiers.length > 0 ||
+      (declaration.pointerQualifiers ?? []).some((level) => level.length > 0))
+    ? qualifiedDisplayType(type, declaration)
+    : type;
+};
 import { basicSizeof } from '../interpreter/RecordTable';
 import { libraryTypedefIn } from '../interpreter/library/types';
 import { blockStaticFunctionOf } from '../interpreter/StateSnapshot';
@@ -369,7 +380,9 @@ export function extractVariables(
         // The key `extractModel` builds this object's cells under. The two
         // passes are separate and have to agree on one thing, and this is it.
         key: `${owner}-${variable.name}`,
-        type,
+        // A qualified type spelled as the memory view spells it: the two said
+        // `int*` and `const int *` of one `const int *a`.
+        type: qualifiedTypeOf(variable, type),
         value: valueOf(variable, type, resolve),
         address: displayAddressOf(variable),
         region: memoryRegionOf(variable, stack.name),

@@ -1,15 +1,7 @@
 import { Engine } from 'unicoen.ts/dist/interpreter/Engine/Engine';
 import { Scope } from 'unicoen.ts/dist/interpreter/Engine/Scope';
 import { LibraryHost } from './host';
-import {
-  Memory,
-  StringArg,
-  cInt,
-  decodeValue,
-  encodeValue,
-  num,
-  sizeArg,
-} from './memory';
+import { Memory, StringArg, cInt, decodeValue, num, sizeArg } from './memory';
 
 /**
  * `<string.h>`.
@@ -304,16 +296,18 @@ export function installString(global: Scope, host: LibraryHost): void {
   });
 
   /**
-   * The structures a `mem*` call covers when its pointer is one, or null
-   * when it is not. A structure is a descriptor word and its members here,
-   * so the bytes between two pointers say nothing about the members; a call
-   * covering whole structures is carried out member by member instead.
+   * The whole structures a `mem*` call covers from a structure's address,
+   * or null when it covers anything else. A structure is a descriptor word
+   * and its members here, so a call over whole structures is carried out
+   * member by member, which keeps what nothing has stored still unstored.
+   * Any other call - part of a structure, a structure and a buffer of bytes,
+   * past the last structure - is the bytes C's layout has there
+   * (`Memory.bytes`, `Memory.writeBytes`), as gcc's is; it used to be
+   * refused.
    */
   const recordSpan = (
     address: number | null,
-    n: number,
-    fn: string,
-    what: string
+    n: number
   ): { type: string; descriptors: number[] } | null => {
     const type = address === null ? null : memory.recordAt(address);
     if (address === null || type === null) {
@@ -321,26 +315,47 @@ export function installString(global: Scope, host: LibraryHost): void {
     }
     const size = host.recordSize(type);
     if (n === 0 || size <= 0 || n % size !== 0) {
-      host.refuse(
-        'partial-record',
-        `${fn} covers ${n} bytes of ${what}, a struct ${type} of ${size} ` +
-          `bytes; c-visualizer applies ${fn} to whole structures only`
-      );
+      return null;
     }
     const stride = host.recordStride(type);
     const descriptors: number[] = [];
     for (let k = 0; k < n / size; k += 1) {
       const descriptor = address + k * stride;
       if (memory.recordAt(descriptor) !== type) {
-        host.refuse(
-          'buffer-overflow',
-          `${fn} would cover ${n / size} structures from ${what}, but only ` +
-            `${k} ${k === 1 ? 'is' : 'are'} there`
-        );
+        return null;
       }
       descriptors.push(descriptor);
     }
     return { type, descriptors };
+  };
+
+  /**
+   * The padding bytes of whole structures copied member by member: the
+   * bytes go with them, as they do in gcc's byte copy, so `memcmp` of a copy
+   * and its original finds them equal.
+   */
+  const copyPadding = (source: number, target: number, n: number): void => {
+    const from = host.recordSpan(source, n);
+    const to = host.recordSpan(target, n);
+    from?.bytes.forEach((site, i) => {
+      const into = to?.bytes[i];
+      if ('cell' in site || typeof into === 'undefined' || 'cell' in into) {
+        return;
+      }
+      const byte = site.get();
+      if (byte !== null) {
+        into.set(byte);
+      }
+    });
+  };
+
+  /** Fills the padding bytes of whole structures, as `memset` does. */
+  const fillPadding = (target: number, n: number, byte: number): void => {
+    for (const site of host.recordSpan(target, n)?.bytes ?? []) {
+      if (!('cell' in site)) {
+        site.set(byte);
+      }
+    }
   };
 
   const cellsOf = (span: { type: string; descriptors: number[] }) =>
@@ -358,24 +373,14 @@ export function installString(global: Scope, host: LibraryHost): void {
       return target;
     }
     const source = pointerOrNull(from);
-    const targetSpan = recordSpan(target, count, fn, 'the destination');
+    const targetSpan = recordSpan(target, count);
     const sourceSpan =
-      source === null || source === 0
-        ? null
-        : recordSpan(source, count, fn, 'the source');
-    if (targetSpan !== null || sourceSpan !== null) {
-      if (
-        targetSpan === null ||
-        sourceSpan === null ||
-        targetSpan.type !== sourceSpan.type
-      ) {
-        host.refuse(
-          'record-copy',
-          `${fn} copies between a structure and something that is not a ` +
-            `structure of the same type; c-visualizer copies a structure ` +
-            `only into a structure of the same type`
-        );
-      }
+      source === null || source === 0 ? null : recordSpan(source, count);
+    if (
+      targetSpan !== null &&
+      sourceSpan !== null &&
+      targetSpan.type === sourceSpan.type
+    ) {
       // A structure's engine extent is its descriptor and members, which is
       // not the `sizeof` the program passed.
       const extent =
@@ -389,12 +394,16 @@ export function installString(global: Scope, host: LibraryHost): void {
       cellsOf(targetSpan).forEach((cell, i) =>
         host.write(cell.address, values[i], fn)
       );
+      copyPadding(source as number, target, count);
       return target;
     }
     const bytes = memory.bytes(from, count, fn, 'the source');
     memory.region(target, count, fn, 'the destination', true);
-    if (fn === 'memcpy' && overlapping(bytes.address, count, target, count)) {
-      refuseOverlap(fn);
+    if (fn === 'memcpy' && bytes.address !== null) {
+      const read = new Set(memory.byteKeys(bytes.address, count));
+      if (memory.byteKeys(target, count).some((key) => read.has(key))) {
+        refuseOverlap(fn);
+      }
     }
     if (bytes.bytes.some((byte) => byte === null)) {
       host.warn(
@@ -422,7 +431,7 @@ export function installString(global: Scope, host: LibraryHost): void {
       return target;
     }
     const byte = num(c) & 0xff;
-    const span = recordSpan(target, count, 'memset', 'the destination');
+    const span = recordSpan(target, count);
     if (span !== null) {
       for (const cell of cellsOf(span)) {
         const size = Engine.sizeof(cell.type);
@@ -435,6 +444,7 @@ export function installString(global: Scope, host: LibraryHost): void {
           'memset'
         );
       }
+      fillPadding(target, count, byte);
       return target;
     }
     memory.region(target, count, 'memset', 'the destination', true);
@@ -442,31 +452,14 @@ export function installString(global: Scope, host: LibraryHost): void {
     return target;
   });
 
-  /** The bytes a record span holds, member after member. */
-  const recordBytes = (span: { type: string; descriptors: number[] }) =>
-    cellsOf(span).flatMap((cell) =>
-      encodeValue(
-        global.objectOnMemory.get(cell.address),
-        host.valueType(cell.type, cell.address),
-        Engine.sizeof(cell.type)
-      )
-    );
-
   define('memcmp', (a: unknown, b: unknown, n: unknown) => {
     const count = sizeArg(n);
     if (count === 0) {
       return cInt(0);
     }
-    const read = (value: unknown, what: string): (number | null)[] => {
-      const address = pointerOrNull(value);
-      const span =
-        address === null || address === 0
-          ? null
-          : recordSpan(address, count, 'memcmp', what);
-      return span === null
-        ? memory.bytes(value, count, 'memcmp', what).bytes
-        : recordBytes(span);
-    };
+    // A structure's bytes as C lays them out, padding included.
+    const read = (value: unknown, what: string): (number | null)[] =>
+      memory.bytes(value, count, 'memcmp', what).bytes;
     const left = read(a, 'the first block');
     const right = read(b, 'the second block');
     for (let i = 0; i < Math.min(left.length, right.length); i += 1) {

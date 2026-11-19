@@ -13,8 +13,22 @@ import { UniProgram } from 'unicoen.ts/dist/node/UniProgram';
 import { ANTLRInputStream, CommonTokenStream } from 'antlr4ts';
 import type { ParserRuleContext } from 'antlr4ts';
 import { PlivetCPP14Engine, SourceLocator } from './CPP14Engine';
-import { arrayPointerParameters } from './ArrayPointerParameters';
+import {
+  ArrayPointerObject,
+  arrayPointerObjects,
+  arrayPointerParameters,
+  resolveArrayPointerObjects,
+} from './ArrayPointerParameters';
+import {
+  alignofExpressions,
+  constantArrayLengths,
+  staticAssertions,
+} from './ArrayLengths';
 import { resolveComplements } from './Complement';
+import { hexFloatLiterals } from './HexFloats';
+import { withoutNoreturn } from './Noreturn';
+import { resolveStackedCases } from './StackedCases';
+import { resolveUnsignedDeclarators } from './UnsignedDeclarators';
 import { Construct } from './Construct';
 import { DeclarationSpecifiers } from './DeclarationSpecifiers';
 import { DesignatedInitializers } from './DesignatedInitializers';
@@ -88,6 +102,9 @@ interface ParsedSource {
  * tree. Diagnostics need both, so expose the two products of one ANTLR parse.
  */
 class PlivetCPP14Mapper extends CPP14Mapper {
+  /** Pointers to arrays the source pass rewrote; see `arrayPointerObjects`. */
+  arrayPointerObjects: readonly ArrayPointerObject[] = [];
+
   analyze(code: string): ParsedSource {
     const antlrTree = this.parseToANTLRTree(code);
     const errors = this.parser
@@ -137,6 +154,9 @@ class PlivetCPP14Mapper extends CPP14Mapper {
   makeUniTree(tree: ParserRuleContext, tokens: CommonTokenStream): UniProgram {
     const program = super.makeUniTree(tree, tokens);
     resolveComplements(program);
+    resolveUnsignedDeclarators(program, this.parsing);
+    resolveStackedCases(program, this.parsing);
+    resolveArrayPointerObjects(program, this.arrayPointerObjects);
     resolveTypedefAmbiguities(
       program,
       typeNamesFor(this.parsing, program),
@@ -592,8 +612,41 @@ export class PlivetCPP14Interpreter extends Interpreter {
   /** Runs every source pass once and gives the engine fresh record metadata. */
   private prepare(code: string): PreparedSource {
     const expanded = preprocessSource(code);
-    const joined = arrayPointerParameters(joinAdjacentStrings(expanded.code));
-    const preprocessed = { ...expanded, code: bracedDoBodies(joined) };
+    const pointerObjects = arrayPointerObjects(
+      arrayPointerParameters(
+        joinAdjacentStrings(hexFloatLiterals(withoutNoreturn(expanded.code)))
+      )
+    );
+    this.plivetMapper.arrayPointerObjects = pointerObjects.objects;
+    const linked = pointerObjects.code;
+    // Array lengths written as constant expressions become their values, and
+    // `_Static_assert`s are checked and taken out (`ArrayLengths.ts`), both
+    // measured with the program's own record types.
+    const sizing = new StructTable();
+    const sizingUnions = new UnionTable();
+    sizing.link(sizingUnions);
+    sizingUnions.link(sizing);
+    sizing.read(linked);
+    sizingUnions.read(linked);
+    const recordSize = (name: string): number | null => {
+      const size =
+        sizing.displaySizeOf(name) || sizingUnions.displaySizeOf(name);
+      return size > 0 ? size : null;
+    };
+    const asserted = staticAssertions(
+      alignofExpressions(linked, recordSize, (name) => {
+        const found =
+          sizing.displayAlignmentOf(name) ||
+          sizingUnions.displayAlignmentOf(name);
+        return recordSize(name) === null ? null : found;
+      }),
+      recordSize
+    );
+    const joined = asserted.code;
+    const preprocessed = {
+      ...expanded,
+      code: constantArrayLengths(bracedDoBodies(joined), recordSize),
+    };
     // What the syntax check reads, in place of the fully rewritten `code`
     // below - from before `bracedDoBodies`, which could make a do-while body
     // C does not allow (a declaration) one it does. The passes after this
@@ -673,6 +726,12 @@ export class PlivetCPP14Interpreter extends Interpreter {
               (member) =>
                 new SyntaxErrorData(member.line, member.column, member.message)
             )
+        )
+        .concat(
+          asserted.failed.map(
+            (failure) =>
+              new SyntaxErrorData(failure.line, failure.column, failure.message)
+          )
         ),
       checkCode,
       expansions: preprocessed.expansions.concat(enums.expansions),

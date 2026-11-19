@@ -80,6 +80,8 @@ interface Declared {
   /** The type as written, without the declarator's stars. */
   type: string;
   pointer: boolean;
+  /** How many `*`s the declarator and the type have between them. */
+  stars?: number;
   array: boolean;
   /**
    * Whether anything has given it a value yet. Lexical rather than
@@ -1117,6 +1119,56 @@ const vaListArgument: Rule = {
   },
 };
 
+/**
+ * `*p` and `p[i]` where `p` is a `void *`. A void pointer says where an
+ * object is and nothing about its type, so there is no value to read there:
+ * gcc refuses the program ("invalid use of void expression"). The engine
+ * read whatever cell was at the address - `*p` printed an `int` the pointer
+ * had been given, or the address held in a structure's first member - which
+ * teaches that the conversion `qsort`'s comparators make is optional.
+ * `p + 1` is not this: gcc steps a `void *` a byte at a time.
+ */
+const voidDereference: Rule = {
+  name: 'void-dereference',
+  severity: 'error',
+  enter(node, pass) {
+    const operand =
+      node instanceof UniUnaryOp && node.operator === '*'
+        ? node.expr
+        : node instanceof UniBinOp && node.operator === '[]'
+          ? node.left
+          : null;
+    if (!(operand instanceof UniIdent)) {
+      return;
+    }
+    const declared = pass.declared(operand.name);
+    if (
+      declared === null ||
+      declared.array ||
+      declared.stars !== 1 ||
+      cSpelling(declared.type)
+        .replace(/\b(const|volatile|restrict)\b|\*/g, '')
+        .trim() !== 'void'
+    ) {
+      return;
+    }
+    const range = rangeOf(node);
+    if (range === null) {
+      return;
+    }
+    const name = operand.name;
+    pass.report(
+      this,
+      range,
+      `${name} is a void pointer, which does not say what type of object it ` +
+        `points to, so ${node instanceof UniUnaryOp ? `*${name}` : `${name}[...]`} ` +
+        `has no value to use. Convert it to a pointer to the type of the ` +
+        `object first, for an int: const int *q = ${name}; and then *q, or ` +
+        `*(const int *)${name}.`
+    );
+  },
+};
+
 const RULES: Rule[] = [
   scanfAddress,
   assignmentAsCondition,
@@ -1139,6 +1191,7 @@ const RULES: Rule[] = [
 const PROGRAM_RULES: Rule[] = [
   undeclaredIdentifier,
   implicitFunctionDeclaration,
+  voidDereference,
 ];
 
 const declaredFrom = (
@@ -1154,6 +1207,7 @@ const declaredFrom = (
     name: withoutStars(name),
     type,
     pointer: 0 < declaratorStars(name),
+    stars: declaratorStars(name) + (type.match(/\*/g) ?? []).length,
     array: suffix.indexOf('[') !== -1,
     initialised,
   };
