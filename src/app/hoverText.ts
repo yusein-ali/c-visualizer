@@ -537,7 +537,7 @@ export class HoverTextSource {
   watchRecord(name: string): HoverRecord {
     const variable = this.variableNamed(name);
     return variable === null
-      ? { title: name, facts: [note(strings.notInScope)] }
+      ? { title: name, facts: [{ ...note(strings.notInScope), brief: true }] }
       : this.variableRecord(variable);
   }
 
@@ -796,7 +796,7 @@ export class HoverTextSource {
     const { target } = variable;
     const facts = [
       fact(strings.declarationType, variable.type, true),
-      fact(strings.value, variable.value, true),
+      { ...fact(strings.value, variable.value, true), brief: true },
     ];
     if (typeof target !== 'undefined') {
       facts.push(

@@ -7,6 +7,10 @@ import {
 } from '@codemirror/view';
 import {
   DebugExtensions,
+  expandWatch,
+  moveWatch,
+  restoreSession,
+  sessionOf,
   setWatchRecords,
   toggleWatch,
   watchField,
@@ -290,6 +294,185 @@ describe('the pin on a watch', () => {
       new MouseEvent('click', { bubbles: true, detail: 0 })
     );
     expect(tooltipsOf(view.state)).toHaveLength(0);
+    view.destroy();
+  });
+});
+
+describe('folding and moving a watch', () => {
+  const at = doc.indexOf('count');
+  const record = (value: string) => ({
+    title: 'count',
+    facts: [
+      { label: 'type', value: 'int', code: true },
+      { label: 'value', value, code: true, brief: true },
+      { label: 'address', value: '0x1000', code: true },
+    ],
+  });
+  const mount = () => {
+    const view = new EditorView({
+      state: stateWith({ name: 'count', pos: at }),
+      parent: document.body,
+    });
+    view.dispatch({
+      effects: setWatchRecords.of([{ name: 'count', record: record('7') }]),
+    });
+    return view;
+  };
+  const step = (view: EditorView, value: string) =>
+    view.dispatch({
+      effects: setWatchRecords.of([{ name: 'count', record: record(value) }]),
+    });
+  const standing = (view: EditorView) =>
+    view.dom.querySelector<HTMLElement>('.plivet-watch')!;
+  const toggleOf = (view: EditorView) =>
+    standing(view).querySelector<HTMLButtonElement>('.plivet-watch__toggle');
+  const handleOf = (view: EditorView) =>
+    standing(view).querySelector<HTMLElement>('.plivet-watch__handle')!;
+  const press = (button: HTMLElement) =>
+    button.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+  // jsdom has no PointerEvent: a mouse event under a pointer event's name
+  // reaches the same listener with the fields the drag reads.
+  const pointer = (target: HTMLElement, type: string, x = 0, y = 0) =>
+    target.dispatchEvent(
+      new MouseEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+        clientX: x,
+        clientY: y,
+      })
+    );
+  // jsdom lays nothing out, so the editor is given a size to keep a watch
+  // in, and the watch a place inside it.
+  const roomFor = (view: EditorView) => {
+    view.dom.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, right: 800, bottom: 600 }) as DOMRect;
+    standing(view).getBoundingClientRect = () =>
+      ({ left: 100, top: 200, right: 250, bottom: 230 }) as DOMRect;
+  };
+  const pinOf = (view: EditorView) => view.state.field(watchField).pins[0]!;
+
+  it('folds a watch to its name and value, with a triangle to show the rest', () => {
+    const view = mount();
+    const dom = standing(view);
+    expect(dom.classList.contains('plivet-watch--folded')).toBe(true);
+    expect(handleOf(view).textContent).toContain('count');
+    expect(handleOf(view).textContent).toContain('= 7');
+    expect(dom.textContent).not.toContain('0x1000');
+    expect(dom.querySelector('table')).toBeNull();
+    expect(toggleOf(view)!.getAttribute('aria-expanded')).toBe('false');
+    view.destroy();
+  });
+
+  it('unfolds with the triangle, stays unfolded through a step, and folds again', () => {
+    const view = mount();
+    press(toggleOf(view)!);
+    expect(pinOf(view).expanded).toBe(true);
+    expect(standing(view).textContent).toContain('0x1000');
+    expect(toggleOf(view)!.getAttribute('aria-expanded')).toBe('true');
+    step(view, '8');
+    expect(standing(view).textContent).toContain('0x1000');
+    expect(standing(view).textContent).toContain('8');
+    press(toggleOf(view)!);
+    expect(pinOf(view).expanded).toBeUndefined();
+    expect(standing(view).textContent).not.toContain('0x1000');
+    expect(handleOf(view).textContent).toContain('= 8');
+    view.destroy();
+  });
+
+  it('shows no triangle where the value is all there is', () => {
+    const view = mount();
+    view.dispatch({
+      effects: setWatchRecords.of([
+        {
+          name: 'count',
+          record: { title: 'count', facts: [{ label: 'value', value: '7' }] },
+        },
+      ]),
+    });
+    expect(toggleOf(view)).toBeNull();
+    expect(handleOf(view).textContent).toContain('= 7');
+    view.destroy();
+  });
+
+  it('is dragged by its line, and keeps its place through a step', () => {
+    const view = mount();
+    roomFor(view);
+    const handle = handleOf(view);
+    pointer(handle, 'pointerdown', 100, 100);
+    pointer(handle, 'pointermove', 130, 60);
+    expect(standing(view).style.transform).toBe('translate(30px, -40px)');
+    pointer(handle, 'pointerup', 130, 60);
+    expect(pinOf(view).offset).toEqual({ x: 30, y: -40 });
+    step(view, '8');
+    const moved = standing(view);
+    expect(moved.style.transform).toBe('translate(30px, -40px)');
+    expect(moved.classList.contains('plivet-watch--moved')).toBe(true);
+    view.destroy();
+  });
+
+  it('cannot be dragged out of the editor', () => {
+    const view = mount();
+    roomFor(view);
+    const handle = handleOf(view);
+    pointer(handle, 'pointerdown', 100, 100);
+    pointer(handle, 'pointermove', -900, -900);
+    pointer(handle, 'pointerup', -900, -900);
+    expect(pinOf(view).offset).toEqual({ x: -100, y: -200 });
+    view.destroy();
+  });
+
+  it('is not pulled the other way when it already stands partly outside', () => {
+    const view = mount();
+    roomFor(view);
+    standing(view).getBoundingClientRect = () =>
+      ({ left: 700, top: 200, right: 900, bottom: 230 }) as DOMRect;
+    const handle = handleOf(view);
+    pointer(handle, 'pointerdown', 100, 100);
+    pointer(handle, 'pointermove', 250, 100);
+    expect(standing(view).style.transform).toBe('');
+    pointer(handle, 'pointerup', 250, 100);
+    expect(pinOf(view).offset).toBeUndefined();
+    view.destroy();
+  });
+
+  it('goes back over its name on a double-click of its line', () => {
+    const view = mount();
+    view.dispatch({
+      effects: moveWatch.of({ name: 'count', offset: { x: 30, y: -40 } }),
+    });
+    const handle = handleOf(view);
+    pointer(handle, 'pointerdown', 10, 10);
+    pointer(handle, 'pointerup', 10, 10);
+    pointer(handle, 'pointerdown', 10, 10);
+    expect(pinOf(view).offset).toBeUndefined();
+    expect(standing(view).style.transform).toBe('');
+    expect(standing(view).classList.contains('plivet-watch--moved')).toBe(
+      false
+    );
+    view.destroy();
+  });
+
+  it('keeps the fold and the place of a watch in a session', () => {
+    const view = mount();
+    view.dispatch({
+      effects: [
+        expandWatch.of({ name: 'count', expanded: true }),
+        moveWatch.of({ name: 'count', offset: { x: 12, y: -30 } }),
+      ],
+    });
+    const written = JSON.parse(JSON.stringify(sessionOf(view.state)));
+    expect(written.watches).toEqual([
+      { name: 'count', pos: at, expanded: true, offset: { x: 12, y: -30 } },
+    ]);
+    const other = new EditorView({
+      state: EditorState.create({ doc, extensions: [watchField] }),
+    });
+    restoreSession(other, written);
+    expect(other.state.field(watchField).pins).toEqual([
+      { name: 'count', pos: at, expanded: true, offset: { x: 12, y: -30 } },
+    ]);
+    other.destroy();
     view.destroy();
   });
 });

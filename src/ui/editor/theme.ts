@@ -574,6 +574,96 @@ export const debugTheme = EditorView.baseTheme({
     opacity: '1',
     borderColor: 'currentColor',
   },
+  // The line with the name: folded, it is the whole watch - the triangle,
+  // the name and its value - and folded or not it is what the watch is
+  // dragged by.
+  '.plivet-watch .plivet-watch__handle': {
+    display: 'flex',
+    alignItems: 'baseline',
+    flexWrap: 'wrap',
+    columnGap: '0.4em',
+    cursor: 'grab',
+    userSelect: 'none',
+  },
+  '.plivet-watch--folded .plivet-watch__handle': {
+    marginBottom: '0',
+  },
+  '.plivet-watch--dragging, .plivet-watch--dragging .plivet-watch__handle': {
+    cursor: 'grabbing',
+  },
+  '.plivet-watch__value': {
+    fontWeight: 'normal',
+    whiteSpace: 'pre-wrap',
+  },
+  '.plivet-watch__brief': {
+    fontWeight: 'normal',
+    fontStyle: 'italic',
+    opacity: '0.85',
+    whiteSpace: 'normal',
+  },
+  '.plivet-watch__toggle': {
+    alignSelf: 'center',
+    marginLeft: '-4px',
+    padding: '0 1px',
+    font: 'inherit',
+    lineHeight: '1',
+    color: 'inherit',
+    background: 'transparent',
+    border: '1px solid transparent',
+    borderRadius: '3px',
+    cursor: 'pointer',
+    opacity: '0.7',
+  },
+  '.plivet-watch__toggle svg': {
+    display: 'block',
+    width: '0.9em',
+    height: '0.9em',
+  },
+  // Pointing at what it hides while folded, down at what it shows when open.
+  '.plivet-watch__toggle[aria-expanded="true"] svg': {
+    transform: 'rotate(90deg)',
+  },
+  '.plivet-watch__toggle:hover, .plivet-watch__toggle:focus-visible': {
+    opacity: '1',
+    borderColor: 'currentColor',
+  },
+  // A pinned watch is the tooltip itself, not a part of a hover, so the
+  // rules above that find it inside a `.cm-tooltip` never reached it: it
+  // stood in CodeMirror's grey with no padding and no edge. These give it
+  // the same face as the hover it came from, its arrow included.
+  '.cm-tooltip.plivet-watch': {
+    maxWidth: '30em',
+    padding: '4px 8px',
+    fontSize: '12px',
+    backgroundColor: 'var(--plivet-tooltip-bg, #fffbe6)',
+    color: 'var(--plivet-tooltip-color, #222)',
+    border: '1px solid rgba(0, 0, 0, 0.2)',
+    borderLeft: '3px solid transparent',
+    borderRadius: '3px',
+    boxShadow: '0 1px 4px rgba(0, 0, 0, 0.25)',
+  },
+  '&dark .cm-tooltip.plivet-watch': {
+    backgroundColor: 'var(--plivet-tooltip-bg, #3e3d32)',
+    color: 'var(--plivet-tooltip-color, #f8f8f2)',
+    border: '1px solid rgba(255, 255, 255, 0.25)',
+    borderLeft: '3px solid transparent',
+  },
+  '.cm-tooltip.plivet-watch--latched, &dark .cm-tooltip.plivet-watch--latched':
+    {
+      borderLeftColor: 'var(--plivet-watch-edge, currentColor)',
+    },
+  '.cm-tooltip.plivet-watch > .cm-tooltip-arrow:after': {
+    borderTopColor: 'var(--plivet-tooltip-bg, #fffbe6)',
+    borderBottomColor: 'var(--plivet-tooltip-bg, #fffbe6)',
+  },
+  '&dark .cm-tooltip.plivet-watch > .cm-tooltip-arrow:after': {
+    borderTopColor: 'var(--plivet-tooltip-bg, #3e3d32)',
+    borderBottomColor: 'var(--plivet-tooltip-bg, #3e3d32)',
+  },
+  // Moved away from its name, a watch has nothing for the arrow to point at.
+  '.cm-tooltip.plivet-watch--moved > .cm-tooltip-arrow': {
+    display: 'none',
+  },
   '.cm-tooltip:has(.plivet-watch)': {
     backgroundColor: 'var(--plivet-tooltip-bg, #fffbe6)',
     color: 'var(--plivet-tooltip-color, #222)',

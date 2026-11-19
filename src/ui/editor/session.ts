@@ -36,7 +36,21 @@ import { pinnedWatches, removeWatch, toggleWatch, watchField } from './watches';
 export interface SessionWatch {
   name: string;
   pos: number;
+  /** Unfolded to every fact; a watch without it is folded to its value. */
+  expanded?: boolean;
+  /** Dragged this far from its name, in pixels. */
+  offset?: { x: number; y: number };
 }
+
+/** A watch as a session keeps it: the optional fields only when set. */
+const sessionWatch = (watch: SessionWatch): SessionWatch => ({
+  name: watch.name,
+  pos: watch.pos,
+  ...(watch.expanded === true ? { expanded: true } : {}),
+  ...(typeof watch.offset === 'undefined'
+    ? {}
+    : { offset: { x: watch.offset.x, y: watch.offset.y } }),
+});
 
 /** Version 1: one document. `version` is what a later reader checks first. */
 export interface DocumentSessionJSON {
@@ -97,10 +111,7 @@ export const sessionOf = (state: EditorState): DocumentSessionJSON => ({
   disabledBreakpoints: breakpointStates(state)
     .filter((breakpoint) => !breakpoint.enabled)
     .map((breakpoint) => breakpoint.row),
-  watches: pinnedWatches(state).map((watch) => ({
-    name: watch.name,
-    pos: watch.pos,
-  })),
+  watches: pinnedWatches(state).map(sessionWatch),
 });
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -112,11 +123,19 @@ const isOffset = (value: unknown): value is number =>
 const isRows = (value: unknown): value is number[] =>
   Array.isArray(value) && value.every(isOffset);
 
+const isWatchOffset = (value: unknown): value is { x: number; y: number } =>
+  isRecord(value) && Number.isFinite(value.x) && Number.isFinite(value.y);
+
 const isWatches = (value: unknown): value is SessionWatch[] =>
   Array.isArray(value) &&
   value.every(
     (watch) =>
-      isRecord(watch) && typeof watch.name === 'string' && isOffset(watch.pos)
+      isRecord(watch) &&
+      typeof watch.name === 'string' &&
+      isOffset(watch.pos) &&
+      (typeof watch.expanded === 'undefined' ||
+        typeof watch.expanded === 'boolean') &&
+      (typeof watch.offset === 'undefined' || isWatchOffset(watch.offset))
   );
 
 const isSelection = (value: unknown): value is SessionSelection =>
@@ -311,7 +330,14 @@ export const restoreSession = (
       continue;
     }
     view.dispatch({
-      effects: toggleWatch.of({ name: watch.name, pos: watch.pos }),
+      effects: toggleWatch.of(
+        sessionWatch({
+          name: watch.name,
+          pos: watch.pos,
+          expanded: watch.expanded === true,
+          ...(isWatchOffset(watch.offset) ? { offset: watch.offset } : {}),
+        })
+      ),
     });
   }
 };

@@ -25,6 +25,12 @@ export interface Fact {
   value: string;
   /** Set where the value is program text and belongs in the monospace. */
   code?: boolean;
+  /**
+   * The fact that stands for the whole record where there is room for one
+   * line: what a folded watch keeps showing - a variable's value, or the
+   * sentence saying that nothing of that name is in scope.
+   */
+  brief?: boolean;
 }
 
 /** A headline and the facts under it. */

@@ -100,6 +100,8 @@ export { excludedRegionFolding } from './folding';
 export { insertNewlineKeepingLineStart, newlineKeymap } from './newline';
 export { expansionListField } from './expansions';
 export {
+  expandWatch,
+  moveWatch,
   releaseWatch,
   removeWatch,
   setWatchRecords,
@@ -107,7 +109,7 @@ export {
   watchField,
   watchNames,
 } from './watches';
-export type { Watch, WatchRecord } from './watches';
+export type { Watch, WatchOffset, WatchRecord } from './watches';
 export { inlineValueField } from './inlineValues';
 export { setStepHighlight, showStep } from './stepHighlight';
 export type { InlineValue, StepMark } from './stepHighlight';

@@ -8,6 +8,9 @@ const strings = {
   close: 'Close',
   watchPin: 'Pin {name} as a live watch',
   watchUnpin: 'Pinned - click to unpin {name}',
+  watchExpand: 'Show everything about {name}',
+  watchCollapse: 'Show only the value of {name}',
+  watchMove: 'Drag to move; double-click to put it back over {name}',
   tabsLabel: 'Open files',
   tabRuns: 'this is the entry source file',
   tabMakeEntry: 'make this the entry source file',
@@ -230,7 +233,7 @@ const strings = {
         'Before execution, tooltips explain declarations and C language constructs. They can show types, type qualifiers, storage-class specifiers, parameters, control-flow clauses, conversions, and where a break, continue, or return statement transfers control. Common library functions show a declaration and a short description.',
         'At a debug step, an object tooltip shows its declared type, stored value, and address; a pointer value also shows the object it points to and that object’s value. Tooltips on the current expression show results already produced, and control-flow tooltips explain controlling-expression values, selected branches, iteration counts, arguments, and return values for that step.',
         'Preprocessor tooltips show macro-replacement chains and definition lines, whether a conditional-inclusion group is active, and which source was excluded. Hover over an error or teaching marker to read the diagnostic and any available library help or suggested fix.',
-        'Hovering an object identifier also highlights the matching declaration and object row on the canvas. Click the pin in its hover tooltip to keep it as a live watch; click the pin again to release it. Alt-click an identifier also toggles its watch. A pinned watch updates at every step and reports when the identifier is not visible at the current execution point.',
+        'Hovering an object identifier also highlights the matching declaration and object row on the canvas. Click the pin in its hover tooltip to keep it as a live watch; click the pin again to release it. Alt-click an identifier also toggles its watch. A pinned watch updates at every step and reports when the identifier is not visible at the current execution point. A watch shows the name and its value; the triangle before the name shows the type, the address and the rest, and hides them again. Drag a watch by its name to move it off the code, and double-click the name to put it back.',
       ],
     },
     {

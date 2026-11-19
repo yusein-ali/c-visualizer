@@ -29,7 +29,26 @@ import { iconFor } from '../controls/icons';
  * gesture - pressing it lets the watch go. A watch let go that way does not
  * vanish from under the pointer that pressed it: it stands, unpinned, for as
  * long as the pointer stays on it, and pressing the pin again puts it back.
+ *
+ * A watch is folded to one line, its name and its value, because several of
+ * them stand over the text at once and a table each would bury the program
+ * they are about. The triangle before the name unfolds it to everything the
+ * hover says - the type, what it points at, the address - and folds it again.
+ *
+ * A watch stands over its name at first, and it can be dragged by that line
+ * to wherever it is out of the way: after it is let go it keeps its distance
+ * from the name, so it scrolls with the line it belongs to. A moved watch
+ * loses the arrow, which would point at nothing; the name it starts with says
+ * whose value it is. A double-click on the line puts it back. Folding and
+ * moving belong to the watch, not to its tooltip, which is built again at
+ * every step.
  */
+
+/** How far a watch has been dragged from its place over the name, in pixels. */
+export interface WatchOffset {
+  x: number;
+  y: number;
+}
 
 /** A pinned name and where it was pinned, so the tooltip stays with it. */
 export interface Watch {
@@ -40,6 +59,10 @@ export interface Watch {
    * no longer a watch for anything that asks which names are pinned.
    */
   released?: boolean;
+  /** Unfolded to every fact rather than the value alone. */
+  expanded?: boolean;
+  /** Dragged away from its name; absent while it stands over it. */
+  offset?: WatchOffset;
 }
 
 /** What a watch shows: the same record the hover tooltip would have shown. */
@@ -64,6 +87,18 @@ export const releaseWatch = StateEffect.define<string>();
 
 /** Take a name's tooltip away, pinned or let go. */
 export const removeWatch = StateEffect.define<string>();
+
+/** Unfold a watch to every fact, or fold it back to its value. */
+export const expandWatch = StateEffect.define<{
+  name: string;
+  expanded: boolean;
+}>();
+
+/** Move a watch by hand, or put it back over its name with `null`. */
+export const moveWatch = StateEffect.define<{
+  name: string;
+  offset: WatchOffset | null;
+}>();
 
 /**
  * Who is told when the pins change by hand. The pin on a tooltip has to tell
@@ -97,11 +132,12 @@ const watchTooltip = (watch: Watch, shown: WatchRecord[]): Tooltip => {
         typeof found === 'undefined'
           ? { title: watch.name, facts: [] }
           : found.record;
-      const dom = hoverDom(record);
+      const dom = watchDom(view, watch, record);
       const released = watch.released === true;
       dom.classList.add('plivet-watch');
       dom.classList.toggle('plivet-watch--latched', !released);
       dom.prepend(pinButton(view, watch));
+      place(dom, watch.offset);
       if (!released) {
         return { dom };
       }
@@ -126,6 +162,204 @@ const watchTooltip = (watch: Watch, shown: WatchRecord[]): Tooltip => {
   };
 };
 
+/** Whether a fact says anything; an empty one gets no line. */
+const says = (fact: HoverRecord['facts'][number]): boolean =>
+  fact.label !== '' || fact.value !== '';
+
+/**
+ * A watch's face. Folded, it is one line: the name and its brief fact, the
+ * value. Unfolded, it is the hover's table. Either way the line with the name
+ * is the handle it is dragged by, and the triangle on it - where there is
+ * more than the brief fact to show - folds and unfolds it.
+ */
+const watchDom = (
+  view: EditorView,
+  watch: Watch,
+  record: HoverRecord
+): HTMLElement => {
+  const said = record.facts.filter(says);
+  // The fact marked brief - a variable's value - or, in a record that marks
+  // none, the first thing it says.
+  const marked = said.filter((fact) => fact.brief === true);
+  const brief = marked.length > 0 ? marked : said.slice(0, 1);
+  const more = said.some((fact) => !brief.includes(fact));
+  const expanded = more && watch.expanded === true;
+  const dom = hoverDom(expanded ? record : { title: record.title, facts: [] });
+  dom.classList.toggle('plivet-watch--folded', !expanded);
+  const title = dom.querySelector<HTMLElement>('.plivet-tooltip__title');
+  if (title === null) {
+    return dom;
+  }
+  title.textContent = '';
+  title.classList.add('plivet-watch__handle');
+  if (more) {
+    title.appendChild(detailsButton(view, watch));
+  }
+  const name = document.createElement('span');
+  name.className = 'plivet-watch__name';
+  name.textContent = record.title;
+  title.appendChild(name);
+  if (!expanded) {
+    for (const fact of brief) {
+      const shown = document.createElement('span');
+      if (fact.label !== '' && fact.value !== '') {
+        shown.className = 'plivet-watch__value';
+        if (fact.code === true) {
+          shown.classList.add('plivet-tooltip__code');
+        }
+        shown.textContent = `= ${fact.value}`;
+      } else {
+        shown.className = 'plivet-watch__brief';
+        shown.textContent = fact.label === '' ? fact.value : fact.label;
+      }
+      title.appendChild(shown);
+    }
+  }
+  draggable(view, watch, dom, title);
+  return dom;
+};
+
+/** Where a watch stands: over its name, or moved by hand from there. */
+const place = (dom: HTMLElement, offset: WatchOffset | undefined): void => {
+  const moved =
+    typeof offset !== 'undefined' && (offset.x !== 0 || offset.y !== 0);
+  dom.style.transform = moved ? `translate(${offset.x}px, ${offset.y}px)` : '';
+  dom.classList.toggle('plivet-watch--moved', moved);
+};
+
+/**
+ * A press on a control of a watch must not take the focus out of the editor,
+ * nor reach it as a click on the text under the tooltip.
+ */
+const keepFocus = (element: HTMLElement): void => {
+  element.addEventListener('mousedown', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+  });
+};
+
+/** The triangle that folds a watch to its value and unfolds it again. */
+const detailsButton = (view: EditorView, watch: Watch): HTMLButtonElement => {
+  const expanded = watch.expanded === true;
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'plivet-watch__toggle';
+  button.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+  const label = (
+    expanded ? strings.watchCollapse : strings.watchExpand
+  ).replace('{name}', watch.name);
+  button.title = label;
+  button.setAttribute('aria-label', label);
+  button.appendChild(iconFor('disclose'));
+  keepFocus(button);
+  button.addEventListener('click', (event) => {
+    event.preventDefault();
+    view.dispatch({
+      effects: expandWatch.of({ name: watch.name, expanded: !expanded }),
+    });
+  });
+  return button;
+};
+
+/** The two presses of a double-click, at most this far apart. */
+const DOUBLE_PRESS_MS = 400;
+
+/**
+ * A drag is kept inside the editor, but a watch that already stands partly
+ * outside it - CodeMirror places a wide one against the window, not the
+ * editor - is only stopped from going further out, never pulled back the
+ * other way by the first move.
+ */
+const clamp = (value: number, low: number, high: number): number =>
+  Math.min(Math.max(value, Math.min(low, 0)), Math.max(high, 0));
+
+/**
+ * Dragging a watch by its line. The tooltip is moved with a transform while
+ * the pointer is down, and only the place it is let go at is written into the
+ * state: the tooltip is built again whenever the state changes, and a drag
+ * that wrote every step of the way would be dropped by its own rebuild. The
+ * watch is kept inside the editor, so it cannot be dragged out of reach.
+ */
+const draggable = (
+  view: EditorView,
+  watch: Watch,
+  dom: HTMLElement,
+  handle: HTMLElement
+): void => {
+  handle.title = strings.watchMove.replace('{name}', watch.name);
+  let lastPress = -Infinity;
+  handle.addEventListener('mousedown', (event) => {
+    if (event.target instanceof Element && event.target.closest('button')) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+  });
+  handle.addEventListener('pointerdown', (event) => {
+    if (
+      event.button !== 0 ||
+      (event.target instanceof Element && event.target.closest('button'))
+    ) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    // A double-click puts the watch back over its name. The pointer events
+    // are taken here, so the browser's own dblclick cannot be relied on.
+    const now = event.timeStamp;
+    if (now - lastPress < DOUBLE_PRESS_MS) {
+      lastPress = -Infinity;
+      if (typeof watch.offset !== 'undefined') {
+        view.dispatch({
+          effects: moveWatch.of({ name: watch.name, offset: null }),
+        });
+      }
+      return;
+    }
+    lastPress = now;
+    const from = watch.offset ?? { x: 0, y: 0 };
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const bounds = view.dom.getBoundingClientRect();
+    const box = dom.getBoundingClientRect();
+    let offset = from;
+    dom.classList.add('plivet-watch--dragging');
+    if (typeof handle.setPointerCapture === 'function') {
+      handle.setPointerCapture(event.pointerId);
+    }
+    const move = (moved: PointerEvent) => {
+      const dx = clamp(
+        moved.clientX - startX,
+        bounds.left - box.left,
+        bounds.right - box.right
+      );
+      const dy = clamp(
+        moved.clientY - startY,
+        bounds.top - box.top,
+        bounds.bottom - box.bottom
+      );
+      offset = { x: Math.round(from.x + dx), y: Math.round(from.y + dy) };
+      place(dom, offset);
+    };
+    const end = () => {
+      handle.removeEventListener('pointermove', move);
+      handle.removeEventListener('pointerup', end);
+      handle.removeEventListener('pointercancel', end);
+      dom.classList.remove('plivet-watch--dragging');
+      if (offset.x !== from.x || offset.y !== from.y) {
+        // A real drag is not the first half of a double-click.
+        lastPress = -Infinity;
+        view.dispatch({
+          effects: moveWatch.of({ name: watch.name, offset }),
+        });
+      }
+    };
+    handle.addEventListener('pointermove', move);
+    handle.addEventListener('pointerup', end);
+    handle.addEventListener('pointercancel', end);
+  });
+};
+
 /**
  * The pin in a watch's corner: pressed in while the watch is pinned, and the
  * button that lets it go.
@@ -143,12 +377,7 @@ const pinButton = (view: EditorView, watch: Watch): HTMLButtonElement => {
   button.title = label;
   button.setAttribute('aria-label', label);
   button.appendChild(iconFor('pin'));
-  // The press must not take the focus out of the editor, nor reach it as a
-  // click on the text under the tooltip.
-  button.addEventListener('mousedown', (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-  });
+  keepFocus(button);
   button.addEventListener('click', (event) => {
     event.preventDefault();
     if (released) {
@@ -192,6 +421,28 @@ export const decorateWatchHover = (
   );
 };
 
+/** A watch as pinned: what the reader set on it kept, `released` dropped. */
+const latched = (watch: Watch): Watch => {
+  const kept: Watch = { name: watch.name, pos: watch.pos };
+  if (watch.expanded === true) {
+    kept.expanded = true;
+  }
+  if (typeof watch.offset !== 'undefined') {
+    kept.offset = watch.offset;
+  }
+  return kept;
+};
+
+/** The pins with one watch changed, or the same array if it is not there. */
+const changeWatch = (
+  pins: Watch[],
+  name: string,
+  change: (watch: Watch) => Watch
+): Watch[] =>
+  pins.some((watch) => watch.name === name)
+    ? pins.map((watch) => (watch.name === name ? change(watch) : watch))
+    : pins;
+
 export const watchField = StateField.define<WatchState>({
   create: () => empty,
   update(watches, transaction) {
@@ -220,12 +471,12 @@ export const watchField = StateField.define<WatchState>({
         const wanted = effect.value;
         const already = pins.find((watch) => watch.name === wanted.name);
         if (typeof already === 'undefined') {
-          pins = pins.concat({ name: wanted.name, pos: wanted.pos });
+          pins = pins.concat(latched(wanted));
         } else if (already.released === true) {
           // Asked for again while it lingers: it is pinned again, where it
-          // stands.
+          // stands, folded or unfolded as it was.
           pins = pins.map((watch) =>
-            watch === already ? { name: watch.name, pos: watch.pos } : watch
+            watch === already ? latched(watch) : watch
           );
         } else {
           pins = pins.filter((watch) => watch !== already);
@@ -244,6 +495,30 @@ export const watchField = StateField.define<WatchState>({
         if (pins.some((watch) => watch.name === name)) {
           pins = pins.filter((watch) => watch.name !== name);
         }
+      }
+      if (effect.is(expandWatch)) {
+        const { name, expanded } = effect.value;
+        pins = changeWatch(pins, name, (watch) => {
+          const next: Watch = { ...watch };
+          if (expanded) {
+            next.expanded = true;
+          } else {
+            delete next.expanded;
+          }
+          return next;
+        });
+      }
+      if (effect.is(moveWatch)) {
+        const { name, offset } = effect.value;
+        pins = changeWatch(pins, name, (watch) => {
+          const next: Watch = { ...watch };
+          if (offset === null || (offset.x === 0 && offset.y === 0)) {
+            delete next.offset;
+          } else {
+            next.offset = { x: offset.x, y: offset.y };
+          }
+          return next;
+        });
       }
       if (effect.is(setWatchRecords)) {
         shown = effect.value;

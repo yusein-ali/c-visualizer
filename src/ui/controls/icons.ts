@@ -29,6 +29,7 @@ export type IconName =
   | 'build'
   | 'preprocessed'
   | 'pin'
+  | 'disclose'
   | 'help';
 
 /*
@@ -80,6 +81,9 @@ const paths: Record<IconName, string> = {
   preprocessed:
     'M5 2h1.5L6 5h3l.5-3H11l-.5 3H13v1.5h-2.8l-.5 3H12V11H9.5L9 14H7.5l.5-3H5l-.5 3H3l.5-3H1V9.5h2.8l.5-3H2V5h2.5zM5.8 6.5l-.5 3h3l.5-3z',
   pin: 'M5 1h6v1l-1 1v4l2 2v1H8.75v4.25L8 16l-.75-1.75V10H4V9l2-2V3L5 2z',
+  // The disclosure triangle of a folded watch, pointing at what it hides;
+  // the stylesheet turns it down when the watch is open.
+  disclose: 'M5.5 3.5v9L11.5 8z',
   help: 'M6.5 11h2v2h-2zM8 2.5c2.5 0 4 1.3 4 3.3 0 1.5-.8 2.3-2.1 3.1-.9.5-1.1.9-1.1 1.6H6.9c0-1.5.6-2.2 1.8-2.9.9-.5 1.4-.9 1.4-1.7 0-1-.8-1.7-2.1-1.7-1.4 0-2.2.7-2.3 2H3.8C3.9 3.9 5.5 2.5 8 2.5z',
 };
 
