@@ -134,6 +134,33 @@ int main(void) {
     expect(run.output).toBe('ab\nc\n5 characters, EOF is -1, feof 1\n');
   });
 
+  it('reads with getc as with fgetc, EOF at the end', async () => {
+    const run = await session(
+      `#include <stdio.h>
+int main(void) {
+  int first = getc(stdin);
+  int n = 1;
+  while (getc(stdin) != EOF) {
+    n++;
+  }
+  printf("%c %d %d\\n", first, n, feof(stdin));
+  return 0;
+}`,
+      [line('xy'), END]
+    );
+    expect(run.event).toBe('EOF');
+    expect(run.output).toBe('xy\nx 3 1\n');
+  });
+
+  it('reads a newline with getc, which is not EOF', async () => {
+    const run = await session(
+      `#include <stdio.h>
+int main(void) { int c = getc(stdin); printf("%d %d\\n", c == EOF, c); return 0; }`,
+      [line('')]
+    );
+    expect(run.output).toBe('\n0 10\n');
+  });
+
   it('ends the fgets loop with a null pointer', async () => {
     const run = await session(
       `#include <stdio.h>
@@ -648,9 +675,9 @@ describe('the scan at the end of input', () => {
 
   it('parses %p as hexadecimal, with or without 0x, and (nil)', () => {
     expect(scanLines('%p %p %p', ['0x1f ff (nil)']).values).toEqual([
-      { kind: 'int', value: 31, counted: true },
-      { kind: 'int', value: 255, counted: true },
-      { kind: 'int', value: 0, counted: true },
+      { kind: 'int', value: 31, counted: true, pointer: true },
+      { kind: 'int', value: 255, counted: true, pointer: true },
+      { kind: 'int', value: 0, counted: true, pointer: true },
     ]);
   });
 });

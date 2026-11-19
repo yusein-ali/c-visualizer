@@ -611,6 +611,9 @@ class Preprocessor {
     if (name === '__LINE__') {
       return { text: String(lineNumber), next: after };
     }
+    if (name === '__DATE__' || name === '__TIME__') {
+      return { text: buildTimeLiteral(name, new Date()), next: after };
+    }
     const macro = this.macros.get(name);
     if (typeof macro === 'undefined' || active.has(name)) {
       return null;
@@ -737,6 +740,39 @@ class Preprocessor {
  * `7 /* seven *\/` - which would otherwise be pasted into every use and shown
  * in the editor's tooltip.
  */
+const MONTHS = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+];
+
+/**
+ * `__DATE__` and `__TIME__` as the string literals a compiler gives them
+ * (6.10.8.1): the date of translation as `"Nov 20 2026"`, the day padded
+ * with a space when it is one digit, and the time as `"14:05:09"`. A run
+ * here is translated when it starts, so that is the moment they name.
+ */
+export function buildTimeLiteral(
+  name: '__DATE__' | '__TIME__',
+  now: Date
+): string {
+  const two = (n: number): string => String(n).padStart(2, '0');
+  if (name === '__DATE__') {
+    const day = String(now.getDate()).padStart(2, ' ');
+    return `"${MONTHS[now.getMonth()]} ${day} ${now.getFullYear()}"`;
+  }
+  return `"${two(now.getHours())}:${two(now.getMinutes())}:${two(now.getSeconds())}"`;
+}
+
 function stripComments(text: string): string {
   let out = '';
   let i = 0;

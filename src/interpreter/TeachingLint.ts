@@ -407,7 +407,11 @@ class LintPass {
   private readonly lines: string[];
   private readonly scopes: Array<Map<string, Declared>> = [new Map()];
 
-  constructor(source: string) {
+  constructor(
+    source: string,
+    /** The library functions a program may name without declaring them. */
+    readonly libraryFunctions: ReadonlySet<string> = new Set()
+  ) {
     this.lines = source.split('\n');
   }
 
@@ -905,7 +909,14 @@ const missingReturn: Rule = {
  * program is entitled to use after including the right header. PLIVET has no
  * headers to read, so it has to know these by name.
  */
-const LIBRARY_OBJECTS = new Set(['stdin', 'stdout', 'stderr', 'errno']);
+const LIBRARY_OBJECTS = new Set([
+  'stdin',
+  'stdout',
+  'stderr',
+  'errno',
+  // Declared by the language in every function body (6.4.2.2).
+  '__func__',
+]);
 
 /** A name spelled the way C spells a macro. */
 const MACRO_CASE = /^[A-Z_][A-Z0-9_]*$/;
@@ -926,7 +937,8 @@ const MACRO_CASE = /^[A-Z_][A-Z0-9_]*$/;
  *   and gives the same reason.
  * - The operand of `sizeof`, which names a type rather than an object.
  * - A function used as a value, which `Op op = add;` does. Those are collected
- *   before the walk, so a function may be named above its definition.
+ *   before the walk, so a function may be named above its definition. A
+ *   library function is one too: `size_t (*f)(const char *) = strlen;`.
  * - A member selector. The right of `.` or `->` names a field, and fields are
  *   not in any lexical scope.
  * - A name spelled as a macro - `NULL`, `EOF`, `INT_MAX`. PLIVET has no
@@ -979,6 +991,7 @@ const undeclaredIdentifier: Rule = {
       // Declared somewhere in this program as a function, whether or not the
       // walk has reached it yet.
       pass.returnTypes.has(name) ||
+      pass.libraryFunctions.has(name) ||
       LIBRARY_OBJECTS.has(name) ||
       MACRO_CASE.test(name) ||
       pass.undeclaredNames.has(name)
@@ -1168,17 +1181,19 @@ export function unknownEscapes(source: string): LintDiagnostic[] {
  */
 export function programDiagnostics(
   root: UniNode,
-  source: string
+  source: string,
+  libraryFunctions: ReadonlySet<string> = new Set()
 ): LintDiagnostic[] {
-  return runRules(PROGRAM_RULES, root, source);
+  return runRules(PROGRAM_RULES, root, source, libraryFunctions);
 }
 
 function runRules(
   active: Rule[],
   root: UniNode,
-  source: string
+  source: string,
+  libraryFunctions: ReadonlySet<string> = new Set()
 ): LintDiagnostic[] {
-  const pass = new LintPass(source);
+  const pass = new LintPass(source, libraryFunctions);
   collectReturnTypes(root, pass);
 
   const visit = (node: any, parent: any = null): void => {

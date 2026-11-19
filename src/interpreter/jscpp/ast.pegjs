@@ -124,8 +124,10 @@ Label
     = CASE a:ConstantExpression COLON {return addPositionInfo({type: 'Label_case', ConstantExpression: a});}
     / DEFAULT COLON {return addPositionInfo({type: 'Label_default'});}
 
+// PLIVET: a typedef may be declared in a block, as any declaration may
+// (C11 6.8.2); upstream allowed one only at file scope.
 CompoundStatement
-    = LWING a:(Statement / Declaration)* RWING {
+    = LWING a:(Statement / TypedefDeclaration / Declaration)* RWING {
         return addPositionInfo({type: 'CompoundStatement', Statements: a});
       }
     ;

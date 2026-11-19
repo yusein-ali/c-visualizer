@@ -86,6 +86,10 @@ export class EnumTable {
   private nextTypeId = 0;
   /** Spans of `enum ... { ... }` declarations, to leave alone when rewriting. */
   private readonly declarations: EnumDeclaration[] = [];
+  /** The constants each scope declares, by where the scope's block opens. */
+  private readonly scopes = new Map<number, Map<string, Enumerator>>();
+  /** Constants declared a second time in one scope, with the first one. */
+  private readonly repeated: { again: Enumerator; first: Enumerator }[] = [];
 
   /** Reads every enum declaration out of the source. */
   read(code: string): this {
@@ -141,8 +145,24 @@ export class EnumTable {
         displayType,
         code
       );
+      const scope = blockAround(masked, at);
+      const declared = this.scopes.get(scope) ?? new Map<string, Enumerator>();
+      this.scopes.set(scope, declared);
+      for (const enumerator of enumerators) {
+        const first = declared.get(enumerator.name);
+        if (typeof first === 'undefined') {
+          declared.set(enumerator.name, enumerator);
+        } else {
+          this.repeated.push({ again: enumerator, first });
+        }
+      }
       const runtimeType = this.runtimeType(tag, masked);
       this.addRuntimeInfo(runtimeType, displayType, enumerators);
+      if (tag !== '') {
+        // As a member of a structure spells it: the record tables read the
+        // source before `enum status` is given its runtime name.
+        this.addRuntimeInfo(`enum ${tag}`, displayType, enumerators);
+      }
       for (const alias of aliases) {
         this.addRuntimeInfo(alias, `${alias} (enum)`, enumerators);
       }
@@ -169,6 +189,16 @@ export class EnumTable {
 
   names(): string[] {
     return Array.from(this.constants.keys());
+  }
+
+  /**
+   * The enumeration constants declared again in a scope that declares them
+   * already (6.7.2.2, 6.2.1): `enum a { RED }; enum b { RED };` is two
+   * declarations of one identifier, which gcc refuses. Constants declared in
+   * different blocks are different identifiers.
+   */
+  redeclarations(): { again: Enumerator; first: Enumerator }[] {
+    return this.repeated.slice();
   }
 
   /** Every enumeration constant declared, in the order they were read. */
@@ -519,4 +549,32 @@ function applyEdits(
   }
   expansions.reverse();
   return { code: out, expansions };
+}
+
+/**
+ * Where the block that encloses `at` opens, or -1 at file scope. The body of
+ * a structure, a union or an enumeration is no block: what is declared in it
+ * belongs to the scope around it.
+ */
+function blockAround(masked: string, at: number): number {
+  const open: { at: number; block: boolean }[] = [];
+  for (let i = 0; i < at; i += 1) {
+    if (masked[i] === '{') {
+      const before = masked.slice(Math.max(0, i - 80), i);
+      open.push({
+        at: i,
+        block: !/\b(?:struct|union|enum)\b\s*(?:[A-Za-z_]\w*\s*)?$/.test(
+          before
+        ),
+      });
+    } else if (masked[i] === '}') {
+      open.pop();
+    }
+  }
+  for (let index = open.length - 1; index >= 0; index -= 1) {
+    if (open[index].block) {
+      return open[index].at;
+    }
+  }
+  return -1;
 }

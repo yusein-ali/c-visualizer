@@ -504,3 +504,58 @@ describe('qualified aggregate teaching fixture', () => {
     );
   });
 });
+
+describe('a pointer to const beside a typedef of a structure', () => {
+  // `typedef struct { int *pages; int count; } Shelf;` was read as a typedef
+  // named `pages`, of a pointer type, and every declaration that mentioned a
+  // `pages` anywhere - its initializer included - took that typedef's
+  // pointer level for its own: `const int *p = pages` became a const pointer.
+  const shelf = 'typedef struct { int *pages; int count; } Shelf;';
+
+  it('moves a pointer to const initialized from a member', () => {
+    const run = execute(`#include <stdio.h>
+${shelf}
+int total(Shelf *shelf) {
+  int sum = 0;
+  for (const int *p = shelf->pages; p < shelf->pages + shelf->count; p++) {
+    sum += *p;
+  }
+  return sum;
+}
+int main(void) {
+  int pages[3] = {412, 310, 398};
+  Shelf shelf;
+  shelf.pages = pages;
+  shelf.count = 3;
+  printf("%d\\n", total(&shelf));
+  return 0;
+}`);
+    expect(run.output).toBe('1120\n');
+  });
+
+  it('moves a pointer to const named like a member of the typedef', () => {
+    const run = execute(`#include <stdio.h>
+${shelf}
+int main(void) {
+  int pages[3] = {1, 2, 3};
+  const int *p = pages;
+  p++;
+  printf("%d\\n", *p);
+  return 0;
+}`);
+    expect(run.output).toBe('2\n');
+  });
+
+  it('still reads the qualifiers of a typedef with a body', () => {
+    const run = execute(`#include <stdio.h>
+typedef const struct { int *pages; int count; } Fixed;
+int main(void) {
+  int pages[1] = {4};
+  Fixed f = {pages, 1};
+  printf("%d\\n", f.count);
+  f.count = 2;
+  return 0;
+}`);
+    expect(run.output).toMatch(/^1\n.*const-qualified/s);
+  });
+});

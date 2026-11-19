@@ -1,5 +1,5 @@
 import { CellModel, StepModel } from '../src/core';
-import { exec, rowNamed, typeOf, valueOf } from './library';
+import { exec, rowNamed } from './library';
 
 /*
  * A heap block of records holds as many as it has room for.
@@ -8,8 +8,9 @@ import { exec, rowNamed, typeOf, valueOf } from './library';
  * `ps[1].x` on `malloc(n * sizeof(struct P))` wrote outside every object and
  * ended the statement; `calloc` and `realloc` were built on it. The block is
  * laid out as n records the first time a record pointer takes it, from the
- * size the program asked for, and each record is drawn on the heap as a
- * descriptor row followed by its members.
+ * size the program asked for, and each record is drawn on the heap as C lays
+ * it out: one object with its members, the records one C size apart, though
+ * the engine keeps a word in front of each record's members.
  */
 
 const program = (body: string, globals: string): string => `#include <stdio.h>
@@ -39,16 +40,63 @@ const descriptors = (model: StepModel, type: string): string[] =>
     )
     .map((row) => row.find((cell) => cell.kind === 'name')!.text);
 
-/** The name of the heap row a pointer's arrow lands on. */
+/** Whether a heap row is a member of the record drawn above it. */
+const isMember = (row: CellModel[]): boolean =>
+  row.some((cell) => cell.kind === 'indent');
+
+/**
+ * The record a pointer's arrow lands in, by the name of its heap row: a
+ * pointer to a record lands on its first member, which shares its address.
+ */
 const heapTarget = (model: StepModel, name: string): string | null => {
   const key = rowNamed(model, name).find(
     (cell) => cell.kind === 'value'
   )?.pointerTarget;
-  const row = heapRows(model).find((cells) =>
-    cells.some((cell) => cell.key === key)
-  );
-  return row?.find((cell) => cell.kind === 'name')?.text ?? null;
+  const rows = heapRows(model);
+  let at = rows.findIndex((cells) => cells.some((cell) => cell.key === key));
+  while (at > 0 && isMember(rows[at])) {
+    at -= 1;
+  }
+  return at === -1
+    ? null
+    : (rows[at].find((cell) => cell.kind === 'name')?.text ?? null);
 };
+
+/** The rows of a heap record's members, after the record's own row. */
+const membersOf = (model: StepModel, record: string): CellModel[][] => {
+  const rows = heapRows(model);
+  const at = rows.findIndex((cells) =>
+    cells.some((cell) => cell.kind === 'name' && cell.text === record)
+  );
+  const members: CellModel[][] = [];
+  for (let next = at + 1; at !== -1 && next < rows.length; next += 1) {
+    if (!isMember(rows[next])) {
+      break;
+    }
+    members.push(rows[next]);
+  }
+  return members;
+};
+
+/** What the canvas writes for one member of a heap record. */
+const memberValue = (
+  model: StepModel,
+  record: string,
+  member: string
+): string | undefined =>
+  membersOf(model, record)
+    .find((row) =>
+      row.some((cell) => cell.kind === 'name' && cell.text === member)
+    )
+    ?.find((cell) => cell.kind === 'value')?.text;
+
+/** The address the canvas gives a heap row. */
+const heapAddress = (model: StepModel, name: string): number | undefined =>
+  heapRows(model)
+    .find((row) =>
+      row.some((cell) => cell.kind === 'name' && cell.text === name)
+    )
+    ?.find((cell) => cell.kind === 'address')?.address;
 
 const point = 'struct P { int x; int y; };';
 
@@ -76,16 +124,25 @@ describe('malloc of n records', () => {
 
   it('draws each record with its members', async () => {
     const { model } = await exec(code);
-    // A descriptor word and two members, twelve engine bytes a record.
+    // Named for where the engine keeps them: a descriptor word and two
+    // members, twelve engine bytes a record.
     expect(descriptors(model, 'struct P')).toEqual([
       'Heap:20000',
       'Heap:20012',
       'Heap:20024',
     ]);
-    expect(valueOf(model, 'Heap:20016')).toBe('1');
-    expect(valueOf(model, 'Heap:20020')).toBe('10');
-    expect(valueOf(model, 'Heap:20028')).toBe('99');
-    expect(valueOf(model, 'Heap:20032')).toBe('20');
+    expect(memberValue(model, 'Heap:20012', 'x')).toBe('1');
+    expect(memberValue(model, 'Heap:20012', 'y')).toBe('10');
+    expect(memberValue(model, 'Heap:20024', 'x')).toBe('99');
+    expect(memberValue(model, 'Heap:20024', 'y')).toBe('20');
+    // Drawn where C puts them: eight bytes a record, x at 0 and y at 4.
+    const first = heapAddress(model, 'Heap:20000')!;
+    expect(heapAddress(model, 'Heap:20012')! - first).toBe(8);
+    expect(heapAddress(model, 'Heap:20024')! - first).toBe(16);
+    const second = membersOf(model, 'Heap:20012').map(
+      (row) => row.find((cell) => cell.kind === 'address')!.address! - first
+    );
+    expect(second).toEqual([8, 12]);
     expect(heapTarget(model, 'ps')).toBe('Heap:20000');
     expect(heapTarget(model, 'second')).toBe('Heap:20012');
     expect(heapTarget(model, 'third')).toBe('Heap:20024');
@@ -143,8 +200,8 @@ describe('malloc of n records', () => {
       'Heap:20012',
       'Heap:20024',
     ]);
-    expect(valueOf(run.model, 'Heap:20016')).toBe('5');
-    expect(typeOf(run.model, 'Heap:20016')).toBe('int');
+    expect(memberValue(run.model, 'Heap:20012', 'x')).toBe('5');
+    expect(memberValue(run.model, 'Heap:20024', 'y')).toBe('6');
   });
 
   it('takes every record back with free', async () => {
@@ -207,8 +264,8 @@ describe('realloc of a block of records', () => {
       'Heap:20040',
       'Heap:20052',
     ]);
-    expect(valueOf(run.model, 'Heap:20044')).toBe('2');
-    expect(valueOf(run.model, 'Heap:20048')).toBe('uninitialized');
+    expect(memberValue(run.model, 'Heap:20040', 'x')).toBe('2');
+    expect(memberValue(run.model, 'Heap:20040', 'y')).toBe('uninitialized');
     expect(
       run.model.mutations.find((one) => one.target === '*ps')
     ).toMatchObject({

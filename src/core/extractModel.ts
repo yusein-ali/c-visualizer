@@ -234,7 +234,8 @@ function valueTextOf(variable: Variable, getTypedef: Typedef): string {
     valueStr =
       functionInfo.pointee === null ? hex : `${functionInfo.pointee} (${hex})`;
   }
-  if (enumInfo !== null && enumInfo.scalar) {
+  // An enumeration nothing has written yet holds no value to name.
+  if (enumInfo !== null && enumInfo.scalar && value != null) {
     const names = enumInfo.namesByValue[String(value.valueOf())];
     if (typeof names !== 'undefined') {
       valueStr = `${names.join(' / ')} (${valueStr})`;

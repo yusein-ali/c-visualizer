@@ -87,6 +87,13 @@ export type ScalarSize = (type: string) => number;
 /** The name of the function at a code address, or null when there is none. */
 export type FunctionLookup = (address: number) => string | null;
 
+/**
+ * How far into the heap band C's layout puts the object at an engine heap
+ * address: its block where the engine carved it, and a record of a block of
+ * records at its index times the record's C size.
+ */
+export type HeapOffset = (address: number) => number;
+
 export function annotateRuntimeFunctions(
   state: ExecState,
   functions: RuntimeFunctionLocation[]
@@ -140,7 +147,8 @@ export function annotateRuntimeVariables(
   functionPointerTypes: RuntimeFunctionPointerTypes = {},
   functionAt: FunctionLookup = () => null,
   strings: { address: number | null; text: string; size: number }[] = [],
-  scalarSize: ScalarSize = basicSizeof
+  scalarSize: ScalarSize = basicSizeof,
+  heapOffset: HeapOffset = (address) => address - ENGINE_HEAP_BASE
 ): ExecState {
   const displayAddresses = new Map<number, number>();
   for (const stack of state.getStacks()) {
@@ -161,7 +169,7 @@ export function annotateRuntimeVariables(
           recordTypes,
           declarationInfoAt,
           scalarSize,
-          MEMORY_START_ADDRESSES.heap + (variable.address - ENGINE_HEAP_BASE),
+          MEMORY_START_ADDRESSES.heap + heapOffset(variable.address),
           displayAddresses,
           variable.address,
           shape.size
@@ -265,7 +273,12 @@ export function displayTypeOf(variable: Variable): string {
   // A bit-field is filed as `unsigned:3`; the width is the name's to show.
   // `long long` is one word to the engine and two to the reader.
   return recordInfo === null
-    ? cSpelling(variable.type.replace(/\s*:\s*\d+$/, ''))
+    ? cSpelling(
+        variable.type
+          .replace(/\s*:\s*\d+$/, '')
+          // A pointer to an array, which the engine spells `int[3]*`.
+          .replace(/^([^[*]+?)\s*((?:\[\d*\])+)\*$/, '$1 (*)$2')
+      )
     : recordInfo.displayType;
 }
 

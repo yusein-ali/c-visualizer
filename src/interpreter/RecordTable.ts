@@ -142,7 +142,16 @@ export abstract class RecordTable {
   /** typedef name, or tagless alias, to the key it stands for. */
   private readonly aliases = new Map<string, string>();
   private readonly taglessKeys = new Set<string>();
+  /**
+   * The keys made up for a definition without a tag that is the type of a
+   * member (`union { ... } value;`), which has no name at all.
+   */
+  private readonly anonymousKeys = new Set<string>();
   private readonly lines = new Map<string, number>();
+  /** Where each definition's body opens and closes, by key. */
+  private readonly spans = new Map<string, [number, number]>();
+  /** The source the table was read from, masked, for `incompleteMembers`. */
+  private masked = '';
   private readonly peers: RecordTable[] = [];
   private readonly bodies: Array<[number, number]> = [];
   /**
@@ -169,6 +178,10 @@ export abstract class RecordTable {
   /** Reads every declaration of this kind out of the source. */
   read(code: string): this {
     const masked = mask(code);
+    this.masked = masked;
+    // The bodies of every structure and union: a definition inside one is
+    // the type of a member, not a declaration of its own.
+    const bodies = recordBodies(masked);
     let i = 0;
     while (i < masked.length) {
       const at = masked.indexOf(this.keyword, i);
@@ -179,10 +192,11 @@ export abstract class RecordTable {
       if (!isWholeIdentifier(masked, at, this.keyword.length)) {
         continue;
       }
-      const parsed = this.readOne(masked, at);
-      if (parsed !== null) {
-        i = parsed;
-      }
+      this.readOne(
+        masked,
+        at,
+        bodies.some(([open, close]) => open < at && at < close)
+      );
     }
     this.readAliasUses(masked);
     this.readScalarTypedefs(masked);
@@ -191,6 +205,91 @@ export abstract class RecordTable {
 
   names(): string[] {
     return Array.from(this.members.keys());
+  }
+
+  /**
+   * The members whose type is a structure or union not complete where they
+   * are declared (6.7.2.1p3): one defined after the record that holds them,
+   * one never defined, or the record itself. A pointer to one is fine; so is
+   * a record defined inline as the member's type. `library` names the
+   * records the library declares, which are complete.
+   */
+  incompleteMembers(
+    library: (name: string) => boolean
+  ): { line: number; column: number; message: string }[] {
+    const found: { line: number; column: number; message: string }[] = [];
+    for (const [key, members] of this.members) {
+      const span = this.spans.get(key);
+      if (typeof span === 'undefined') {
+        continue;
+      }
+      for (const member of members) {
+        const spelled = /^(?:(struct|union)\s+)?([A-Za-z_]\w*)$/.exec(
+          member.type.trim()
+        );
+        if (spelled === null) {
+          continue;
+        }
+        const name = spelled[2];
+        const owner = this.ownerOf(name);
+        if (
+          owner === null &&
+          (typeof spelled[1] === 'undefined' || library(name))
+        ) {
+          // A scalar, a typedef of one, or a record the library declares.
+          continue;
+        }
+        const target = owner === null ? null : owner.resolve(name);
+        const defined =
+          owner === null || target === null
+            ? undefined
+            : owner.spans.get(target);
+        const complete =
+          typeof defined !== 'undefined' &&
+          !(owner === this && target === key) &&
+          defined[1] < span[1];
+        if (complete) {
+          continue;
+        }
+        const at = this.memberOffset(span, member.name);
+        const type =
+          typeof spelled[1] === 'undefined' ? name : `${spelled[1]} ${name}`;
+        const holder = this.taglessKeys.has(key)
+          ? key
+          : `${this.keyword} ${key}`;
+        found.push({
+          line: lineAt(this.masked, at),
+          column: at - this.masked.lastIndexOf('\n', at - 1) - 1,
+          message:
+            `member ${member.name} has incomplete type ${type}: a structure ` +
+            `or union is complete only after the closing brace of its ` +
+            `definition, so define ${type} before ${holder}, or make the ` +
+            `member a pointer`,
+        });
+      }
+    }
+    return found;
+  }
+
+  /** Where a member's name is written in a body, or where the body opens. */
+  private memberOffset(span: [number, number], name: string): number {
+    const body = this.masked.slice(span[0], span[1]);
+    const written = new RegExp(`\\b${name}\\b\\s*[;,\\[:]`).exec(body);
+    return written === null ? span[0] : span[0] + written.index;
+  }
+
+  /** `struct` or `union`, for a caller that spells a type with it. */
+  kind(): 'struct' | 'union' {
+    return this.keyword;
+  }
+
+  /**
+   * Whether `name` is the tag of a record this table declares - `book` of
+   * `struct book { ... }` - rather than a typedef name or nothing. A tag has
+   * a name space of its own, so an object may share its name.
+   */
+  isTag(name: string): boolean {
+    return this.members.has(name) && !this.taglessKeys.has(name);
   }
 
   has(name: string): boolean {
@@ -256,8 +355,9 @@ export abstract class RecordTable {
       }
       for (const runtimeName of this.namesFor(name)) {
         types[runtimeName] = {
-          displayType:
-            runtimeName === name && !this.taglessKeys.has(name)
+          displayType: this.anonymousKeys.has(name)
+            ? `${this.keyword} <anonymous>`
+            : runtimeName === name && !this.taglessKeys.has(name)
               ? `${this.keyword} ${name}`
               : `${runtimeName} (${this.keyword})`,
           kind: this.keyword,
@@ -591,11 +691,13 @@ export abstract class RecordTable {
   }
 
   /**
-   * Reads one declaration that starts with the keyword at `at`. Returns the
-   * index to carry on from, or null when this is a use rather than a
-   * definition - `struct P p;` names a type, it does not declare one.
+   * Reads one definition that starts with the keyword at `at`. A use rather
+   * than a definition - `struct P p;` names a type, it does not declare one -
+   * is passed over. A definition `nested` in the body of another record is
+   * the type of one of its members: filed under its tag, which C declares as
+   * if it were written outside, or under a key of its own.
    */
-  private readOne(masked: string, at: number): number | null {
+  private readOne(masked: string, at: number, nested: boolean): void {
     let i = skipSpace(masked, at + this.keyword.length);
     let tag = '';
     if (i < masked.length && IDENT_START.test(masked[i])) {
@@ -604,26 +706,48 @@ export abstract class RecordTable {
       i = skipSpace(masked, end);
     }
     if (masked[i] !== '{') {
-      return null;
+      return;
     }
     const close = matchBrace(masked, i);
     if (close === -1) {
-      return null;
+      return;
     }
     this.bodies.push([i + 1, close]);
-    const members = parseMembers(masked.slice(i + 1, close));
+    const members = parseMembers(masked.slice(i + 1, close), i + 1);
+    if (nested) {
+      const key = tag !== '' ? tag : anonymousKey(at);
+      this.members.set(key, members);
+      this.spans.set(key, [i, close]);
+      if (tag === '') {
+        this.anonymousKeys.add(key);
+      }
+      this.lines.set(key, lineAt(masked, at));
+      return;
+    }
     const after = masked.slice(close + 1, indexOfSemicolon(masked, close + 1));
     const declared = declaratorNames(after);
     const isTypedef = precededByTypedef(masked, at);
     // A tagless `typedef struct { ... } P;` is filed under P: it is the only
-    // name the type ever has, and the parse tree drops it entirely.
-    const key = tag !== '' ? tag : declared.length > 0 ? declared[0] : '';
+    // name the type ever has, and the parse tree drops it entirely. A tagless
+    // `struct { ... } s;` declares an object, whose name is no type's: the
+    // type has none, and the object was looked up as its own layout.
+    const key =
+      tag !== ''
+        ? tag
+        : !isTypedef && declared.length > 0
+          ? anonymousKey(at)
+          : declared.length > 0
+            ? declared[0]
+            : '';
     if (key === '') {
-      return close + 1;
+      return;
     }
     this.members.set(key, members);
-    if (tag === '') {
+    this.spans.set(key, [i, close]);
+    if (tag === '' && isTypedef) {
       this.taglessKeys.add(key);
+    } else if (tag === '') {
+      this.anonymousKeys.add(key);
     }
     this.lines.set(key, lineAt(masked, at));
     if (isTypedef) {
@@ -631,8 +755,33 @@ export abstract class RecordTable {
         this.aliases.set(alias, key);
       }
     }
-    return close + 1;
   }
+}
+
+/**
+ * The key of a record defined without a tag as the type of a member: from
+ * where its keyword is, so the structure and the union table, which both
+ * read the same source, give it the same one. A name beginning with two
+ * underscores is reserved, so no program declares it.
+ */
+function anonymousKey(at: number): string {
+  return `__anon${at}`;
+}
+
+/** Where the body of every structure and union definition is, braces excluded. */
+function recordBodies(masked: string): Array<[number, number]> {
+  const bodies: Array<[number, number]> = [];
+  const pattern = /\b(?:struct|union)\b\s*(?:[A-Za-z_]\w*\s*)?\{/g;
+  let found = pattern.exec(masked);
+  while (found !== null) {
+    const open = found.index + found[0].length - 1;
+    const close = matchBrace(masked, open);
+    if (close !== -1) {
+      bodies.push([open, close]);
+    }
+    found = pattern.exec(masked);
+  }
+  return bodies;
 }
 
 /** Index of the `;` closing a declaration, or the end of the source. */
@@ -641,17 +790,25 @@ function indexOfSemicolon(masked: string, from: number): number {
   return at === -1 ? masked.length : at;
 }
 
-/** True when the nearest word before `at` is `typedef`. */
+/**
+ * True when the nearest word before `at` is `typedef`, qualifiers passed
+ * over: `typedef const struct { ... } Fixed;` is a typedef too.
+ */
 function precededByTypedef(masked: string, at: number): boolean {
   let i = at - 1;
-  while (i >= 0 && /\s/.test(masked[i])) {
-    i -= 1;
+  for (;;) {
+    while (i >= 0 && /\s/.test(masked[i])) {
+      i -= 1;
+    }
+    const end = i + 1;
+    while (i >= 0 && /[A-Za-z0-9_]/.test(masked[i])) {
+      i -= 1;
+    }
+    const word = masked.slice(i + 1, end);
+    if (!/^(?:const|volatile|restrict|_Atomic)$/.test(word)) {
+      return word === 'typedef';
+    }
   }
-  const end = i + 1;
-  while (i >= 0 && /[A-Za-z0-9_]/.test(masked[i])) {
-    i -= 1;
-  }
-  return masked.slice(i + 1, end) === 'typedef';
 }
 
 /** The names declared after a record body: the `a, b` of `} a, b;`. */
@@ -675,18 +832,22 @@ function declaratorNames(text: string): string[] {
  * in `bits`: the engine gives it a whole object of that type, and wraps what
  * is stored in it at the width (`CPP14Engine._execCast`).
  */
-export function parseMembers(body: string): Member[] {
+export function parseMembers(body: string, offset = 0): Member[] {
   const members: Member[] = [];
+  let cursor = offset;
   for (const raw of splitTopLevel(body, ';')) {
+    const start = cursor;
+    cursor += raw.length + 1;
     const declaration = raw.trim();
     const normalizedDeclaration = declaration.replace(
       /\b_Atomic\s*\(([^)]+)\)/g,
       '_Atomic $1'
     );
-    if (normalizedDeclaration === '' || normalizedDeclaration.includes('(')) {
+    if (normalizedDeclaration.includes('{')) {
+      members.push(...inlineMembers(raw, start));
       continue;
     }
-    if (normalizedDeclaration.includes('{')) {
+    if (normalizedDeclaration === '' || normalizedDeclaration.includes('(')) {
       continue;
     }
     const parts = splitTopLevel(normalizedDeclaration, ',');
@@ -729,6 +890,45 @@ export function parseMembers(body: string): Member[] {
       }
       members.push(member);
     }
+  }
+  return members;
+}
+
+/**
+ * The members a declaration with a record defined inline declares:
+ * `union { double celsius; int open; } value` is a member `value` of that
+ * union, whose key the table reading the definition gives it (`readOne`).
+ * One that declares nothing - an anonymous structure or union, whose members
+ * C makes the enclosing record's own - is passed over, as it was before.
+ */
+function inlineMembers(raw: string, start: number): Member[] {
+  const head = /^(\s*)(struct|union)\b\s*([A-Za-z_]\w*)?\s*\{/.exec(raw);
+  if (head === null) {
+    return [];
+  }
+  const open = head[0].length - 1;
+  const close = matchBrace(raw, open);
+  if (close === -1) {
+    return [];
+  }
+  const keyword = head[2];
+  const key =
+    typeof head[3] === 'string'
+      ? head[3]
+      : anonymousKey(start + head[1].length);
+  const members: Member[] = [];
+  for (const part of splitTopLevel(raw.slice(close + 1), ',')) {
+    const parsed = splitDeclarator(`${keyword} ${key} ${part.trim()}`);
+    if (parsed === null || part.trim() === '') {
+      continue;
+    }
+    members.push({
+      name: parsed.name,
+      type: `${keyword} ${key}${parsed.stars > 0 ? ' ' : ''}${'*'.repeat(parsed.stars)}`,
+      lengths: parsed.lengths,
+      baseQualifiers: parsed.baseQualifiers,
+      pointerQualifiers: parsed.pointerQualifiers,
+    });
   }
   return members;
 }

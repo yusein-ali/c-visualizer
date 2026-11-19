@@ -104,6 +104,11 @@ const stdioBasics = fromHeader('stdio.h', {
     signature: 'int fgetc(FILE* file)',
     description: 'reads the next character from a stream, or returns EOF',
   },
+  getc: {
+    signature: 'int getc(FILE* file)',
+    description:
+      'reads the next character from a stream, or returns EOF, as fgetc does',
+  },
   fputc: {
     signature: 'int fputc(int c, FILE* file)',
     description: 'writes one character to a stream',

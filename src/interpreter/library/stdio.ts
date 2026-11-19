@@ -77,6 +77,14 @@ export interface StdioHost {
   /** Where the engine wrote a string literal with this text, if it did. */
   literalAddress(text: string): number | null;
   /**
+   * The address the canvas shows for an engine address, which `%p` prints,
+   * for the argument this far from the end of the call's arguments: one the
+   * program wrote as an integer is printed as the integer it is.
+   */
+  displayAddress(address: number, fromEnd: number): number;
+  /** The engine address of one the canvas shows, which `%p` reads back. */
+  engineAddress(address: number): number;
+  /**
    * Parks the program on a read, or lets it go: the engine's waiting flag,
    * which is what stops a step and turns the console's input on.
    */
@@ -143,7 +151,9 @@ const byteText = (count: number): string =>
 export function blockAt(
   global: Scope,
   address: number,
-  endOf: (start: number, size: number) => number = (start, size) => start + size
+  endOf: (start: number, size: number) => number = (start, size) =>
+    start + size,
+  isRecord: (type: string) => boolean = (type) => global.isStructType(type)
 ): MemoryBlock | null {
   for (const [start, size] of global.mallocData) {
     // A block of records spans more cells than its size; see `blockEnd`.
@@ -176,11 +186,7 @@ export function blockAt(
         // at the end of `c`. A record's members are laid out apart from it,
         // and are left to the existence check.
         const size = Scope.sizeof(type);
-        if (
-          !scope.isStructType(type) &&
-          handle <= address &&
-          address < handle + size
-        ) {
+        if (!isRecord(type) && handle <= address && address < handle + size) {
           found = { start: handle, size, label: name, noun: 'object' };
         }
         continue;
@@ -189,6 +195,9 @@ export function blockAt(
       const element = type.slice(0, type.indexOf('['));
       const dimensions = scope.getArrayDims(type);
       if (
+        // An array of records: its elements' members are laid out apart
+        // from it, as a record's are, and its element size is no record's.
+        isRecord(element.trim()) ||
         base === null ||
         dimensions.length === 0 ||
         dimensions.length > 2 ||
@@ -274,7 +283,12 @@ function readString(host: StdioHost, raw: unknown, what: string): StringRead {
       `${what} points to ${hex(address)}, where there is no object`
     );
   }
-  const block = blockAt(host.global, address, host.library.blockEnd);
+  const block = blockAt(
+    host.global,
+    address,
+    host.library.blockEnd,
+    host.library.isRecordType
+  );
   const limit = block === null ? Infinity : block.start + block.size;
   let text = '';
   let at = address;
@@ -363,7 +377,12 @@ function writeString(
         `modifying a string literal has undefined behavior`
     );
   }
-  const block = blockAt(host.global, address, host.library.blockEnd);
+  const block = blockAt(
+    host.global,
+    address,
+    host.library.blockEnd,
+    host.library.isRecordType
+  );
   if (block !== null) {
     const room = block.start + block.size - address;
     if (count > room) {
@@ -478,6 +497,9 @@ function typeArguments(
             `indeterminate value has undefined behavior`,
         });
         number = 0;
+      }
+      if (directive.conversion === 'p' && number !== 0) {
+        number = host.displayAddress(number, raw.length - index);
       }
       typed.args.push({ kind, value: number });
     }
@@ -626,11 +648,11 @@ function storeScanned(
         `${caller} stores through a pointer that does not point to an object`
       );
     }
-    host.library.write(
-      address,
-      scannedNumber(host, address, value.value),
-      caller
-    );
+    const stored =
+      value.kind === 'int' && value.pointer === true && value.value !== 0
+        ? host.engineAddress(value.value)
+        : value.value;
+    host.library.write(address, scannedNumber(host, address, stored), caller);
     return;
   }
   if (value.kind === 'string') {
@@ -755,6 +777,7 @@ export const STDIO_FUNCTIONS = [
   'fclose',
   'fflush',
   'fgetc',
+  'getc',
   'fgets',
   'fputc',
   'fputs',
@@ -1300,6 +1323,11 @@ export function installStdio(host: StdioHost): StdioRuntime {
     return cInt(yield* getByte(streamArg(raw, 'fgetc'), 'fgetc'));
   }
 
+  /** `fgetc`, which C lets a library define as a macro too. */
+  function* getc(raw: unknown): Generator<undefined, Int, unknown> {
+    return cInt(yield* getByte(streamArg(raw, 'getc'), 'getc'));
+  }
+
   function* fgets(
     buffer: unknown,
     size: unknown,
@@ -1594,6 +1622,7 @@ export function installStdio(host: StdioHost): StdioRuntime {
       fclose,
       fflush,
       fgetc,
+      getc,
       fgets,
       fputc,
       fputs,

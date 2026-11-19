@@ -45,7 +45,7 @@ export interface UnionStorageHost {
 
 /** One union laid out in memory, filed under where its members begin. */
 interface LiveUnion {
-  /** As its descriptor word is typed: the name, without `union`. */
+  /** As its descriptor word is typed, without `union`. */
   type: string;
   /**
    * The scope whose lifetime the union has, or null for one that lives as
@@ -199,7 +199,7 @@ export class UnionStorage {
   private isLive(base: number, entry: LiveUnion, cells: Cells): boolean {
     const descriptor = base - Engine.structInfoSize;
     if (
-      cells.typeOnMemory.get(descriptor) !== entry.type ||
+      withoutTag(cells.typeOnMemory.get(descriptor) ?? '') !== entry.type ||
       num(cells.objectOnMemory.get(descriptor)) !== base
     ) {
       return false;

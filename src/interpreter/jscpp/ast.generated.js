@@ -1432,13 +1432,19 @@ module.exports = (function() {
         s2 = [];
         s3 = peg$parseStatement();
         if (s3 === peg$FAILED) {
-          s3 = peg$parseDeclaration();
+          s3 = peg$parseTypedefDeclaration();
+          if (s3 === peg$FAILED) {
+            s3 = peg$parseDeclaration();
+          }
         }
         while (s3 !== peg$FAILED) {
           s2.push(s3);
           s3 = peg$parseStatement();
           if (s3 === peg$FAILED) {
-            s3 = peg$parseDeclaration();
+            s3 = peg$parseTypedefDeclaration();
+            if (s3 === peg$FAILED) {
+              s3 = peg$parseDeclaration();
+            }
           }
         }
         if (s2 !== peg$FAILED) {

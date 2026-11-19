@@ -124,9 +124,12 @@ describe('realloc', () => {
     );
     expect(run.output).toBe('1 2.5 7\n');
     expect(run.runtime).toEqual([]);
-    expect(targetOf(run.model, 'p')).toBe('Heap:20020');
-    expect(valueOf(run.model, 'Heap:20024')).toBe('1');
-    expect(valueOf(run.model, 'Heap:20028')).toBe('2.5');
+    // The record is drawn as one object, and the arrow lands on its first
+    // member, which shares its address.
+    expect(heapRows(run.model)).toContain('Heap:20020');
+    expect(targetOf(run.model, 'p')).toBe('x');
+    expect(valueOf(run.model, 'x')).toBe('1');
+    expect(valueOf(run.model, 'y')).toBe('2.5');
     expect(heapRows(run.model)).not.toContain('Heap:20000');
     expect(
       run.model.mutations.find((one) => one.target === '*p')

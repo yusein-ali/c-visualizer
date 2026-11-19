@@ -13,6 +13,8 @@ import { UniProgram } from 'unicoen.ts/dist/node/UniProgram';
 import { ANTLRInputStream, CommonTokenStream } from 'antlr4ts';
 import type { ParserRuleContext } from 'antlr4ts';
 import { PlivetCPP14Engine, SourceLocator } from './CPP14Engine';
+import { arrayPointerParameters } from './ArrayPointerParameters';
+import { resolveComplements } from './Complement';
 import { Construct } from './Construct';
 import { DeclarationSpecifiers } from './DeclarationSpecifiers';
 import { DesignatedInitializers } from './DesignatedInitializers';
@@ -33,6 +35,7 @@ import {
 } from './RuntimeTypeInfo';
 import { RuntimeDiagnostic } from './RuntimeDiagnostic';
 import { ShiftAssignLexer } from './ShiftAssignLexer';
+import { joinAdjacentStrings } from './StringConcatenation';
 import { OutputSpan } from './stream';
 import { StructTable } from './StructTable';
 import {
@@ -49,6 +52,8 @@ import { UnionTable } from './UnionTable';
 
 interface PreparedSource {
   code: string;
+  /** What the compiler refuses that no grammar can see: a repeated enumerator. */
+  declarationErrors: SyntaxErrorData[];
   /** The same source, rewritten only as far as the syntax check needs. */
   checkCode: string;
   expansions: Expansion[];
@@ -121,12 +126,14 @@ class PlivetCPP14Mapper extends CPP14Mapper {
   }
 
   /**
-   * The tree, with the declarations and casts that only a typedef name could
-   * have made ambiguous read the way C reads them (`TypedefNames.ts`):
-   * `Node *head = NULL;` inside a function is a declaration, not a product.
+   * The tree, with `~a` read as the complement of `a` (`Complement.ts`), and
+   * the declarations and casts that only a typedef name could have made
+   * ambiguous read the way C reads them (`TypedefNames.ts`): `Node *head =
+   * NULL;` inside a function is a declaration, not a product.
    */
   makeUniTree(tree: ParserRuleContext, tokens: CommonTokenStream): UniProgram {
     const program = super.makeUniTree(tree, tokens);
+    resolveComplements(program);
     resolveTypedefAmbiguities(
       program,
       typeNamesFor(this.parsing, program),
@@ -167,12 +174,15 @@ export class PlivetCPP14Interpreter extends Interpreter {
   private functionPointerTypes: RuntimeFunctionPointerTypes;
   /** A diagnostics parse that can be consumed by the next matching Start. */
   private analyzedExecution: { code: string; tree: UniProgram } | null = null;
+  /** What the library defines, for the lint; read once, when first needed. */
+  private libraryFunctions: ReadonlySet<string> | null = null;
 
   constructor() {
     const engine = new PlivetCPP14Engine();
     const mapper = new PlivetCPP14Mapper();
     super(engine, mapper);
     this.plivetEngine = engine;
+    engine.setDisplayAddressSource(() => this.liveDisplayAddresses());
     this.plivetMapper = mapper;
     this.enumTypes = {};
     this.recordTypes = {};
@@ -203,16 +213,7 @@ export class PlivetCPP14Interpreter extends Interpreter {
   }
 
   private describeState(state: ExecState): ExecState {
-    const annotated = annotateRuntimeVariables(
-      this.plivetEngine.expandRecordArrays(state),
-      this.enumTypes,
-      this.recordTypes,
-      (address) => this.plivetEngine.declarationInfoAt(address),
-      this.functionPointerTypes,
-      (address) => this.plivetEngine.functionNameAt(address),
-      this.plivetEngine.stringLiterals(),
-      (type) => this.plivetEngine.scalarSizeOf(type)
-    );
+    const annotated = this.annotate(state);
     const display = takeDisplayAddresses(annotated);
     if (display !== null) {
       this.plivetEngine.resolveDisplayAddresses(annotated, (address) =>
@@ -223,6 +224,30 @@ export class PlivetCPP14Interpreter extends Interpreter {
       annotated,
       this.plivetEngine.functionLocations()
     );
+  }
+
+  /** A state with what the canvas needs to draw it: types, addresses, names. */
+  private annotate(state: ExecState): ExecState {
+    return annotateRuntimeVariables(
+      this.plivetEngine.expandRecordArrays(state),
+      this.enumTypes,
+      this.recordTypes,
+      (address) => this.plivetEngine.declarationInfoAt(address),
+      this.functionPointerTypes,
+      (address) => this.plivetEngine.functionNameAt(address),
+      this.plivetEngine.stringLiterals(),
+      (type) => this.plivetEngine.scalarSizeOf(type),
+      (address) => this.plivetEngine.heapOffsetOf(address)
+    );
+  }
+
+  /**
+   * Where the canvas would draw each engine address if the step ended now,
+   * for a program that looks at an address: `%p`, a pointer converted to an
+   * integer, two byte pointers subtracted (`PlivetCPP14Engine.displayAddressOf`).
+   */
+  private liveDisplayAddresses(): Map<number, number> | null {
+    return takeDisplayAddresses(this.annotate(this.plivetEngine.liveState()));
   }
 
   /**
@@ -304,7 +329,10 @@ export class PlivetCPP14Interpreter extends Interpreter {
    * maps back to whichever file the reader has open.
    */
   private programLints(tree: UniProgram, source: string): LintDiagnostic[] {
-    return linkerDiagnostics(tree).concat(programDiagnostics(tree, source));
+    this.libraryFunctions ??= PlivetCPP14Engine.libraryFunctionNames();
+    return linkerDiagnostics(tree).concat(
+      programDiagnostics(tree, source, this.libraryFunctions)
+    );
   }
 
   private analyzeSource(
@@ -322,7 +350,8 @@ export class PlivetCPP14Interpreter extends Interpreter {
     const parsed = this.plivetMapper.analyze(
       omitEmptyDeclarations(prepared.code, check.warnings)
     );
-    const errors = this.syntaxErrors(check, parsed);
+    const syntax = this.syntaxErrors(check, parsed);
+    const errors = syntax.length > 0 ? syntax : prepared.declarationErrors;
     return {
       prepared,
       parsed,
@@ -534,12 +563,20 @@ export class PlivetCPP14Interpreter extends Interpreter {
     // a tree, and only when the grammar has already accepted the program -
     // there is nothing to say about a file that does not parse.
     const check = jscppCheck(prepared.checkCode, code);
-    return this.syntaxErrors(check, this.plivetMapper.analyze(prepared.code));
+    const syntax = this.syntaxErrors(
+      check,
+      this.plivetMapper.analyze(prepared.code)
+    );
+    return syntax.length > 0 ? syntax : prepared.declarationErrors;
   }
 
   /** Runs every source pass once and gives the engine fresh record metadata. */
   private prepare(code: string): PreparedSource {
-    const preprocessed = preprocessSource(code);
+    const expanded = preprocessSource(code);
+    const preprocessed = {
+      ...expanded,
+      code: arrayPointerParameters(joinAdjacentStrings(expanded.code)),
+    };
     // What the syntax check reads, in place of the fully rewritten `code`
     // below. The passes after this one exist for ANTLR's C++14 grammar, and
     // two of them erase the evidence a check needs: the qualifier pass blanks
@@ -589,8 +626,32 @@ export class PlivetCPP14Interpreter extends Interpreter {
     const recordsForParser = unions.rewriteForParser(
       structs.rewriteForParser(functionPointers.apply(initializers))
     );
+    const library = libraryRecordTypes();
+    const isLibraryRecord = (name: string): boolean =>
+      Object.prototype.hasOwnProperty.call(library, name);
     return {
       code: recordsForParser,
+      declarationErrors: enumTable
+        .redeclarations()
+        .map(
+          ({ again, first }) =>
+            new SyntaxErrorData(
+              again.line,
+              again.column,
+              `redeclaration of enumerator ${again.name}: it is declared ` +
+                `on line ${first.line} already, and one scope declares an ` +
+                `identifier once`
+            )
+        )
+        .concat(
+          structs
+            .incompleteMembers(isLibraryRecord)
+            .concat(unions.incompleteMembers(isLibraryRecord))
+            .map(
+              (member) =>
+                new SyntaxErrorData(member.line, member.column, member.message)
+            )
+        ),
       checkCode,
       expansions: preprocessed.expansions.concat(enums.expansions),
       source: preprocessed.code,

@@ -55,6 +55,8 @@ export type ScanValue = (
    * from the count.
    */
   counted: boolean;
+  /** `%p`: an address as the program saw one printed (`StdioHost`). */
+  pointer?: true;
 };
 
 /**
@@ -628,6 +630,7 @@ export function* scan(
             value:
               text === '(nil)' ? 0 : Number.parseInt(text, baseFor(spec, text)),
             counted: true,
+            ...(spec === 'p' ? { pointer: true as const } : {}),
           }
     );
   }

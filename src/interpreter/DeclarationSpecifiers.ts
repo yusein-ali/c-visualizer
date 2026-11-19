@@ -370,7 +370,10 @@ export class DeclarationSpecifiers {
     firstVariableRange: CodeRange
   ): DeclarationSpecifierInfo | null {
     const declarationInfo = this.infoFor(declarationRange);
-    const typedefInfo = this.typedefInfoFromRange(declarationRange);
+    const typedefInfo = this.typedefInfoFromRange(
+      declarationRange,
+      this.offsetOf(firstVariableRange.begin.y, firstVariableRange.begin.x)
+    );
     const spelling = this.typeSpellingBefore(
       this.offsetOf(firstVariableRange.begin.y, firstVariableRange.begin.x)
     );
@@ -525,11 +528,14 @@ export class DeclarationSpecifiers {
     const pattern = /\btypedef\b/g;
     let found = pattern.exec(masked);
     while (found !== null) {
-      const end = masked.indexOf(';', found.index + found[0].length);
+      const end = endOfDeclaration(masked, found.index + found[0].length);
       if (end === -1) {
         break;
       }
-      const text = masked.slice(found.index, end);
+      // A structure's body declares its members, not the typedef: `typedef
+      // struct { int *pages; } Shelf;` names `Shelf`, and the `*` of a
+      // member is no pointer level of it.
+      const text = withoutBodies(masked.slice(found.index, end));
       const aliasMatch = /([A-Za-z_][A-Za-z0-9_]*)\s*$/.exec(text);
       const alias = aliasMatch === null ? undefined : aliasMatch[1];
       const typeText =
@@ -571,10 +577,16 @@ export class DeclarationSpecifiers {
   }
 
   private typedefInfoFromRange(
-    range: CodeRange
+    range: CodeRange,
+    firstVariableStart: number
   ): DeclarationSpecifierInfo | null {
     const start = this.offsetOf(range.begin.y, range.begin.x);
-    const end = this.offsetOf(range.end.y, range.end.x);
+    // The type is written before the first declarator; a name after it is a
+    // declarator's or an initializer's, whatever a typedef elsewhere is called.
+    const end =
+      firstVariableStart > start
+        ? Math.min(firstVariableStart, this.offsetOf(range.end.y, range.end.x))
+        : this.offsetOf(range.end.y, range.end.x);
     const words = this.source
       .slice(start, end)
       .match(/[A-Za-z_][A-Za-z0-9_]*/g);
@@ -589,6 +601,41 @@ export class DeclarationSpecifiers {
     }
     return null;
   }
+}
+
+/**
+ * Where the declaration that goes on from `from` ends: its `;` outside every
+ * brace, or -1 when there is none.
+ */
+function endOfDeclaration(masked: string, from: number): number {
+  let depth = 0;
+  for (let at = from; at < masked.length; at += 1) {
+    const char = masked[at];
+    if (char === '{') {
+      depth += 1;
+    } else if (char === '}') {
+      depth = Math.max(0, depth - 1);
+    } else if (char === ';' && depth === 0) {
+      return at;
+    }
+  }
+  return -1;
+}
+
+/** A declaration's text with every brace-enclosed body blanked. */
+function withoutBodies(text: string): string {
+  let depth = 0;
+  let kept = '';
+  for (const char of text) {
+    if (char === '{') {
+      depth += 1;
+    }
+    kept += depth > 0 ? ' ' : char;
+    if (char === '}') {
+      depth = Math.max(0, depth - 1);
+    }
+  }
+  return kept;
 }
 
 function unique<T>(values: T[]): T[] {

@@ -113,21 +113,6 @@ export class DesignatedInitializers {
     );
   }
 
-  /** Whether one declaration contains at least one member designator. */
-  hasMembersIn(declarationRange: CodeRange | null): boolean {
-    if (declarationRange === null || typeof declarationRange === 'undefined') {
-      return false;
-    }
-    const start = this.offsetOf(
-      declarationRange.begin.y,
-      declarationRange.begin.x
-    );
-    const end = this.offsetOf(declarationRange.end.y, declarationRange.end.x);
-    return this.members.some(
-      (item) => start <= item.start && item.end <= end + 1
-    );
-  }
-
   /**
    * The member an initializer item is designated for - the `y` of
    * `.y = 2` - or null for an item that follows on from the one before it.
@@ -200,17 +185,27 @@ export class DesignatedInitializers {
       return typeof found === 'undefined' ? null : found.index;
     });
 
-    const ordered: any[] = [];
+    const indexes: number[] = [];
     let next = 0;
     for (let item = 0; item < values.length; item += 1) {
       const designated = designatedByItem[item];
       const index = designated === null ? next : designated;
-      if (0 <= index && index < length) {
-        ordered[index] = values[item];
-      }
+      indexes.push(index);
       next = index + 1;
     }
-    for (let index = 0; index < length; index += 1) {
+    // An array declared without its length (`struct pair t[] = {...}`) is as
+    // long as the furthest element its initializer reaches.
+    const size =
+      length > 0
+        ? length
+        : indexes.reduce((furthest, index) => Math.max(furthest, index + 1), 0);
+    const ordered: any[] = [];
+    indexes.forEach((index, item) => {
+      if (0 <= index && index < size) {
+        ordered[index] = values[item];
+      }
+    });
+    for (let index = 0; index < size; index += 1) {
       if (typeof ordered[index] === 'undefined') {
         ordered[index] = emptyValue;
       }

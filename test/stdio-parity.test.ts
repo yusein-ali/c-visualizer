@@ -242,7 +242,9 @@ describe("the interpreter's printf", () => {
   });
 
   it('puts the char the defect cases name where they name it', () => {
-    expect(outputs.get(-1)).toBe('0xc352');
+    // `%p` prints the address the canvas shows, 0xc354, for the char the
+    // engine keeps at 50002: the address the defect cases pass as integers.
+    expect(outputs.get(-1)).toBe('0xc354');
   });
 
   it.each(cases.map(([index, one]) => [labelled[index][0], index, one]))(

@@ -141,8 +141,9 @@ function makeScope(state: StateInternals, scope: Scope): void {
     if (value instanceof UniNode || value instanceof Function) {
       continue;
     }
-    // An array: the value is the address of its first element.
-    if (type.indexOf('[') >= 0 && type.indexOf(']') >= 0) {
+    // An array: the value is the address of its first element. A pointer to
+    // an array (`int[3]*`, a parameter `int log[][3]`) is a pointer.
+    if (type.trim().endsWith(']')) {
       const dims = scope.getArrayDims(type);
       const sum = dims.reduce((total, length) => total * length, 1);
       let startAddr = value;
