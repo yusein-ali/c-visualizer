@@ -42,12 +42,14 @@ export interface LibraryTypedef {
   bytes: number;
   /**
    * The type as the engine spells it (`unsignedchar`), for a typedef narrower
-   * or wider than the engine's default of four bytes. The engine is given
-   * `typedef <engineType> <name>` before the program's first declaration (see
-   * `installLibraryTypedefs`), so its own sizes - the stride of an array, the
-   * step of a pointer - follow the width, as they do for a typedef the program
-   * writes itself. Left out, the engine sizes the name as four bytes, which is
-   * the width of every other entry here.
+   * or wider than the engine's default of four bytes. The engine's `sizeof`
+   * (`RecordTable.basicSizeof`) sizes the name as this type, so its own sizes
+   * - the stride of an array, the step of a pointer, the elements of a heap
+   * block - follow the width; and the engine is given `typedef <engineType>
+   * <name>` before the program's first declaration (see
+   * `installLibraryTypedefs`), so its conversions do. Left out, the engine
+   * sizes the name as four bytes, which is the width of every other entry
+   * here.
    */
   engineType?: string;
   /** The one-line description the editor shows. */

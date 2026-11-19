@@ -302,7 +302,9 @@ export class Memory {
     }
     const base = type.replace(/\[[^\]]*\]/g, '').trim();
     const record = base.indexOf('*') === -1 && this.host.isRecordType(base);
-    if (type.indexOf('[') !== -1) {
+    // A pointer to an array (`int[3]*`, a parameter `int log[][3]`) is a
+    // pointer: unicoen's `getArrayDims` never ends on what follows its `]`.
+    if (type.trim().endsWith(']')) {
       const dims = this.scope.getArrayDims(type);
       if (dims.length === 0 || dims.some((dim) => !(dim > 0))) {
         // `char s[]` as a parameter: a pointer by another name.

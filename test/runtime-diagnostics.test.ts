@@ -195,6 +195,214 @@ int main(void) { return twice(2) + counter; }`);
   });
 });
 
+/**
+ * A cell of a block `malloc` returned holds nothing until the program stores
+ * into it. Its read was silent garbage in `int x = p[2];`, stopped the run
+ * with "could not be executed" in `t += p[2];` and `if (p[2] > 5)`, and was
+ * reported only as a `printf` argument. Each is now the read of an object
+ * nothing has written, as a local's is: said once, and the run goes on - an
+ * element of a local array too, which was said nowhere.
+ */
+describe('reading an element nothing has written', () => {
+  const unwritten = (
+    message: string
+  ): Pick<RuntimeDiagnostic, 'rule' | 'severity' | 'fatal' | 'message'> => ({
+    rule: 'uninitialized-read',
+    severity: 'warning',
+    fatal: false,
+    message:
+      `${message} is evaluated before a value is stored in it; its value ` +
+      `is indeterminate, and using that value has undefined behavior`,
+  });
+  const reported = (session: Session) =>
+    session.diagnostics.map(({ rule, severity, fatal, message, line }) => ({
+      rule,
+      severity,
+      fatal,
+      message,
+      line,
+    }));
+
+  it.each([
+    ['an initializer', 'int x = p[2];'],
+    ['a compound assignment', 'int t = 1;\n  t += p[2];'],
+    ['a condition', 'if (p[2] > 5) { p[0] = 1; }'],
+    ['an operand', 'int y = p[2] + 1;'],
+    ['a printf argument', 'printf("%d\\n", p[2]);'],
+  ])('in a heap block, read in %s', (_where, statement) => {
+    const session = run(`#include <stdio.h>
+#include <stdlib.h>
+int main(void) {
+  int *p = malloc(3 * sizeof(int));
+  ${statement}
+  printf("end\\n");
+  free(p);
+  return 0;
+}`);
+    expect(reported(session)).toEqual([
+      { ...unwritten('p[2]'), line: statement.includes('\n') ? 6 : 5 },
+    ]);
+    expect(session.output).toMatch(/end\n$/);
+  });
+
+  it('through a dereference, once however often, and not once written', () => {
+    const session = run(`#include <stdlib.h>
+int main(void) {
+  int *p = malloc(2 * sizeof(int));
+  int total = 0;
+  for (int i = 0; i < 3; i++) {
+    total += *p;
+  }
+  p[1] = 4;
+  total += p[1];
+  free(p);
+  return total;
+}`);
+    expect(reported(session)).toEqual([{ ...unwritten('*p'), line: 6 }]);
+  });
+
+  it('in a local array', () => {
+    const session = run(`int main(void) {
+  int a[3];
+  a[0] = 1;
+  int t = a[0];
+  t += a[2];
+  return t;
+}`);
+    expect(reported(session)).toEqual([{ ...unwritten('a[2]'), line: 5 }]);
+  });
+
+  it('says nothing about calloc, which fills its block with zero', () => {
+    const session = run(`#include <stdio.h>
+#include <stdlib.h>
+int main(void) {
+  int *p = calloc(3, sizeof(int));
+  printf("%d\\n", p[2] + 1);
+  free(p);
+  return 0;
+}`);
+    expect(session.diagnostics).toEqual([]);
+    expect(session.output).toBe('1\n');
+  });
+});
+
+/**
+ * The objects of a frame that has returned are gone, and so are their marks:
+ * a `char title[80]` left mostly unwritten made the next function's `int i
+ * = 0;` at the same addresses an "uninitialized read". A new frame's objects
+ * start fresh - initialized means written - and one declared without an
+ * initializer is reported when it is read before it is written.
+ */
+describe('reading an object where a returned frame left one unwritten', () => {
+  it('says nothing about an initialized object or a parameter', () => {
+    const session = run(`#include <stdio.h>
+void read_nothing(void)
+{
+  char title[80];
+  title[0] = '\\0';
+  printf("%s", title);
+}
+int twice(int n)
+{
+  int i = 0;
+  int sum = n;
+  while (i < n) {
+    i++;
+  }
+  return sum + i;
+}
+void count(int n)
+{
+  int i = 0;
+  while (i < n) {
+    i++;
+  }
+  printf("%d %d\\n", i, twice(i));
+}
+int main(void)
+{
+  read_nothing();
+  count(3);
+  read_nothing();
+  printf("%d\\n", twice(2));
+  return 0;
+}`);
+    expect(session.diagnostics).toEqual([]);
+    expect(session.output).toBe('3 6\n4\n');
+  });
+
+  it('still reports a new object declared without an initializer', () => {
+    const session = run(`#include <stdio.h>
+void first(void)
+{
+  int a;
+  a = 42;
+  printf("%d\\n", a);
+}
+int second(void)
+{
+  int y;
+  return y + 1;
+}
+int main(void)
+{
+  first();
+  second();
+  for (int k = 0; k < 3; k++) {
+    second();
+  }
+  return 0;
+}`);
+    expect(
+      session.diagnostics.map(({ rule, message, line }) => [
+        rule,
+        message.split(' ')[0],
+        line,
+      ])
+    ).toEqual([['uninitialized-read', 'y', 11]]);
+  });
+});
+
+/**
+ * `return;` in a function returning `void` has no expression, and the stock
+ * engine evaluated the missing one: every executed `return;` was a fatal
+ * "could not be executed", though the run then went on as it should.
+ */
+describe('a return without a value', () => {
+  it('leaves a void function quietly, at its end or early', () => {
+    const session = run(`#include <stdio.h>
+void g(void)
+{
+  return;
+}
+void first_negative(const int *a, int n)
+{
+  for (int i = 0; i < n; i++) {
+    if (a[i] < 0) {
+      printf("%d at %d\\n", a[i], i);
+      return;
+    }
+  }
+  printf("none\\n");
+}
+void f(int n)
+{
+  g();
+  printf("%d\\n", n);
+}
+int main(void)
+{
+  int a[4] = {3, -1, 4, -5};
+  f(1);
+  first_negative(a, 4);
+  first_negative(a, 1);
+  return 0;
+}`);
+    expect(session.diagnostics).toEqual([]);
+    expect(session.output).toBe('1\n-1 at 1\nnone\n');
+  });
+});
+
 describe('a statement the interpreter cannot execute', () => {
   it('turns a swallowed interpreter exception into a located fatal diagnostic', () => {
     const session = run(`int main(void) {

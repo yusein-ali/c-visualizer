@@ -292,6 +292,12 @@ interface Activation {
    * values it passed, since no call expression of the program's carries them.
    */
   calledBackWith?: string[];
+  /**
+   * For a `functionDec`: what its parameters were given, spelled as the
+   * Variables view spells them, where the engine has spelled one
+   * (`parametersBound`); null where the call's own spelling stands.
+   */
+  boundWith?: (string | null)[];
 }
 
 /**
@@ -524,7 +530,6 @@ export class ConstructRecorder {
   private finished: Activation[] = [];
   /** The assignments being carried out, so `execAssign` knows whose it is. */
   private assigning: Activation[] = [];
-  private entries = new Map<object, number>();
   /** What each part of the statement running now has come to. */
   private evaluations = new Map<object, EvaluationModel>();
   /** Every write the run has made, oldest first, bounded. */
@@ -544,7 +549,6 @@ export class ConstructRecorder {
     this.stack = [];
     this.finished = [];
     this.assigning = [];
-    this.entries = new Map<object, number>();
     this.evaluations = new Map<object, EvaluationModel>();
     this.mutations = [];
     this.unresolved = [];
@@ -553,7 +557,6 @@ export class ConstructRecorder {
     if (entryPoint !== null) {
       // Nothing calls `main`, so its activation is opened here; the count is
       // one because C gives a program one entry.
-      this.entries.set(entryPoint, 1);
       const activation = this.activationOf(entryPoint, 'functionDec');
       if (activation !== null) {
         activation.timesEntered = 1;
@@ -578,24 +581,57 @@ export class ConstructRecorder {
   /** A call, and the function it enters where the program defines one. */
   calling(call: UniMethodCall, declaration: UniFunctionDec | null): number {
     const depth = this.entered(call, 'call');
-    if (declaration === null) {
-      return depth;
+    if (declaration !== null) {
+      this.entering(call, declaration);
     }
+    return depth;
+  }
+
+  /**
+   * The function a call enters, once it is known: at once for a call by
+   * name, and for one through a pointer - `p(3, 4)`, `f(*p)`,
+   * `row->run(&shelf)` - once the pointer has been read. Such a call had no
+   * frame in the Call stack at all.
+   */
+  entering(call: UniMethodCall, declaration: UniFunctionDec): void {
     const site = this.stack[this.stack.length - 1];
-    const times = (this.entries.get(declaration) ?? 0) + 1;
-    this.entries.set(declaration, times);
     const activation = this.activationOf(declaration, 'functionDec');
     if (activation === null) {
-      return depth;
+      return;
     }
-    activation.timesEntered = times;
+    activation.timesEntered = this.activeCalls(declaration) + 1;
     activation.parameters = parameterNames(declaration);
     this.stack.push(activation);
     if (typeof site !== 'undefined' && site.node === call) {
       site.parameters = activation.parameters;
       site.callee = activation;
     }
-    return depth;
+  }
+
+  /**
+   * How many calls of a function are on the stack: its active invocations,
+   * which is what the count says - recursion's depth, and 1 again for a
+   * call made after the one before it returned. It counted every call so
+   * far.
+   */
+  private activeCalls(declaration: UniFunctionDec): number {
+    return this.stack.filter(
+      (activation) =>
+        activation.kind === 'functionDec' && activation.node === declaration
+    ).length;
+  }
+
+  /**
+   * The parameters of the function whose body is starting, spelled as the
+   * Variables view spells their values; see `boundWith`.
+   */
+  parametersBound(values: (string | null)[]): void {
+    for (let i = this.stack.length - 1; 0 <= i; i -= 1) {
+      if (this.stack[i].kind === 'functionDec') {
+        this.stack[i].boundWith = values;
+        return;
+      }
+    }
   }
 
   /**
@@ -608,9 +644,7 @@ export class ConstructRecorder {
     if (activation === null) {
       return depth;
     }
-    const times = (this.entries.get(declaration) ?? 0) + 1;
-    this.entries.set(declaration, times);
-    activation.timesEntered = times;
+    activation.timesEntered = this.activeCalls(declaration) + 1;
     activation.parameters = parameterNames(declaration);
     activation.calledBackWith = args;
     this.stack.push(activation);
@@ -823,6 +857,11 @@ export class ConstructRecorder {
         fact.value = spellAddresses(fact.value, display);
       }
     }
+    for (const frame of (state as StateWithConstructs).plivetFrames ?? []) {
+      for (const argument of frame.arguments) {
+        argument.value = spellAddresses(argument.value, display);
+      }
+    }
   }
 
   /** Nothing is running any more, so nothing is doing anything. */
@@ -986,7 +1025,7 @@ export class ConstructRecorder {
           activation.calledBackWith ?? (site === null ? [] : site.args)
         ).map((value, position) => ({
           name: activation.parameters[position] ?? '',
-          value,
+          value: activation.boundWith?.[position] ?? value,
         })),
         timesEntered: activation.timesEntered ?? 1,
       });

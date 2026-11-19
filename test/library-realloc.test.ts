@@ -185,6 +185,94 @@ describe('realloc', () => {
     expect(rulesOf(run)).toEqual(['use-after-free']);
   });
 
+  // The block realloc moved away from was freed, and a pointer still
+  // holding it stopped with "could not be executed".
+  it.each([
+    ['a write', 'a[0] = 1;', 'a', 'a[0]'],
+    ['a read', 'printf("%d\\n", a[1]);', 'a', 'a[1]'],
+    ['a dereference', '*a = 1;', 'a', '*a'],
+    ['a read through a dereference', 'int n = *(a + 1);', 'a + 1', '*(a + 1)'],
+  ])(
+    'refuses %s through the pointer to the block it moved',
+    async (_kind, statement, pointer, access) => {
+      const run = await exec(
+        program(`  int *a = malloc(2 * sizeof(int));
+  int *b = malloc(sizeof(int));
+  int *c = realloc(a, 4 * sizeof(int));
+  ${statement}
+  printf("not reached\\n");
+  free(b);
+  free(c);`)
+      );
+      expect(rulesOf(run)).toEqual(['use-after-free']);
+      expect(run.runtime[0].line).toBe(8);
+      const literal = (text: string): string =>
+        text.replace(/[()*+[\]]/g, '\\$&');
+      expect(run.runtime[0].message).toMatch(
+        new RegExp(
+          `^the block ${literal(pointer)} points to has been freed: realloc ` +
+            `moved it to 0x[0-9A-F]+, so ${literal(access)} does not ` +
+            `designate an object; use the pointer realloc returned$`
+        )
+      );
+      expect(run.output).not.toContain('not reached');
+    }
+  );
+
+  it('says a block freed by realloc to size 0 is freed, and was not moved', async () => {
+    const run = await exec(
+      program(`  int *p = malloc(8);
+  int *q = realloc(p, 0);
+  *p = 1;`)
+    );
+    expect(rulesOf(run)).toEqual(['realloc-zero-size', 'use-after-free']);
+    expect(run.runtime[1].message).toBe(
+      'the block p points to has been freed, so *p does not designate an object'
+    );
+  });
+
+  it('refuses a dereference of a pointer free was given', async () => {
+    const run = await exec(
+      program(`  int *p = malloc(sizeof(int));
+  *p = 4;
+  free(p);
+  printf("%d\\n", *p);`)
+    );
+    expect(rulesOf(run)).toEqual(['use-after-free']);
+    expect(run.runtime[0].message).toBe(
+      'the block p points to has been freed, so *p does not designate an object'
+    );
+  });
+
+  it('refuses a member of a freed structure', async () => {
+    const run = await exec(
+      program(
+        `  struct P *p = malloc(sizeof(struct P));
+  p->x = 1;
+  free(p);
+  p->y = 2;`,
+        'struct P { int x; int y; };'
+      )
+    );
+    expect(rulesOf(run)).toEqual(['use-after-free']);
+    expect(run.runtime[0].message).toBe(
+      'the block p points to has been freed, so p->y does not designate an object'
+    );
+  });
+
+  it('leaves a block malloc hands out again where a freed one was alone', async () => {
+    expect(
+      await outputOf(
+        program(`  int *p = malloc(sizeof(int));
+  *p = 4;
+  int *q = realloc(p, 2 * sizeof(int));
+  q[1] = 5;
+  printf("%d %d\\n", *q, q[1]);
+  free(q);`)
+      )
+    ).toBe('4 5\n');
+  });
+
   it('copies characters, so a growing string keeps its text', async () => {
     expect(
       await outputOf(

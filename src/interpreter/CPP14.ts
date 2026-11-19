@@ -18,6 +18,7 @@ import { resolveComplements } from './Complement';
 import { Construct } from './Construct';
 import { DeclarationSpecifiers } from './DeclarationSpecifiers';
 import { DesignatedInitializers } from './DesignatedInitializers';
+import { bracedDoBodies } from './DoWhileBodies';
 import { EnumTable, Enumerator, RuntimeEnumTypes } from './EnumTable';
 import {
   FunctionPointerTable,
@@ -54,6 +55,8 @@ interface PreparedSource {
   code: string;
   /** What the compiler refuses that no grammar can see: a repeated enumerator. */
   declarationErrors: SyntaxErrorData[];
+  /** The `#error` directives in groups the preprocessor kept. */
+  directiveErrors: SyntaxErrorData[];
   /** The same source, rewritten only as far as the syntax check needs. */
   checkCode: string;
   expansions: Expansion[];
@@ -350,8 +353,10 @@ export class PlivetCPP14Interpreter extends Interpreter {
     const parsed = this.plivetMapper.analyze(
       omitEmptyDeclarations(prepared.code, check.warnings)
     );
-    const syntax = this.syntaxErrors(check, parsed);
-    const errors = syntax.length > 0 ? syntax : prepared.declarationErrors;
+    const errors = this.compileErrors(
+      prepared,
+      this.syntaxErrors(check, parsed)
+    );
     return {
       prepared,
       parsed,
@@ -563,22 +568,36 @@ export class PlivetCPP14Interpreter extends Interpreter {
     // a tree, and only when the grammar has already accepted the program -
     // there is nothing to say about a file that does not parse.
     const check = jscppCheck(prepared.checkCode, code);
-    const syntax = this.syntaxErrors(
-      check,
-      this.plivetMapper.analyze(prepared.code)
+    return this.compileErrors(
+      prepared,
+      this.syntaxErrors(check, this.plivetMapper.analyze(prepared.code))
     );
-    return syntax.length > 0 ? syntax : prepared.declarationErrors;
+  }
+
+  /**
+   * Everything that refuses the program: an `#error` the preprocessor kept,
+   * which comes first and is said whatever else is wrong, as gcc says it;
+   * then the parse's errors, or when it has none, the declarations C does
+   * not allow.
+   */
+  private compileErrors(
+    prepared: PreparedSource,
+    syntax: SyntaxErrorData[]
+  ): SyntaxErrorData[] {
+    return prepared.directiveErrors.concat(
+      syntax.length > 0 ? syntax : prepared.declarationErrors
+    );
   }
 
   /** Runs every source pass once and gives the engine fresh record metadata. */
   private prepare(code: string): PreparedSource {
     const expanded = preprocessSource(code);
-    const preprocessed = {
-      ...expanded,
-      code: arrayPointerParameters(joinAdjacentStrings(expanded.code)),
-    };
+    const joined = arrayPointerParameters(joinAdjacentStrings(expanded.code));
+    const preprocessed = { ...expanded, code: bracedDoBodies(joined) };
     // What the syntax check reads, in place of the fully rewritten `code`
-    // below. The passes after this one exist for ANTLR's C++14 grammar, and
+    // below - from before `bracedDoBodies`, which could make a do-while body
+    // C does not allow (a declaration) one it does. The passes after this
+    // one exist for ANTLR's C++14 grammar, and
     // two of them erase the evidence a check needs: the qualifier pass blanks
     // `const`, `volatile` and `_Atomic` in place, so `int x volatile;` - which
     // is not a declaration - reached the parser as `int x         ;` and was
@@ -586,7 +605,7 @@ export class PlivetCPP14Interpreter extends Interpreter {
     // pointers, and enums; a designated initializer is the one form it has no
     // rule for. Its own instance, so the engine's is left alone.
     const checkCode = typedefsForSyntaxCheck(
-      new DesignatedInitializers().rewrite(preprocessed.code)
+      new DesignatedInitializers().rewrite(joined)
     );
     const declarationSpecifiers = new DeclarationSpecifiers();
     const declarations = declarationSpecifiers.rewrite(preprocessed.code);
@@ -631,6 +650,9 @@ export class PlivetCPP14Interpreter extends Interpreter {
       Object.prototype.hasOwnProperty.call(library, name);
     return {
       code: recordsForParser,
+      directiveErrors: expanded.errors.map(
+        (error) => new SyntaxErrorData(error.line, error.column, error.message)
+      ),
       declarationErrors: enumTable
         .redeclarations()
         .map(

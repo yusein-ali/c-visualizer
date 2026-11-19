@@ -151,9 +151,23 @@ export function annotateRuntimeVariables(
   heapOffset: HeapOffset = (address) => address - ENGINE_HEAP_BASE
 ): ExecState {
   const displayAddresses = new Map<number, number>();
+  // Objects of static storage that are `const`: read-only data, laid out in
+  // the read-only band after the string literals. They were given addresses
+  // after the other file-scope objects, beside `main`'s frame, while the
+  // memory view listed them with the literals at 0x2710.
+  const readOnlyObjects: Variable[] = [];
   for (const stack of state.getStacks()) {
     let cursor: number | null = null;
     for (const variable of stack.getVariables()) {
+      const declared = declarationInfoAt(variable.address);
+      if (
+        declared !== null &&
+        declared.readOnly &&
+        (declared.region === 'global' || declared.region === 'static')
+      ) {
+        readOnlyObjects.push(variable);
+        continue;
+      }
       const shape = displayShapeOf(variable, recordTypes, scalarSize);
       if (isHeapObject(variable)) {
         // A heap block keeps the offset the engine gave it instead of taking
@@ -223,6 +237,25 @@ export function annotateRuntimeVariables(
     }
     return { ...literal, displayAddress };
   });
+  for (const variable of readOnlyObjects) {
+    const shape = displayShapeOf(variable, recordTypes, scalarSize);
+    readOnly = alignAddress(
+      readOnly,
+      Math.max(shape.alignment, MEMORY_ALIGNMENT)
+    );
+    annotateVariable(
+      variable,
+      enumTypes,
+      recordTypes,
+      declarationInfoAt,
+      scalarSize,
+      readOnly,
+      displayAddresses,
+      variable.address,
+      shape.size
+    );
+    readOnly += shape.size;
+  }
   (state as ExecStateWithTypeInfo).plivetStrings = literals;
   for (const stack of state.getStacks()) {
     for (const variable of stack.getVariables()) {

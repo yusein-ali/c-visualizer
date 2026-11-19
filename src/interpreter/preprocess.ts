@@ -226,6 +226,17 @@ export const PREDEFINED_MACRO_NAMES: readonly string[] =
 const IDENT_START = /[A-Za-z_]/;
 const IDENT_CHAR = /[A-Za-z0-9_]/;
 
+/**
+ * A directive that makes the program ill-formed: an `#error` in a group that
+ * is kept (C11 6.10.5). `line` is one-based and `column` zero-based, at its
+ * `#`; `message` is what gcc says, the directive as written.
+ */
+export interface DirectiveError {
+  line: number;
+  column: number;
+  message: string;
+}
+
 interface ConditionalFrame {
   active: boolean;
   taken: boolean;
@@ -248,8 +259,13 @@ class Preprocessor {
    * inside another macro's body has no position in the source the user typed.
    */
   private expansions: Expansion[] = [];
+  private errors: DirectiveError[] = [];
 
-  public run(code: string): { code: string; expansions: Expansion[] } {
+  public run(code: string): {
+    code: string;
+    expansions: Expansion[];
+    errors: DirectiveError[];
+  } {
     const lines = code.split('\n');
     const out: string[] = [];
     for (let i = 0; i < lines.length; i += 1) {
@@ -286,7 +302,11 @@ class Preprocessor {
       }
       out.push(this.expandLine(line, i + 1));
     }
-    return { code: out.join('\n'), expansions: this.expansions };
+    return {
+      code: out.join('\n'),
+      expansions: this.expansions,
+      errors: this.errors,
+    };
   }
 
   /** The directive whose branch is not being taken, for the tooltip. */
@@ -409,9 +429,21 @@ class Preprocessor {
         record('', undefined, frame?.parentActive ?? activeBefore);
         return;
       }
+      case 'error':
+        // gcc refuses the program with the directive's message - only where
+        // the group is kept, which is what `#if` around one is for.
+        if (this.isActive()) {
+          this.errors.push({
+            line: lineNumber,
+            column: Math.max(raw.indexOf('#'), 0),
+            message: `#error${rest === '' ? '' : ` ${rest.trim()}`}`,
+          });
+        }
+        record(rest);
+        return;
       default:
-        // #include, #pragma, #error, #line: dropped, like every other
-        // directive. The blank line keeps the numbering.
+        // #include, #pragma, #line: dropped, like every other directive.
+        // The blank line keeps the numbering.
         record(rest);
         return;
     }
@@ -1131,6 +1163,7 @@ export function evaluateConstantExpression(expression: string): number {
 export function preprocessSource(code: string): {
   code: string;
   expansions: Expansion[];
+  errors: DirectiveError[];
 } {
   return new Preprocessor().run(code);
 }

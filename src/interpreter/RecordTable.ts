@@ -43,13 +43,40 @@ import { LIBRARY_TYPEDEFS } from './library/types';
 /** How wide a basic type is. Mirrors `Engine.sizeof` in unicoen.ts. */
 export type Sizeof = (type: string) => number;
 
+/** The library typedefs not four bytes wide, as one pattern. */
+const NARROW_OR_WIDE_LIBRARY_TYPEDEF = new RegExp(
+  `\\b(${Object.keys(LIBRARY_TYPEDEFS)
+    .filter((name) => typeof LIBRARY_TYPEDEFS[name].engineType === 'string')
+    .join('|')})\\b`,
+  'g'
+);
+
 /**
  * `Engine.sizeof` in unicoen.ts, and eight bytes for `long long` - which the
  * engine is given as one word (`ExpressionTypes.ENGINE_LONG_LONG`) and which
  * upstream would size as four. `CPP14Engine` installs this as the engine's
  * own, so the two cannot disagree.
+ *
+ * A library typedef is sized as the type it names (`uint8_t` as `unsigned
+ * char`), which is fixed data rather than anything a program declares.
+ * Upstream sized every name it did not know as four bytes, so a `uint8_t`
+ * array was laid out four bytes to an element, a `uint8_t *` stepped four
+ * bytes - `((uint8_t *)&x)[1]` read the object after `x` - and `malloc(8)`
+ * for a `uint8_t *` made two elements.
  */
 export function basicSizeof(type: string): number {
+  if (type.includes('*')) {
+    return 4;
+  }
+  const spelled = type.replace(
+    NARROW_OR_WIDE_LIBRARY_TYPEDEF,
+    (name) => LIBRARY_TYPEDEFS[name].engineType!
+  );
+  return builtinSizeof(spelled);
+}
+
+/** `basicSizeof` of a type spelled with the engine's own words. */
+function builtinSizeof(type: string): number {
   if (type.includes('*')) {
     return 4;
   }

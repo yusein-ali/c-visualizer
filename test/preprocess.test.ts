@@ -4,6 +4,9 @@ import {
   preprocessSource,
 } from '../src/interpreter/preprocess';
 import { originalRange } from '../src/interpreter/Expansion';
+import { PlivetCPP14Interpreter } from '../src/interpreter/CPP14';
+import { Response, Server } from '../src/core';
+import { exec } from './library';
 
 /**
  * The cases record what the stock unicoen.ts pass does. Everything asserted
@@ -247,6 +250,101 @@ describe('conditional directives', () => {
     const out = lines('#if 0\n#if 1\nint a = 1;\n#endif\n#endif\nint b = 2;');
     expect(out[2].trim()).toBe('');
     expect(out[5].trim()).toBe('int b = 2;');
+  });
+});
+
+/**
+ * `#error` makes the program ill-formed (C11 6.10.5): gcc refuses it with the
+ * directive's message. The pass dropped it like any other unknown directive,
+ * and the program ran.
+ */
+describe('#error', () => {
+  const shelf = `#include <stdio.h>
+#define SHELF_SIZE 0
+#if SHELF_SIZE < 1
+#error "The shelf must hold at least one book"
+#endif
+int main(void) { printf("ran\\n"); return 0; }`;
+
+  it('is reported where it is, with its message, in a group that is kept', () => {
+    expect(preprocessSource(shelf).errors).toEqual([
+      {
+        line: 4,
+        column: 0,
+        message: '#error "The shelf must hold at least one book"',
+      },
+    ]);
+    expect(
+      preprocessSource('#if 0\n  #  error  never\n#endif\n  # error  now  ')
+        .errors
+    ).toEqual([{ line: 4, column: 2, message: '#error now' }]);
+  });
+
+  it('is not reported in a group that is skipped', () => {
+    expect(
+      preprocessSource(shelf.replace('SHELF_SIZE 0', 'SHELF_SIZE 3')).errors
+    ).toEqual([]);
+    expect(
+      preprocessSource(
+        '#ifdef MISSING\n#error a\n#elif 1\n#else\n#error b\n#endif'
+      ).errors
+    ).toEqual([]);
+  });
+
+  it('refuses the run as a compile error does', async () => {
+    const errors = new PlivetCPP14Interpreter().checkSyntaxError(shelf);
+    expect(
+      errors.map(({ line, charPositionInLine, msg }) => [
+        line,
+        charPositionInLine,
+        msg,
+      ])
+    ).toEqual([[4, 0, '#error "The shelf must hold at least one book"']]);
+    const run = await exec(shelf);
+    expect(run.output).toBe('');
+    expect(run.response.debugState).toBe('Stop');
+    expect(run.response.errors).toHaveLength(1);
+    const kept = await exec(shelf.replace('SHELF_SIZE 0', 'SHELF_SIZE 3'));
+    expect(kept.output).toBe('ran\n');
+  });
+
+  it('names the header it is in', async () => {
+    const files = [
+      {
+        path: 'main.c',
+        text: '#include "config.h"\nint main(void) {\n  return 0;\n}\n',
+      },
+      {
+        path: 'config.h',
+        text: '#ifndef LIMIT\n#error "define LIMIT"\n#endif\n',
+      },
+    ];
+    const logged = console.log;
+    console.log = () => undefined;
+    let response: Response;
+    try {
+      response = await new Server().send({
+        controlEvent: 'Exec',
+        sourcecode: files[0].text,
+        files,
+        entry: 'main.c',
+      });
+    } finally {
+      console.log = logged;
+    }
+    expect(response.debugState).toBe('Stop');
+    expect(response.fileErrors).toEqual([
+      {
+        path: 'config.h',
+        errors: [
+          {
+            line: 2,
+            charPositionInLine: 0,
+            msg: 'line 2:0 #error "define LIMIT"',
+          },
+        ],
+      },
+    ]);
   });
 });
 

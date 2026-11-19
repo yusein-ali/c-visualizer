@@ -212,10 +212,12 @@ describe('what a construct is doing', () => {
     ]);
   });
 
-  it('counts the active invocations of a recursive function', () => {
+  // The second call of `twice` starts after the first has returned: one
+  // active invocation, not the second call so far.
+  it('counts the active invocations, not the calls so far', () => {
     expect(factsFor(stepOn(steps, 24, 1), 'functionDec', 23)).toEqual([
       'factArgument=n = 2',
-      'factTimesEntered=2',
+      'factTimesEntered=1',
     ]);
   });
 

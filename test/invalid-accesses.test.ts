@@ -121,3 +121,120 @@ describe('an index past the end of a heap block', () => {
     expect(rulesOf(run)).toEqual(['use-after-free']);
   });
 });
+
+/**
+ * A member read through a pointer to a freed structure. It stopped with
+ * "could not be executed" at the top level; in a called function the
+ * engine's call runner swallowed the stop and the caller ran on with 0 - so
+ * the wrong `free(head); head = head->next;` loop finished "freeing" its
+ * list. A declaration taking the freed block (`Book *current = *shelf;`)
+ * also brought it back onto the canvas as a block nothing had written.
+ */
+describe('a member of a freed structure', () => {
+  const node = 'struct node { int value; struct node *next; };';
+
+  it('is refused naming the freed block, at the top level', async () => {
+    const run = await exec(
+      program(
+        `  struct node *p = malloc(sizeof(struct node));
+  p->value = 7;
+  free(p);
+  int v = p->value;
+  printf("after the read: %d\\n", v);`,
+        node
+      )
+    );
+    expect(rulesOf(run)).toEqual(['use-after-free']);
+    expect(run.runtime[0].message).toBe(
+      'the block p points to has been freed, so p->value does not ' +
+        'designate an object'
+    );
+    expect(run.output).not.toMatch(/after the read/);
+  });
+
+  it('is refused in a called function, and the caller does not go on', async () => {
+    const run = await exec(
+      program(
+        `  struct node *p = malloc(sizeof(struct node));
+  p->value = 7;
+  p->next = NULL;
+  printf("read %d\\n", read_after_free(p));
+  printf("main goes on\\n");`,
+        `${node}
+int read_after_free(struct node *p)
+{
+  free(p);
+  return p->value;
+}`
+      )
+    );
+    expect(rulesOf(run)).toEqual(['use-after-free']);
+    expect(run.runtime[0].line).toBe(7);
+    expect(run.output).not.toMatch(/read|main goes on/);
+  });
+
+  it("stops page 8.2's wrong loop at its first read of a freed node", async () => {
+    const run = await exec(
+      program(
+        `  struct node *head = NULL;
+  for (int i = 0; i < 3; i++) {
+    struct node *n = malloc(sizeof(struct node));
+    n->value = i;
+    n->next = head;
+    head = n;
+  }
+  free_list(head);
+  printf("The list is freed\\n");`,
+        `${node}
+void free_list(struct node *head)
+{
+  while (head != NULL) {
+    free(head);
+    head = head->next;
+  }
+}`
+      )
+    );
+    expect(rulesOf(run)).toEqual(['use-after-free']);
+    expect(run.runtime[0].message).toBe(
+      'the block head points to has been freed, so head->next does not ' +
+        'designate an object'
+    );
+    expect(run.output).not.toMatch(/The list is freed/);
+  });
+
+  it('leaves the freed block off the canvas', async () => {
+    const run = await exec(
+      program(
+        `  Book *dune = malloc(sizeof(Book));
+  Book *shelf;
+  dune->title = "Dune";
+  dune->next = NULL;
+  shelf = dune;
+  free(dune);
+  printf("%d\\n", on_shelf(&shelf, "Emma"));`,
+        `#include <string.h>
+typedef struct book {
+  char *title;
+  struct book *next;
+} Book;
+int on_shelf(Book **shelf, const char *title)
+{
+  Book *current = *shelf;
+  while (current != NULL && strcmp(current->title, title) != 0) {
+    current = current->next;
+  }
+  return current != NULL;
+}`
+      )
+    );
+    expect(rulesOf(run)).toEqual(['use-after-free']);
+    const names = run.model.stacks.flatMap((stack) =>
+      stack.rows.map(
+        (row) => row.find((cell) => cell.kind === 'name')?.text ?? ''
+      )
+    );
+    expect(names).toContain('current');
+    expect(names.filter((name) => name.startsWith('Heap:'))).toEqual([]);
+  });
+});

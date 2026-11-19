@@ -181,10 +181,12 @@ export function blockAt(
       ) {
         continue;
       }
-      if (type.indexOf('[') === -1) {
+      if (!type.trim().endsWith(']')) {
         // A scalar is its own one-element block, so a `%s` given `&c` stops
         // at the end of `c`. A record's members are laid out apart from it,
-        // and are left to the existence check.
+        // and are left to the existence check. A pointer to an array
+        // (`int[3]*`, a parameter `int log[][3]`) is a pointer: unicoen's
+        // `getArrayDims` never ends on what follows its last `]`.
         const size = Scope.sizeof(type);
         if (!isRecord(type) && handle <= address && address < handle + size) {
           found = { start: handle, size, label: name, noun: 'object' };

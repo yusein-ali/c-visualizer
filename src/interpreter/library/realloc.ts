@@ -116,6 +116,7 @@ export function installRealloc(global: Scope, host: LibraryHost): void {
 
       if (size === 0) {
         global.removeOnMemory(start, limit - start);
+        host.released(start, null);
         host.warn(
           'realloc-zero-size',
           'realloc with size 0 freed the block and returned a null pointer, ' +
@@ -176,6 +177,7 @@ export function installRealloc(global: Scope, host: LibraryHost): void {
           });
         });
         global.removeOnMemory(start, limit - start);
+        host.released(start, fresh);
         host.note(
           target,
           before,
@@ -234,6 +236,7 @@ export function installRealloc(global: Scope, host: LibraryHost): void {
         host.write(fresh + offset, value, 'realloc');
       }
       global.removeOnMemory(start, limit - start);
+      host.released(start, fresh);
       host.note(
         target,
         before,

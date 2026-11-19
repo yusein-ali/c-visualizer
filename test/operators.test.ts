@@ -1,9 +1,11 @@
-import { outputOf } from './library';
+import { bracedDoBodies } from '../src/interpreter/DoWhileBodies';
+import { exec, outputOf } from './library';
 
 /**
  * Operators of Modules 3 to 5 that the engine computed otherwise than C:
  * `~` straight before a name, the values and the short circuit of `&&` and
- * `||`, and a do-while whose condition is false from the start.
+ * `||`, and a do-while whose condition is false from the start, or whose
+ * body has no braces.
  */
 
 const program = (body: string, globals = ''): string => `#include <stdio.h>
@@ -87,6 +89,69 @@ describe('do-while', () => {
   printf("%d %d\\n", n, k);`)
       )
     ).toBe('10 4\n');
+  });
+
+  // unicoen's grammar has a do-while only around a compound statement, and
+  // read `do k++; while (k < 3);` by error recovery: the rest of the
+  // function became the body, with no condition, and the loop never ended.
+  it('repeats a body without braces', async () => {
+    expect(
+      await outputOf(
+        program(`  int k = 0;
+  do k++; while (k < 3);
+  printf("%d\\n", k);`)
+      )
+    ).toBe('3\n');
+  });
+
+  it('repeats a body without braces that is itself a statement with parts', async () => {
+    expect(
+      await outputOf(
+        program(`  int k = 0, odd = 0, even = 0, total = 0, a = 0, b = 0;
+  do if (k % 2) odd++; else even++; while (++k < 5);
+  do
+    total += k--;
+  while (k > 0);
+  do do a++; while (a % 2); while (++b < 3);
+  do for (int i = 0; i < 2; i++) b++; while (b < 8);
+  do if (k == 2) break; else k++; while (1);
+  do printf("%d ", k); while (++k < 4);
+  printf("%d %d %d %d %d %d\\n", odd, even, total, a, b, k);`)
+      )
+    ).toBe('2 3 2 3 15 6 9 4\n');
+  });
+
+  it('keeps every token of a body without braces where it was', async () => {
+    const lines = [
+      '  do k++; while (k < 3);',
+      '  do',
+      '    k = k / z;',
+      '  while (k);',
+      'do',
+      'k++;',
+      'while (k < 3);',
+      '  do(k++);while(k < 3);',
+    ];
+    expect(bracedDoBodies(lines.join('\n')).split('\n')).toEqual([
+      '  do{k++;}while (k < 3);',
+      '  do',
+      '   {k = k / z;',
+      ' }while (k);',
+      'do{',
+      'k++;}',
+      'while (k < 3);',
+      // Packed against both words: the one place a column moves.
+      '  do{(k++);}while(k < 3);',
+    ]);
+    const run = await exec(
+      program(`  int k = 4, z = 0;
+  do
+    k = k / z;
+  while (k);`)
+    );
+    expect(
+      run.runtime.map(({ rule, line, column }) => [rule, line, column])
+    ).toEqual([['division-by-zero', 6, 4]]);
   });
 
   it('repeats while the condition holds, and continue tests it', async () => {

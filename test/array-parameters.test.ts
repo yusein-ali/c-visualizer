@@ -86,6 +86,29 @@ describe('a two-dimensional array parameter', () => {
     expect(typeOf(run.model, 'log')).toBe('int[2][3]');
   });
 
+  // The library looks a string's object up among every object in scope,
+  // and took the parameter, spelled `int[3]*`, for an array: reading its
+  // dimensions never ended.
+  it.each([['int log[][3]'], ['int (*log)[3]']])(
+    'leaves the strings of a function taking %s to the library',
+    async (parameter) => {
+      expect(
+        await outputOf(
+          program(
+            `  f(log);`,
+            `#include <string.h>
+void f(${parameter}) {
+  char t[8] = "Dune";
+  char u[8];
+  strcpy(u, t);
+  printf("%s %s %d %zu\\n", t, u, log[1][2], strlen(u));
+}`
+          )
+        )
+      ).toBe('Dune Dune 6 4\n');
+    }
+  );
+
   it('is spelled as C spells a pointer to an array', () => {
     expect(displayTypeOf(new Variable('int[3]*', 'rows', 0, 0, 0))).toBe(
       'int (*)[3]'

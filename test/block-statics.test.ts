@@ -228,6 +228,74 @@ int main(void) {
   });
 });
 
+/**
+ * Where a block-scope `static` without an initializer is drawn: in the BSS,
+ * zero, from the first step - whatever its type, and in a nested block too -
+ * and only one written with an initializer in the data segment. Two reports
+ * disagreed about which it was; this settles it on the canvas model.
+ */
+describe('a block-scope static without an initializer', () => {
+  const statics = `#include <stdio.h>
+struct P { int x; int y; };
+int tick(void) {
+  static int seen;
+  static int buf[3];
+  static struct P point;
+  static char *name;
+  static double ratio;
+  static char text[4];
+  static int set = 5;
+  {
+    static int inner;
+    inner++;
+  }
+  seen++;
+  buf[1] = 2;
+  return seen;
+}
+int main(void) {
+  tick();
+  printf("%d\\n", tick());
+  return 0;
+}
+`;
+  const names = (model: StepModel, key: string): string[] =>
+    segment(model, key).map((row) => row.split(' = ')[0]);
+
+  it('is in the BSS, zero, from the first step to the last', async () => {
+    const responses = await stepThrough(statics);
+    const first = responses[0].model;
+    const last = responses[responses.length - 1].model;
+    for (const model of [first, last]) {
+      expect(names(model, 'bss')).toEqual(
+        expect.arrayContaining(['seen', 'buf', 'point', 'name', 'ratio'])
+      );
+      expect(names(model, 'bss')).toEqual(
+        expect.arrayContaining(['text', 'inner'])
+      );
+      expect(names(model, 'data')).toEqual(['set']);
+      expect(names(model, 'stack')).not.toEqual(
+        expect.arrayContaining(['seen'])
+      );
+    }
+    expect(segment(first, 'bss')).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/^seen = 0 @/),
+        expect.stringMatching(/^ratio = 0 @/),
+        expect.stringMatching(/^name = 0x0 @/),
+      ])
+    );
+    // Written to, it stays where it is.
+    expect(segment(last, 'bss')).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/^seen = 2 @/),
+        expect.stringMatching(/^inner = 2 @/),
+      ])
+    );
+    expect(responses[responses.length - 1].output).toBe('2\n');
+  });
+});
+
 describe('a block-scope extern', () => {
   it('names the file-scope object rather than a copy of it', async () => {
     const responses = await stepThrough(`#include <stdio.h>
@@ -247,6 +315,44 @@ int main(void) {
     expect(last.output).toBe('5\n');
     expect(segment(last.model, 'data')).toEqual([
       expect.stringMatching(/^shared = 5 @ \d+$/),
+    ]);
+  });
+});
+
+/**
+ * A `const` object of static storage is read-only data, drawn in the
+ * read-only band with the string literals. It was listed there but given an
+ * address after the other file-scope objects, beside `main`'s frame.
+ */
+describe('a const object of static storage', () => {
+  it('is addressed in the read-only band, after the literals', async () => {
+    const responses = await stepThrough(`#include <stdio.h>
+const int primes[3] = {2, 3, 5};
+const double rate = 0.5;
+int counter = 1;
+int main(void)
+{
+  static const int fixed[2] = {7, 8};
+  printf("%d %.1f %d %d\\n", primes[1], rate, counter, fixed[1]);
+  return 0;
+}
+`);
+    const last = responses[responses.length - 1];
+    expect(last.output).toBe('3 0.5 1 8\n');
+    const rows = segment(last.model, 'readOnly');
+    const at = (name: string): number =>
+      Number(rows.find((row) => row.startsWith(`${name} = `))!.split(' @ ')[1]);
+    const literals = rows
+      .filter((row) => row.startsWith('_unnamed_cs_'))
+      .map((row) => Number(row.split(' @ ')[1]));
+    expect(literals.length).toBeGreaterThan(0);
+    for (const name of ['primes', 'rate', 'fixed']) {
+      expect(at(name)).toBeGreaterThan(Math.max(...literals));
+      expect(at(name)).toBeLessThan(0x3000);
+    }
+    expect(at('rate') % 8).toBe(0);
+    expect(segment(last.model, 'data')).toEqual([
+      expect.stringMatching(/^counter = 1 @ \d+$/),
     ]);
   });
 });

@@ -91,6 +91,13 @@ export interface LibraryHost {
    */
   note(target: string, before: string, after: string): void;
   /**
+   * Tells the engine a block was freed by a call other than `free`: `realloc`
+   * to size 0, or a `realloc` that moved it, to `movedTo`. A pointer still
+   * holding it is then refused as one into freed memory, saying where the
+   * block went.
+   */
+  released(block: number, movedTo: number | null): void;
+  /**
    * A program function reached through a pointer argument, ready to be
    * called as interpreted code from a library generator (`qsort`'s
    * comparator): stepping enters it, and its frame is drawn. Resolved and
