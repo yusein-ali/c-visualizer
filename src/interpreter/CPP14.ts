@@ -210,7 +210,8 @@ export class PlivetCPP14Interpreter extends Interpreter {
       (address) => this.plivetEngine.declarationInfoAt(address),
       this.functionPointerTypes,
       (address) => this.plivetEngine.functionNameAt(address),
-      this.plivetEngine.stringLiterals()
+      this.plivetEngine.stringLiterals(),
+      (type) => this.plivetEngine.scalarSizeOf(type)
     );
     const display = takeDisplayAddresses(annotated);
     if (display !== null) {

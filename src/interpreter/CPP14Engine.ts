@@ -103,6 +103,7 @@ import {
 } from './StateSnapshot';
 import { StructTable } from './StructTable';
 import { UnionTable } from './UnionTable';
+import { UnionStorage } from './UnionStorage';
 import {
   argumentTypeOf,
   promotedArgument,
@@ -663,6 +664,13 @@ export class PlivetCPP14Engine extends CPP14Engine {
 
   private structs = new StructTable();
   private unions = new UnionTable();
+  /** The bytes the members of each union share; see `UnionStorage`. */
+  private readonly unionStorage = new UnionStorage({
+    tableFor: (type) => this.tableFor(type),
+    scalarOf: (type) => this.scalarOf(type),
+    convert: (cellType, value) => this._execCast(cellType, value),
+    wrote: (address) => this.noteWrite(address),
+  });
   private declarationSpecifiers = new DeclarationSpecifiers();
   private designatedInitializers = new DesignatedInitializers();
   private readonly recordArrays = new Map<number, RecordArrayAllocation>();
@@ -747,6 +755,11 @@ export class PlivetCPP14Engine extends CPP14Engine {
   } | null = null;
   /** The functions the program defines with `...`; see `Variadic.ts`. */
   private variadicFunctions = new Set<string>();
+  /**
+   * The function being called and its arguments, from the moment its
+   * parameters are bound until its body starts; see `bindRecordParameters`.
+   */
+  private pendingCall: { dec: UniFunctionDec; args: unknown[] } | null = null;
   /** The unnamed arguments of a call, until the callee's frame files them. */
   private pendingVarargs: {
     dec: UniFunctionDec;
@@ -796,6 +809,32 @@ export class PlivetCPP14Engine extends CPP14Engine {
     this.structs = structs;
     this.unions = unions;
     this.recordArrays.clear();
+    this.unionStorage.clear();
+  }
+
+  /**
+   * How many bytes C gives an object of a scalar type, typedefs resolved:
+   * the width the canvas draws it with. `uint8_t` is one byte, where the
+   * engine's own `sizeof` gives every name it does not know four.
+   */
+  scalarSizeOf(type: string): number {
+    const scope = this.globalScope;
+    const size = scope === null ? null : this.sizeOfType(type, scope);
+    return size === null || !(size > 0) ? Engine.sizeof(type) : size;
+  }
+
+  /** A scalar type as `UnionStorage` encodes and decodes it. */
+  private scalarOf(type: string): {
+    size: number;
+    floating: boolean;
+    signed: boolean;
+  } {
+    const canonical = this.cTypeOf(type, null);
+    return {
+      size: this.scalarSizeOf(type),
+      floating: isFloatingType(canonical),
+      signed: integerTypeInfo(canonical)?.signed === true,
+    };
   }
 
   /**
@@ -1724,7 +1763,8 @@ export class PlivetCPP14Engine extends CPP14Engine {
       const callee =
         (yield* this.calleeOf(mc, scope)) ??
         this.variadicCallee(mc, scope) ??
-        this.arrayParameterCallee(mc, scope);
+        this.arrayParameterCallee(mc, scope) ??
+        this.recordParameterCallee(mc, scope);
       if (callee === null) {
         return yield* super.execMethoodCall(mc, scope);
       }
@@ -1784,10 +1824,45 @@ export class PlivetCPP14Engine extends CPP14Engine {
           ),
       };
     }
+    const dec = this.adjustedParameters(callee);
+    this.pendingCall = { dec, args: bound };
     return yield* (this as unknown as DispatchingEngine).execFunc(
-      this.adjustedParameters(callee),
+      dec,
       scope,
       bound
+    );
+  }
+
+  /**
+   * A direct call of a function with a structure or union parameter that
+   * needs its own layout, which is made here so the argument can be copied
+   * into it; see `bindRecordParameters`.
+   */
+  private recordParameterCallee(
+    mc: UniMethodCall,
+    scope: Scope
+  ): UniFunctionDec | null {
+    const declaration = this.declarationCalledBy(mc, scope);
+    return declaration !== null &&
+      (declaration.params ?? []).some((param) =>
+        this.isRecordParameter(param.type, param.variables[0])
+      )
+      ? declaration
+      : null;
+  }
+
+  /** Whether a parameter is a record passed by value that needs its layout. */
+  private isRecordParameter(
+    type: string,
+    variable: { name: string; typeSuffix?: string | null } | undefined
+  ): boolean {
+    return (
+      typeof variable !== 'undefined' &&
+      !/^[*&]/.test(variable.name) &&
+      type.indexOf('*') === -1 &&
+      (variable.typeSuffix ?? '') === '' &&
+      this.tableFor(type) !== null &&
+      this.needsOwnLayout(type)
     );
   }
 
@@ -1881,6 +1956,39 @@ export class PlivetCPP14Engine extends CPP14Engine {
   }
 
   /**
+   * A structure or union passed by value, copied into its parameter as a
+   * declaration initialized from it is.
+   *
+   * The stock binding copies one entry per member, so an array member kept
+   * its first element and nothing else, and a union's members were left
+   * without the bytes they share. A parameter whose record needs its own
+   * layout (`needsOwnLayout`) is laid out again in the callee's frame and
+   * copied member by member from the argument.
+   */
+  private bindRecordParameters(
+    dec: UniFunctionDec,
+    args: unknown[],
+    scope: Scope
+  ): void {
+    (dec.params ?? []).forEach((param, index) => {
+      const variable = param.variables[0];
+      if (
+        index >= args.length ||
+        !this.isRecordParameter(param.type, variable) ||
+        !scope.variableAddress.has(variable.name)
+      ) {
+        return;
+      }
+      const type = param.type;
+      const argument = args[index] as { valueOf?: () => unknown } | null;
+      const source = Number(argument?.valueOf?.() ?? argument);
+      if (Number.isFinite(source)) {
+        this.allocateRecord(variable.name, type, source, false, scope);
+      }
+    });
+  }
+
+  /**
    * A `...` function's frame: the unnamed arguments are filed after the
    * named parameters and before the body's locals, as rows named `...[0]`,
    * `...[1]`, so a `va_list` can point at them one after another. The block
@@ -1888,6 +1996,11 @@ export class PlivetCPP14Engine extends CPP14Engine {
    * them, which is where a `va_list` that has read them all points.
    */
   protected *execBlock(block: UniBlock, scope: Scope): any {
+    const call = this.pendingCall;
+    if (call !== null && call.dec.block === block) {
+      this.pendingCall = null;
+      this.bindRecordParameters(call.dec, call.args, scope);
+    }
     const main = this.mainArguments;
     if (main !== null && block === this.entryPoint?.block) {
       // unicoen calls `main` with no arguments, so its parameters are bound
@@ -2751,6 +2864,7 @@ export class PlivetCPP14Engine extends CPP14Engine {
     const unwritten = this.unwritten.has(address);
     this.noteWrite(address);
     global.objectOnMemory.set(address, value);
+    this.unionStorage.stored(address, global);
     // Kept once per address: a cell written twice in one call (strtok over
     // its own terminator) changed from its first value to its last.
     const earlier = this.libraryWrites.find((one) => one.address === address);
@@ -2806,8 +2920,24 @@ export class PlivetCPP14Engine extends CPP14Engine {
     if (!Number.isFinite(memberBase) || !(layout instanceof Map)) {
       return cells;
     }
-    for (const [offset, memberType] of layout.values()) {
+    const members = table === null ? null : table.membersOf(type);
+    for (const [name, [offset, memberType]] of layout) {
       const address = memberBase + offset;
+      const member = members?.find((one) => one.name === name);
+      if (typeof member !== 'undefined' && member.lengths.length > 0) {
+        // Every element of an array member, not only the first: `memcpy`
+        // of a record copied `name[0]` and left the rest behind.
+        for (const element of this.elementsOf(member, address)) {
+          if (element.record) {
+            cells.push(
+              ...this.recordCells(element.type, element.address, global)
+            );
+          } else if (global.objectOnMemory.has(element.address)) {
+            cells.push({ address: element.address, type: element.type });
+          }
+        }
+        continue;
+      }
       const nested =
         memberType.indexOf('*') === -1 &&
         (this.tableFor(memberType) !== null || global.isStructType(memberType));
@@ -3032,15 +3162,25 @@ export class PlivetCPP14Engine extends CPP14Engine {
     const arrayDimensions = decVar.variables.map((def) =>
       def.typeSuffix === null ? [] : scope.getArrayDims(def.typeSuffix)
     );
+    // `.y = 2`: initializer items that name the member they initialize.
+    const memberDesignated = this.designatedInitializers.hasMembersIn(
+      decVar.codeRange
+    );
     // A record with an array member is laid out here rather than by
     // `Scope.setStruct`, which gives each member one entry: see `writeRecord`.
-    const ownLayout = (def: { name: string }, index: number): boolean =>
+    // So is one whose initializer names its members, which `setStruct` would
+    // take in the order they are written.
+    const ownLayout = (
+      def: { name: string; value: UniExpr | null },
+      index: number
+    ): boolean =>
       arrayDimensions[index].length === 0 &&
       decVar.type.indexOf('*') === -1 &&
       !/^[*&]/.test(def.name) &&
       !decVar.modifiers.includes('typedef') &&
       this.tableFor(decVar.type) !== null &&
-      this.needsOwnLayout(decVar.type);
+      (this.needsOwnLayout(decVar.type) ||
+        (memberDesignated && def.value instanceof UniArray));
     // An array of pointers: see `declarePointerArray`.
     const pointerArray = (def: { name: string }, index: number): boolean =>
       arrayDimensions[index].length > 0 &&
@@ -3084,10 +3224,13 @@ export class PlivetCPP14Engine extends CPP14Engine {
             def.value instanceof UniArray &&
             this.designatedInitializers.hasIn(decVar.codeRange);
           if (ownLayout(def, index)) {
-            const initializer =
+            const evaluated =
               def.value === null || def.value instanceof UniNoneLiteral
                 ? null
                 : yield* this.execExpr(def.value, scope);
+            const initializer = memberDesignated
+              ? this.inMemberOrder(decVar.type, def.value, evaluated)
+              : evaluated;
             value = this.allocateRecord(
               def.name,
               decVar.type,
@@ -3120,7 +3263,17 @@ export class PlivetCPP14Engine extends CPP14Engine {
 
           let elements: any[];
           if (def.value instanceof UniArray) {
-            const evaluated = yield* this.execExpr(def.value, scope);
+            let evaluated = yield* this.execExpr(def.value, scope);
+            if (
+              memberDesignated &&
+              table !== null &&
+              Array.isArray(evaluated)
+            ) {
+              const items = def.value.items;
+              evaluated = evaluated.map((element: unknown, at: number) =>
+                this.inMemberOrder(decVar.type, items[at], element)
+              );
+            }
             elements = this.designatedInitializers.order(
               decVar.codeRange,
               def.value,
@@ -3607,8 +3760,11 @@ export class PlivetCPP14Engine extends CPP14Engine {
   ): void {
     const probe = new Map<number, unknown>();
     const types = new Map<number, string>();
+    // Made from the global scope, whatever scope the pointer taking the
+    // block was in: a union laid out here lives as long as the block, not as
+    // long as that scope (`UnionStorage.register`).
     const shadow = {
-      ...scope,
+      ...scope.global,
       objectOnMemory: probe,
       typeOnMemory: types,
     } as unknown as Scope;
@@ -4287,6 +4443,9 @@ export class PlivetCPP14Engine extends CPP14Engine {
       type.indexOf('*') === -1 && this.tableFor(type) !== null
         ? this.copyRecord(type, address, value, scope)
         : super.execAssign(address, value, scope);
+    // A store into a union member is a store into the bytes every member
+    // of that union reads.
+    this.unionStorage.stored(address, scope);
     if (type.endsWith('*')) {
       const block = Number(result?.valueOf?.() ?? result);
       if (Number.isFinite(block) && scope.isMallocArea(block)) {
@@ -4547,13 +4706,18 @@ export class PlivetCPP14Engine extends CPP14Engine {
   /**
    * Whether a record has a member `Scope.setStruct` cannot lay out: an array
    * (one entry per element, where `setStruct` writes one for the whole
-   * member and steps past the rest), directly or in a nested record.
+   * member and steps past the rest), directly or in a nested record. A union
+   * is never left to it: its members are given the bytes they share as it is
+   * laid out (`writeRecord`), which `setStruct` knows nothing about.
    */
   private needsOwnLayout(type: string, seen: Set<string> = new Set()): boolean {
     const table = this.tableFor(type);
     const members = table?.membersOf(type) ?? null;
     if (members === null || seen.has(type)) {
       return false;
+    }
+    if (table === this.unions) {
+      return true;
     }
     seen.add(type);
     return members.some(
@@ -4584,6 +4748,27 @@ export class PlivetCPP14Engine extends CPP14Engine {
     scope.variableAddress.set(name, descriptor);
     scope.variableTypes.set(name, type);
     const list = Array.isArray(initializer) ? initializer : null;
+    const source =
+      typeof initializer === 'number' || initializer instanceof Number
+        ? Number(initializer)
+        : null;
+    // A record a function has just returned is still in the frame that call
+    // popped, and this one is laid out over the same addresses: what it
+    // holds is read before anything is written. `struct S t = make();` lost
+    // every member the new layout reached first.
+    const held = new Map<number, unknown>();
+    if (source !== null) {
+      const end = source + table.sizeOf(type);
+      for (
+        let address = source - Engine.structInfoSize;
+        address < end;
+        address += 1
+      ) {
+        if (scope.objectOnMemory.has(address)) {
+          held.set(address, scope.objectOnMemory.get(address));
+        }
+      }
+    }
     this.writeRecord(
       type,
       descriptor,
@@ -4594,10 +4779,63 @@ export class PlivetCPP14Engine extends CPP14Engine {
     );
     scope.address.stackAddress =
       descriptor + Engine.structInfoSize + table.sizeOf(type);
-    if (typeof initializer === 'number' || initializer instanceof Number) {
-      this.copyRecord(type, descriptor, Number(initializer), scope);
+    if (source !== null) {
+      this.copyRecord(type, descriptor, source, scope, held);
     }
     return descriptor + Engine.structInfoSize;
+  }
+
+  /**
+   * A record's initializer list with each value at the index of the member
+   * it initializes, as `writeRecord` takes it: `{.y = 2, .x = 1}` is
+   * `[1, 2]`, and a member nothing names is a hole, which is zero. An item
+   * without a designator initializes the member after the one before it, as
+   * in C. A union keeps the last member named, or its first; nested lists
+   * are ordered by their own members' designators.
+   */
+  private inMemberOrder(type: string, node: unknown, value: unknown): unknown {
+    const table = type.indexOf('*') === -1 ? this.tableFor(type) : null;
+    const members = table?.membersOf(type) ?? null;
+    if (
+      members === null ||
+      !(node instanceof UniArray) ||
+      !Array.isArray(value)
+    ) {
+      return value;
+    }
+    const ordered: unknown[] = [];
+    let next = 0;
+    node.items.forEach((item, at) => {
+      const designated = this.designatedInitializers.memberOf(item);
+      const index =
+        designated === null
+          ? next
+          : members.findIndex((member) => member.name === designated);
+      next = index + 1;
+      if (
+        at >= value.length ||
+        index < 0 ||
+        index >= members.length ||
+        // Past the one member a union's list may initialize.
+        (table === this.unions && designated === null && at > 0)
+      ) {
+        return;
+      }
+      const member = members[index];
+      let given = value[at];
+      if (member.lengths.length === 0) {
+        given = this.inMemberOrder(member.type, item, given);
+      } else if (item instanceof UniArray && Array.isArray(given)) {
+        given = given.map((element: unknown, k: number) =>
+          this.inMemberOrder(member.type, item.items[k], element)
+        );
+      }
+      if (table === this.unions) {
+        ordered.length = 0;
+      }
+      ordered[index] = given;
+    });
+    return ordered;
   }
 
   /**
@@ -4677,8 +4915,13 @@ export class PlivetCPP14Engine extends CPP14Engine {
     type: string,
     descriptor: number,
     source: any,
-    scope: Scope
+    scope: Scope,
+    held: Map<number, unknown> = scope.objectOnMemory
   ): any {
+    // What the source holds: `held`, when the caller read it beforehand.
+    const has = (address: number): boolean => held.has(address);
+    const read = (address: number): unknown =>
+      held.has(address) ? held.get(address) : scope.getValue(address);
     const table = this.tableFor(type)!;
     const layout = table.layoutOf(type);
     const members = table.membersOf(type);
@@ -4720,29 +4963,22 @@ export class PlivetCPP14Engine extends CPP14Engine {
             this.copyRecord(
               element.type,
               to[at].address,
-              scope.getValue(element.address),
-              scope
+              read(element.address),
+              scope,
+              held
             );
-          } else if (scope.objectOnMemory.has(element.address)) {
-            scope.objectOnMemory.set(
-              to[at].address,
-              scope.getValue(element.address)
-            );
+          } else if (has(element.address)) {
+            scope.objectOnMemory.set(to[at].address, read(element.address));
           }
         });
         continue;
       }
       if (nested !== null) {
-        this.copyRecord(
-          member.type,
-          destination,
-          scope.getValue(origin),
-          scope
-        );
+        this.copyRecord(member.type, destination, read(origin), scope, held);
         continue;
       }
-      if (scope.objectOnMemory.has(origin)) {
-        scope.objectOnMemory.set(destination, scope.getValue(origin));
+      if (has(origin)) {
+        scope.objectOnMemory.set(destination, read(origin));
       }
     }
     return target;
@@ -4792,7 +5028,6 @@ export class PlivetCPP14Engine extends CPP14Engine {
     return null;
   }
 
-  /** Writes one record and recursively materialises record-valued members. */
   /**
    * Writes one record and recursively materialises record-valued members.
    *
@@ -4801,6 +5036,12 @@ export class PlivetCPP14Engine extends CPP14Engine {
    * `strcpy(s.name, ...)` writes into. A member left without a value is
    * zero when `zeroFill` says so, unwritten (`null`) when `blank` does, and
    * the engine's indeterminate bits otherwise.
+   *
+   * A union gets the cells of every member, each in storage of its own
+   * (`UnionTable`). The member its initializer names - the first, unless a
+   * designator names another - is written as a struct member is, and the
+   * others are decoded from the bytes that leaves (`UnionStorage`), the rest
+   * of the union zero as an initializer leaves it.
    */
   private writeRecord(
     type: string,
@@ -4822,75 +5063,120 @@ export class PlivetCPP14Engine extends CPP14Engine {
       type.replace(/^\s*(struct|union)\s+/, '')
     );
     scope.objectOnMemory.set(descriptor, memberBase);
+    const given = (index: number): boolean =>
+      index < values.length && typeof values[index] !== 'undefined';
+
+    if (table !== this.unions) {
+      members.forEach((member, index) => {
+        this.writeMember(
+          type,
+          member,
+          layout.get(member.name)!,
+          memberBase,
+          values[index],
+          given(index),
+          zeroFill,
+          blank,
+          scope
+        );
+      });
+      return;
+    }
+    // A union is initialized through one member: the one a designated
+    // initializer left a value for, or the first.
+    const chosen = members.findIndex((_, index) => given(index));
+    members.forEach((member, index) => {
+      const initialized = index === chosen;
+      this.writeMember(
+        type,
+        member,
+        layout.get(member.name)!,
+        memberBase,
+        initialized ? values[index] : undefined,
+        initialized,
+        initialized,
+        !initialized,
+        scope
+      );
+    });
+    this.unionStorage.initialize(
+      type,
+      memberBase,
+      chosen === -1 ? null : members[chosen],
+      zeroFill || chosen !== -1 ? 'zero' : blank ? 'unknown' : 'random',
+      scope
+    );
+    this.unionStorage.register(memberBase, type, scope);
+  }
+
+  /** One member of a record being written; see `writeRecord`. */
+  private writeMember(
+    type: string,
+    member: Member,
+    field: [number, string, number],
+    memberBase: number,
+    value: any,
+    hasValue: boolean,
+    zeroFill: boolean,
+    blank: boolean,
+    scope: Scope
+  ): void {
+    const address = memberBase + field[0];
+    const nested =
+      member.type.indexOf('*') === -1 ? this.tableFor(member.type) : null;
     const missing = (): unknown =>
       zeroFill ? 0 : blank ? null : this.randInt32();
-
-    for (let index = 0; index < members.length; index += 1) {
-      const member = members[index];
-      const field = layout.get(member.name)!;
-      const address = memberBase + field[0];
-      const nested =
-        member.type.indexOf('*') === -1 ? this.tableFor(member.type) : null;
-      const hasValue = index < values.length;
-      if (table === this.unions && index !== 0) {
-        continue;
-      }
-      if (member.lengths.length > 0) {
-        const elements = this.elementsOf(member, address);
-        const given = hasValue
-          ? nested === null
-            ? placedInitializer(values[index], member.lengths)
-            : Array.isArray(values[index])
-              ? values[index]
-              : [values[index]]
-          : [];
-        elements.forEach((element, at) => {
-          const value = given[at];
-          if (element.record) {
-            this.writeRecord(
-              element.type,
-              element.address,
-              typeof value === 'undefined' ? [] : value,
-              zeroFill || hasValue,
-              scope,
-              blank && !hasValue
-            );
-            return;
-          }
-          scope.typeOnMemory.set(element.address, element.type);
-          scope.objectOnMemory.set(
+    if (member.lengths.length > 0) {
+      const elements = this.elementsOf(member, address);
+      const placed = hasValue
+        ? nested === null
+          ? placedInitializer(value, member.lengths)
+          : Array.isArray(value)
+            ? value
+            : [value]
+        : [];
+      elements.forEach((element, at) => {
+        const item = placed[at];
+        if (element.record) {
+          this.writeRecord(
+            element.type,
             element.address,
-            typeof value === 'undefined'
-              ? hasValue
-                ? 0
-                : missing()
-              : this._execCast(element.type, value)
+            typeof item === 'undefined' ? [] : item,
+            zeroFill || hasValue,
+            scope,
+            blank && !hasValue
           );
-        });
-        continue;
-      }
-      if (nested !== null) {
-        this.writeRecord(
-          member.type,
-          address,
-          hasValue ? values[index] : [],
-          zeroFill || !hasValue,
-          scope,
-          blank && !hasValue
-        );
-      } else {
-        scope.typeOnMemory.set(address, this.cellTypeOf(type, member, field));
+          return;
+        }
+        scope.typeOnMemory.set(element.address, element.type);
         scope.objectOnMemory.set(
-          address,
-          hasValue
-            ? this._execCast(
-                this.cellTypeOf(type, member, field),
-                values[index]
-              )
-            : missing()
+          element.address,
+          typeof item === 'undefined'
+            ? hasValue
+              ? 0
+              : missing()
+            : this._execCast(element.type, item)
         );
-      }
+      });
+      return;
     }
+    if (nested !== null) {
+      this.writeRecord(
+        member.type,
+        address,
+        hasValue ? value : [],
+        zeroFill || !hasValue,
+        scope,
+        blank && !hasValue
+      );
+      return;
+    }
+    const cellType = this.cellTypeOf(type, member, field);
+    scope.typeOnMemory.set(address, cellType);
+    scope.objectOnMemory.set(
+      address,
+      hasValue ? this._execCast(cellType, value) : missing()
+    );
   }
 
   /** The type a member's entry is filed under (`runtimeLayout`'s spelling). */

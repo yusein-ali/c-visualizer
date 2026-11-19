@@ -1,27 +1,32 @@
 import { RecordTable } from './RecordTable';
 
 /**
- * `union` layout: every member starts at the same place, and the record is as
- * wide as its widest member.
+ * `union` layout: in C every member starts at the same place, and the record
+ * is as wide as its widest member, rounded up to its strictest alignment.
  *
- * This is the whole difference from a struct, and it is the difference the
- * parse tree throws away - a union reaches the engine as the same
- * `UniClassDec` a struct does, gets sequential offsets, and quietly stops being
- * a union. Sharing the offset is what makes `u.i = 65; u.c` read 65.
- *
- * Members share an address, not bytes: reading a member returns whatever was
- * last written there, without being reinterpreted through the second member's
- * type. Writing an `int` and reading a `char` gives the whole value back rather
- * than its low byte.
+ * That is the layout `sizeof` and the canvas count (`displayFieldsOf`). The
+ * engine cannot store it as it is: its memory is a map of typed cells, one
+ * per scalar, so two members at one address would be two cells at one key,
+ * and a record member carries a descriptor word C does not have. Each member
+ * is therefore given storage of its own in the engine, one after another as
+ * a struct's members are, and `UnionStorage` keeps them all holding the same
+ * bytes: after a store into one member, every other member is decoded again
+ * from the bytes C would now hold at its offsets. Writing `0x01020304` to a
+ * `uint32_t` member and reading a `uint8_t[4]` one gives 4, 3, 2, 1.
  */
 export class UnionTable extends RecordTable {
   protected readonly keyword = 'union';
 
   protected offsetsOf(sizes: number[]): number[] {
-    return sizes.map(() => 0);
+    let next = 0;
+    return sizes.map((size) => {
+      const offset = next;
+      next += size;
+      return offset;
+    });
   }
 
   protected sizeOfAll(sizes: number[]): number {
-    return sizes.reduce((widest, size) => Math.max(widest, size), 0);
+    return sizes.reduce((total, size) => total + size, 0);
   }
 }

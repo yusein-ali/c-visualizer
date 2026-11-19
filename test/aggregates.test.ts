@@ -350,10 +350,22 @@ describe('StructTable', () => {
 describe('UnionTable', () => {
   it('starts every member at the same offset', () => {
     const table = new UnionTable().read('union U { int i; char c; };');
+    expect(table.displayFieldsOf('U')).toEqual(
+      new Map([
+        ['i', { offset: 0, size: 4, alignment: 4 }],
+        ['c', { offset: 0, size: 1, alignment: 1 }],
+      ])
+    );
+  });
+
+  it('gives each member storage of its own in the engine', () => {
+    // The engine's cells are typed, one per scalar, so the members cannot
+    // share them; `UnionStorage` keeps them holding the same bytes instead.
+    const table = new UnionTable().read('union U { int i; char c; };');
     expect(table.layoutOf('U')).toEqual(
       new Map([
         ['i', [0, 'int', 4]],
-        ['c', [0, 'char', 1]],
+        ['c', [4, 'char', 1]],
       ])
     );
   });
@@ -362,12 +374,28 @@ describe('UnionTable', () => {
     const table = new UnionTable().read(
       'union U { char c; double d; int i; };'
     );
-    expect(table.sizeOf('U')).toBe(8);
+    expect(table.displaySizeOf('U')).toBe(8);
   });
 
   it('reads a tagless typedef union', () => {
     const table = new UnionTable().read('typedef union { int i; char c; } U;');
-    expect(table.layoutOf('U')!.get('c')).toEqual([0, 'char', 1]);
+    expect(table.displayFieldsOf('U')!.get('c')).toEqual({
+      offset: 0,
+      size: 1,
+      alignment: 1,
+    });
+  });
+
+  it('sizes a typedef of a narrow type by its width', () => {
+    const table = new UnionTable().read(
+      'typedef unsigned char byte;\nunion U { uint32_t whole; byte b[3]; uint8_t low; };'
+    );
+    expect(table.displayFieldsOf('U')!.get('b')).toEqual({
+      offset: 0,
+      size: 3,
+      alignment: 1,
+    });
+    expect(table.displaySizeOf('U')).toBe(4);
   });
 });
 
@@ -381,11 +409,19 @@ describe('struct and union together', () => {
     structs.link(unions);
     structs.read(source);
     unions.read(source);
-    // 8 for the widest union member, 4 for the engine's own bookkeeping.
+    // In C: as wide as the widest member, and aligned as strictly.
+    expect(structs.displayFieldsOf('S')).toEqual(
+      new Map([
+        ['u', { offset: 0, size: 8, alignment: 8 }],
+        ['n', { offset: 8, size: 4, alignment: 4 }],
+      ])
+    );
+    expect(structs.displaySizeOf('S')).toBe(16);
+    // In the engine: storage for both members, and 4 for its bookkeeping.
     expect(structs.layoutOf('S')).toEqual(
       new Map([
-        ['u', [0, 'union U', 12]],
-        ['n', [12, 'int', 4]],
+        ['u', [0, 'union U', 16]],
+        ['n', [16, 'int', 4]],
       ])
     );
   });

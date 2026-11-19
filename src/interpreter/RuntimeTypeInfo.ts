@@ -77,6 +77,13 @@ export type DeclarationInfoLookup = (
   address: number
 ) => RuntimeDeclarationInfo | null;
 
+/**
+ * How many bytes C gives an object of a scalar type, typedefs resolved:
+ * `uint8_t` is one. The engine's `basicSizeof` gives a name it does not know
+ * four, which is what the canvas used to draw a `uint8_t[4]` with.
+ */
+export type ScalarSize = (type: string) => number;
+
 /** The name of the function at a code address, or null when there is none. */
 export type FunctionLookup = (address: number) => string | null;
 
@@ -112,6 +119,15 @@ export function runtimeFunctionsOf(
  */
 const ENGINE_HEAP_BASE = 20000;
 
+/**
+ * The name a record type is filed under in the runtime types, which is
+ * without its tag keyword. A member that is itself a record keeps the
+ * keyword its declaration spelled (`union reg r;`), and looked up with it
+ * the member was laid out member after member, as if it were a structure.
+ */
+const recordKeyOf = (baseType: string): string =>
+  baseType.replace(/^(struct|union)\s+/, '');
+
 /** A block `malloc` returned, rather than an object the program named. */
 const isHeapObject = (variable: Variable): boolean =>
   variable.getName().startsWith('Heap:');
@@ -123,13 +139,14 @@ export function annotateRuntimeVariables(
   declarationInfoAt: DeclarationInfoLookup = () => null,
   functionPointerTypes: RuntimeFunctionPointerTypes = {},
   functionAt: FunctionLookup = () => null,
-  strings: { address: number | null; text: string; size: number }[] = []
+  strings: { address: number | null; text: string; size: number }[] = [],
+  scalarSize: ScalarSize = basicSizeof
 ): ExecState {
   const displayAddresses = new Map<number, number>();
   for (const stack of state.getStacks()) {
     let cursor: number | null = null;
     for (const variable of stack.getVariables()) {
-      const shape = displayShapeOf(variable, recordTypes);
+      const shape = displayShapeOf(variable, recordTypes, scalarSize);
       if (isHeapObject(variable)) {
         // A heap block keeps the offset the engine gave it instead of taking
         // the next place in this walk. Packing them closes the hole a `free`
@@ -143,6 +160,7 @@ export function annotateRuntimeVariables(
           enumTypes,
           recordTypes,
           declarationInfoAt,
+          scalarSize,
           MEMORY_START_ADDRESSES.heap + (variable.address - ENGINE_HEAP_BASE),
           displayAddresses,
           variable.address,
@@ -165,6 +183,7 @@ export function annotateRuntimeVariables(
         enumTypes,
         recordTypes,
         declarationInfoAt,
+        scalarSize,
         cursor,
         displayAddresses,
         variable.address,
@@ -305,6 +324,7 @@ function annotateVariable(
   enumTypes: RuntimeEnumTypes,
   recordTypes: RuntimeRecordTypes,
   declarationInfoAt: DeclarationInfoLookup,
+  scalarSize: ScalarSize,
   displayAddress: number = variable.address,
   displayAddresses: Map<number, number> = new Map(),
   engineAddress: number = variable.address,
@@ -333,7 +353,7 @@ function annotateVariable(
       scalar: suffix === '',
     };
   }
-  const recordInfo = recordTypes[baseType];
+  const recordInfo = recordTypes[recordKeyOf(baseType)];
   if (typeof recordInfo !== 'undefined') {
     annotated.plivetRecordInfo = {
       ...recordInfo,
@@ -349,7 +369,7 @@ function annotateVariable(
         typeof recordInfo === 'undefined' || suffix !== ''
           ? undefined
           : recordInfo.fields[child.name];
-      const childShape = displayShapeOf(child, recordTypes);
+      const childShape = displayShapeOf(child, recordTypes, scalarSize);
       const childAddress =
         typeof field === 'undefined'
           ? alignAddress(childCursor, childShape.alignment)
@@ -414,6 +434,7 @@ function annotateVariable(
         enumTypes,
         recordTypes,
         declarationInfoAt,
+        scalarSize,
         childAddress,
         displayAddresses,
         childEngineAddress,
@@ -496,12 +517,13 @@ function annotatePointerValues(
 
 function displayShapeOf(
   variable: Variable,
-  recordTypes: RuntimeRecordTypes
+  recordTypes: RuntimeRecordTypes,
+  scalarSize: ScalarSize
 ): { size: number; alignment: number } {
   const match = /^([^[*]+)([\s\S]*)$/.exec(variable.type);
   const baseType = match === null ? variable.type : match[1].trim();
   const suffix = match === null ? '' : match[2];
-  const record = recordTypes[baseType];
+  const record = recordTypes[recordKeyOf(baseType)];
   if (typeof record !== 'undefined' && suffix === '') {
     return { size: record.size, alignment: record.alignment };
   }
@@ -526,7 +548,7 @@ function displayShapeOf(
     const elementSize = elementIsPointer
       ? 4
       : typeof record === 'undefined'
-        ? basicSizeof(baseType)
+        ? scalarSize(baseType)
         : record.size;
     const alignment =
       elementIsPointer || typeof record === 'undefined'
@@ -542,12 +564,12 @@ function displayShapeOf(
     let size = 0;
     let alignment = 1;
     for (const child of value) {
-      const childShape = displayShapeOf(child, recordTypes);
+      const childShape = displayShapeOf(child, recordTypes, scalarSize);
       size = alignAddress(size, childShape.alignment) + childShape.size;
       alignment = Math.max(alignment, childShape.alignment);
     }
     return { size: alignAddress(size, alignment), alignment };
   }
-  const size = basicSizeof(baseType);
+  const size = scalarSize(baseType);
   return { size, alignment: Math.max(1, Math.min(size, 8)) };
 }

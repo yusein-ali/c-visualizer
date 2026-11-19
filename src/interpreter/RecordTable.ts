@@ -10,6 +10,7 @@ import {
 } from './scan';
 import { TypeQualifier } from './DeclarationSpecifiers';
 import { ENGINE_LONG_LONG_WORD } from './ExpressionTypes';
+import { LIBRARY_TYPEDEFS } from './library/types';
 
 /**
  * What `struct` and `union` declarations mean, read from the source rather than
@@ -83,6 +84,19 @@ export interface Member {
 /** Where each member sits: the shape `Engine.execClassDec` puts in scope. */
 export type FieldOffset = Map<string, [number, string, number]>;
 
+/** Where a member sits in C's own layout: aligned, padded, bit-fields packed. */
+export interface DisplayField {
+  offset: number;
+  size: number;
+  alignment: number;
+  /**
+   * For a bit-field, the bit its value starts at within the storage unit at
+   * `offset`, counted from the least significant bit, as gcc allocates them
+   * on a little-endian target.
+   */
+  bitOffset?: number;
+}
+
 export interface RuntimeRecordInfo {
   displayType: string;
   kind: 'struct' | 'union';
@@ -131,6 +145,12 @@ export abstract class RecordTable {
   private readonly lines = new Map<string, number>();
   private readonly peers: RecordTable[] = [];
   private readonly bodies: Array<[number, number]> = [];
+  /**
+   * The program's typedefs of scalar types, name to the type it stands for:
+   * `typedef unsigned char byte;` is `byte` to `unsigned char`. The engine
+   * sizes a name it does not know as four bytes, which a C layout cannot.
+   */
+  private readonly scalarTypedefs = new Map<string, string>();
 
   constructor(
     private readonly sizeof: Sizeof = basicSizeof,
@@ -165,6 +185,7 @@ export abstract class RecordTable {
       }
     }
     this.readAliasUses(masked);
+    this.readScalarTypedefs(masked);
     return this;
   }
 
@@ -329,6 +350,16 @@ export abstract class RecordTable {
   }
 
   /**
+   * Where each member sits in the record as C lays it out - the offsets
+   * `sizeof` and the canvas count, and the bytes a union's members share -
+   * or null when no record goes by that name.
+   */
+  displayFieldsOf(name: string): Map<string, DisplayField> | null {
+    const layout = this.displayLayoutOf(name);
+    return layout === null ? null : layout.fields;
+  }
+
+  /**
    * Where every member sits. `null` when no record goes by that name, so a
    * caller can fall back to whatever it did before.
    */
@@ -407,7 +438,7 @@ export abstract class RecordTable {
     name: string,
     seen: Set<string> = new Set()
   ): {
-    fields: Map<string, { offset: number; size: number; alignment: number }>;
+    fields: Map<string, DisplayField>;
     size: number;
     alignment: number;
   } | null {
@@ -424,10 +455,7 @@ export abstract class RecordTable {
     }
     const path = new Set(seen);
     path.add(key);
-    const fields = new Map<
-      string,
-      { offset: number; size: number; alignment: number }
-    >();
+    const fields = new Map<string, DisplayField>();
     let cursor = 0;
     let widest = 0;
     let recordAlignment = 1;
@@ -445,13 +473,22 @@ export abstract class RecordTable {
         unit.size === shape.size &&
         unit.used + bits <= unit.size * 8
       ) {
+        fields.set(member.name, {
+          offset: unit.offset,
+          ...shape,
+          bitOffset: unit.used,
+        });
         unit.used += bits;
-        fields.set(member.name, { offset: unit.offset, ...shape });
         continue;
       }
       const offset =
         this.keyword === 'union' ? 0 : alignAddress(cursor, shape.alignment);
-      fields.set(member.name, { offset, ...shape });
+      fields.set(
+        member.name,
+        typeof bits === 'number'
+          ? { offset, ...shape, bitOffset: 0 }
+          : { offset, ...shape }
+      );
       unit =
         typeof bits === 'number'
           ? { offset, size: shape.size, used: bits }
@@ -482,8 +519,61 @@ export abstract class RecordTable {
         ? { size: 0, alignment: 1 }
         : { size: nested.size * count, alignment: nested.alignment };
     }
-    const size = this.sizeof(member.type);
+    const size = this.scalarSizeOf(member.type);
     return { size: size * count, alignment: Math.max(1, Math.min(size, 8)) };
+  }
+
+  /**
+   * A scalar type's size as C counts it, typedefs resolved: `uint8_t` and a
+   * program's `typedef unsigned char byte` are one byte, where the engine's
+   * `sizeof` gives every name it does not recognise four.
+   */
+  private scalarSizeOf(type: string): number {
+    let spelled = type.trim();
+    for (let depth = 0; depth < 8 && !spelled.includes('*'); depth += 1) {
+      const alias = this.scalarTypedefs.get(spelled);
+      if (typeof alias === 'undefined') {
+        break;
+      }
+      spelled = alias;
+    }
+    const library = spelled.includes('*')
+      ? undefined
+      : LIBRARY_TYPEDEFS[spelled];
+    return typeof library === 'undefined'
+      ? this.sizeof(spelled)
+      : library.bytes;
+  }
+
+  /**
+   * `typedef unsigned char byte;`, `typedef double real, *reals;`: every
+   * typedef of a scalar or a pointer. One with a body, or with parentheses
+   * (a function pointer), names something else and is read elsewhere.
+   */
+  private readScalarTypedefs(masked: string): void {
+    const pattern = /\btypedef\b([^;{}()]*);/g;
+    let match = pattern.exec(masked);
+    while (match !== null) {
+      const parts = splitTopLevel(match[1], ',');
+      const first = parts.length === 0 ? null : splitDeclarator(parts[0]);
+      if (
+        first !== null &&
+        first.prefix !== '' &&
+        !/\b(struct|union|enum)\b/.test(first.prefix)
+      ) {
+        for (const part of parts) {
+          const parsed = splitDeclarator(part);
+          if (parsed === null || parsed.lengths.length > 0) {
+            continue;
+          }
+          this.scalarTypedefs.set(
+            parsed.name,
+            `${first.prefix}${' *'.repeat(parsed.stars)}`.trim()
+          );
+        }
+      }
+      match = pattern.exec(masked);
+    }
   }
 
   private readAliasUses(masked: string): void {
